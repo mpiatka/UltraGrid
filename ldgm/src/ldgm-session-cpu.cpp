@@ -74,64 +74,40 @@ xor_using_sse (char* source, char* dest, int packet_size)
     //     *(dest + a) ^= *(source+a);
     //     a++;
     // }
-    //First, do as many 128-bit XORs as possible
-    int iter_bytes_32 = 0;
-    int iter_bytes_4 = 0;
-    int iter_bytes_1 = 0;
+	char *orig_dest = dest;
 #if defined __SSE2__ || _M_IX86_FP == 2
-    iter_bytes_32 = (packet_size/32)*32;
+	while(packet_size >= 32){
+		__m256d xmm1 = _mm256_loadu_pd((const double *) source);
+		__m256d xmm2 = _mm256_loadu_pd((const double *) dest);
 
-    if ( iter_bytes_32 > 0)
-    {
-
-        //    printf ( "iter_bytes: %d\n", iter_bytes );
-        __m256d* wrd_ptr = (__m256d *) source;
-        __m256d* wrd_end = (__m256d *) (source + iter_bytes_32);
-        __m256d* dst_ptr = (__m256d *) dest;
-
-        //    printf ( "wrd_ptr address: %p\n", wrd_ptr );
-        do
-        {
-            __m256d xmm1 = _mm256_loadu_pd((const double *) wrd_ptr);
-            __m256d xmm2 = _mm256_loadu_pd((const double *) dst_ptr);
-
-            xmm1 = _mm256_xor_pd(xmm1, xmm2);     //  XOR  8 32-bit words
-            _mm256_storeu_pd((double *) dst_ptr, xmm1);
-            ++wrd_ptr;
-            ++dst_ptr;
-
-        } while (wrd_ptr < wrd_end);
+		xmm1 = _mm256_xor_pd(xmm1, xmm2);     //  XOR  8 32-bit words
+		_mm256_storeu_pd((double *) dest, xmm1);
+		source += 32;
+		dest += 32;
+		packet_size -= 32;
     }
 #endif
     //Check, whether further XORing is necessary
-    if ( iter_bytes_32 < packet_size )
+	if(packet_size >= 4)
     {
-        char *mark_source = source + iter_bytes_32;
-        char *mark_dest = dest + iter_bytes_32;
-
-        iter_bytes_4 = ((packet_size - iter_bytes_32)/4)*4;
-
-        for ( int i = 0; i < (packet_size - iter_bytes_32)/4; i++)
-        {
-            int *s = ((int*) mark_source) + i;
-            int *d = ((int*) mark_dest) + i;
-            *d ^= *s;
-        }
-
-        mark_source += iter_bytes_4;
-        mark_dest += iter_bytes_4;
-
-        iter_bytes_1 = packet_size - iter_bytes_32 - iter_bytes_4;
-
-        for ( int i = 0; i < iter_bytes_1; i++)
-        {
-            *(mark_dest + i) ^= *(mark_source+i);
-        }
+		int *s = (int *) source;
+		int *d = (int *) dest;
+		for(int i = 0; i < packet_size / 4; i++){
+			*(d++) ^= *(s++);
+		}
+		source = (char *) s;
+		dest = (char *) d;
+		packet_size %= 4;
     }
+
+	while (packet_size >= 1){
+		*(source++) ^= *(dest++);
+		packet_size--;
+	}
 
 //   printf ( "XORed: %d bytes using SSE, %d bytes as ints and %d bytes byte-per-byte.\n",iter_bytes_32, iter_bytes_4, iter_bytes_1);
 
-    return dest;
+    return orig_dest;
 }
 
 void *
