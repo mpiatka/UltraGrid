@@ -75,16 +75,29 @@ xor_using_sse (char* source, char* dest, int packet_size)
     //     a++;
     // }
 	char *orig_dest = dest;
-#if defined __SSE2__ || _M_IX86_FP == 2
+#if defined __AVX2__
 	while(packet_size >= 32){
-		__m256d xmm1 = _mm256_loadu_pd((const double *) source);
-		__m256d xmm2 = _mm256_loadu_pd((const double *) dest);
+		__m256i xmm1 = _mm256_lddqu_si256((__m256i *) source);
+		__m256i xmm2 = _mm256_lddqu_si256((__m256i *) dest);
 
-		xmm1 = _mm256_xor_pd(xmm1, xmm2);     //  XOR  8 32-bit words
-		_mm256_storeu_pd((double *) dest, xmm1);
+		xmm1 = _mm256_xor_si256(xmm1, xmm2);     //  XOR  8 32-bit words
+		_mm256_storeu_si256((__m256i *) dest, xmm1);
 		source += 32;
 		dest += 32;
 		packet_size -= 32;
+    }
+#endif
+#if defined __SSE2__ || _M_IX86_FP == 2
+	while(packet_size >= 16){
+		__m128i xmm1 = _mm_loadu_si128((__m128i *) source);
+		__m128i xmm2 = _mm_loadu_si128((__m128i *) dest);
+
+		xmm1 = _mm_xor_si128(xmm1, xmm2);     //  XOR  8 32-bit words
+		_mm_storeu_si128((__m128i *) dest, xmm1);
+		//_mm_prefetch((void *) dest + 16, _MM_HINT_T1);
+		source += 16;
+		dest += 16;
+		packet_size -= 16;
     }
 #endif
     //Check, whether further XORing is necessary
