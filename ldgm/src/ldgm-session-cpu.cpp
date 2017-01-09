@@ -18,8 +18,10 @@
 
 #include <stdlib.h>
 #include <stdio.h>
-#if defined __SSE2__ || _M_IX86_FP == 2
+#if defined __AVX2__
 #include <immintrin.h>
+#elif defined __SSE2__ || _M_IX86_FP == 2
+#include <emmintrin.h>
 #endif
 #include <string.h>
 #include <time.h>
