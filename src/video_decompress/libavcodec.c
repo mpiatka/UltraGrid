@@ -51,6 +51,8 @@
 #include "video.h"
 #include "video_decompress.h"
 
+#include <libavutil/hwcontext.h>
+
 #ifdef __cplusplus
 #include <algorithm>
 using std::max;
@@ -69,6 +71,8 @@ struct state_libavcodec_decompress {
         AVCodecContext  *codec_ctx;
         AVFrame         *frame;
         AVPacket         pkt;
+
+		AVBufferRef		*device_ctx;
 
         int              width, height;
         int              pitch;
@@ -322,6 +326,16 @@ static void * libavcodec_decompress_init(void)
         av_init_packet(&s->pkt);
         s->pkt.data = NULL;
         s->pkt.size = 0;
+
+		s->device_ctx = NULL;
+		if(av_hwdevice_ctx_create(&s->device_ctx, AV_HWDEVICE_TYPE_VDPAU, NULL, NULL, 0)){
+			printf("Unable to create hwdevice!!\n\n");	
+		}
+
+		AVBufferRef *hw_frames_ctx = av_hwframe_context_alloc(s->device_ctx);
+
+		AVHWFramesContext *frames_ctx = (AVHWFramesContext *) hw_frames_ctx->data;
+		frames_ctx->format    = AV_PIX_FMT_VDPAU;
 
         av_log_set_callback(error_callback);
 
@@ -1021,6 +1035,9 @@ static const struct {
 
 static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribute__((unused)), const enum AVPixelFormat *fmt)
 {
+	
+	return AV_PIX_FMT_VDPAU;
+
         if (log_level >= LOG_LEVEL_DEBUG) {
                 char out[1024] = "[lavd] Available output pixel formats:";
                 const enum AVPixelFormat *it = fmt;
