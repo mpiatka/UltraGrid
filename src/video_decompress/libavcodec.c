@@ -52,6 +52,8 @@
 #include "video_decompress.h"
 
 #include <libavutil/hwcontext.h>
+#include <libavutil/hwcontext_vdpau.h>
+#include <libavcodec/vdpau.h>
 
 #ifdef __cplusplus
 #include <algorithm>
@@ -71,8 +73,6 @@ struct state_libavcodec_decompress {
         AVCodecContext  *codec_ctx;
         AVFrame         *frame;
         AVPacket         pkt;
-
-		AVBufferRef		*device_ctx;
 
         int              width, height;
         int              pitch;
@@ -326,16 +326,6 @@ static void * libavcodec_decompress_init(void)
         av_init_packet(&s->pkt);
         s->pkt.data = NULL;
         s->pkt.size = 0;
-
-		s->device_ctx = NULL;
-		if(av_hwdevice_ctx_create(&s->device_ctx, AV_HWDEVICE_TYPE_VDPAU, NULL, NULL, 0)){
-			printf("Unable to create hwdevice!!\n\n");	
-		}
-
-		AVBufferRef *hw_frames_ctx = av_hwframe_context_alloc(s->device_ctx);
-
-		AVHWFramesContext *frames_ctx = (AVHWFramesContext *) hw_frames_ctx->data;
-		frames_ctx->format    = AV_PIX_FMT_VDPAU;
 
         av_log_set_callback(error_callback);
 
@@ -1033,9 +1023,45 @@ static const struct {
         {AV_PIX_FMT_RGB24, RGB, rgb24_to_rgb},
 };
 
+static int vdpau_init(struct AVCodecContext *s){
+	
+	AVBufferRef *device_ref = NULL;
+
+	if(av_hwdevice_ctx_create(&device_ref, AV_HWDEVICE_TYPE_VDPAU, NULL, NULL, 0)){
+		printf("Unable to create hwdevice!!\n\n");	
+		return 0;
+	}
+
+	AVBufferRef *hw_frames_ctx = av_hwframe_ctx_alloc(device_ref);
+	if(!hw_frames_ctx){
+		printf("Failed to allocate hwframe_ctx!!\n\n");	
+		return 0;
+	}
+
+	AVHWFramesContext *frames_ctx = (AVHWFramesContext *) hw_frames_ctx->data;
+	frames_ctx->format    = AV_PIX_FMT_VDPAU;
+	frames_ctx->width     = s->coded_width;
+	frames_ctx->height    = s->coded_height;
+	frames_ctx->sw_format = s->sw_pix_fmt;
+
+	if(av_hwframe_ctx_init(hw_frames_ctx)){
+		printf("Unable to init hwframe_ctx!!\n\n");	
+		return 0;
+	}
+
+	AVHWDeviceContext *device_ctx = (AVHWDeviceContext*)device_ref->data;
+	AVVDPAUDeviceContext *device_vdpau_ctx = device_ctx->hwctx;
+
+	if(av_vdpau_bind_context(s, device_vdpau_ctx->device, device_vdpau_ctx->get_proc_address, 0)){
+		printf("Unable to bind!!\n\n");	
+		return 0;
+	}	
+}
+
 static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribute__((unused)), const enum AVPixelFormat *fmt)
 {
 	
+	vdpau_init(s);
 	return AV_PIX_FMT_VDPAU;
 
         if (log_level >= LOG_LEVEL_DEBUG) {
