@@ -1057,7 +1057,7 @@ static int vdpau_init(struct AVCodecContext *s){
 	}
 
 	s->hw_frames_ctx = hw_frames_ctx;
-	s->hwaccel_context = device_vdpau_ctx;
+	//s->hwaccel_context = device_vdpau_ctx;
 
 	if(av_vdpau_bind_context(s, device_vdpau_ctx->device, device_vdpau_ctx->get_proc_address, 0)){
 		printf("Unable to bind!!\n\n");	
@@ -1216,7 +1216,10 @@ static int libavcodec_decompress(void *state, unsigned char *dst, unsigned char 
                                                 s->last_frame_seq : -1, (unsigned) frame_seq);
                                 res = FALSE;
                         } else {
-                                res = change_pixfmt(s->frame, dst, s->codec_ctx->pix_fmt,
+							AVFrame *sw_frame = av_frame_alloc();
+							sw_frame->format = AV_PIX_FMT_YUV420P;
+							av_hwframe_transfer_data(sw_frame, s->frame, 0);
+                                res = change_pixfmt(sw_frame, dst, AV_PIX_FMT_YUV420P,
                                                 s->out_codec, s->width, s->height, s->pitch);
                                 if(res == TRUE) {
                                         s->last_frame_seq_initialized = true;
