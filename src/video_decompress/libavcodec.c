@@ -74,6 +74,8 @@ struct state_libavcodec_decompress {
         AVFrame         *frame;
         AVPacket         pkt;
 
+		AVBufferRef *device_ref;
+
         int              width, height;
         int              pitch;
         int              rshift, gshift, bshift;
@@ -157,6 +159,8 @@ static void set_codec_context_params(struct state_libavcodec_decompress *s)
         s->codec_ctx->pix_fmt = AV_PIX_FMT_NONE;
         // callback to negotiate pixel format that is supported by UG
         s->codec_ctx->get_format = get_format_callback;
+
+		s->codec_ctx->opaque = s;
 }
 
 static void jpeg_callback(void)
@@ -328,6 +332,11 @@ static void * libavcodec_decompress_init(void)
         s->pkt.size = 0;
 
         av_log_set_callback(error_callback);
+
+		if(av_hwdevice_ctx_create(&s->device_ref, AV_HWDEVICE_TYPE_VDPAU, NULL, NULL, 0)){
+			printf("Unable to create hwdevice!!\n\n");	
+			return 0;
+		}
 
         return s;
 }
@@ -1025,14 +1034,12 @@ static const struct {
 
 static int vdpau_init(struct AVCodecContext *s){
 	
-	AVBufferRef *device_ref = NULL;
+	struct state_libavcodec_decompress *state = s->opaque;
 
-	if(av_hwdevice_ctx_create(&device_ref, AV_HWDEVICE_TYPE_VDPAU, NULL, NULL, 0)){
-		printf("Unable to create hwdevice!!\n\n");	
-		return 0;
-	}
+	AVHWDeviceContext *device_ctx = (AVHWDeviceContext*)state->device_ref->data;
+	AVVDPAUDeviceContext *device_vdpau_ctx = device_ctx->hwctx;
 
-	AVBufferRef *hw_frames_ctx = av_hwframe_ctx_alloc(device_ref);
+	AVBufferRef *hw_frames_ctx = av_hwframe_ctx_alloc(state->device_ref);
 	if(!hw_frames_ctx){
 		printf("Failed to allocate hwframe_ctx!!\n\n");	
 		return 0;
@@ -1049,16 +1056,14 @@ static int vdpau_init(struct AVCodecContext *s){
 		return 0;
 	}
 
-	AVHWDeviceContext *device_ctx = (AVHWDeviceContext*)device_ref->data;
-	AVVDPAUDeviceContext *device_vdpau_ctx = device_ctx->hwctx;
+	s->hw_frames_ctx = hw_frames_ctx;
+	s->hwaccel_context = device_vdpau_ctx;
 
 	if(av_vdpau_bind_context(s, device_vdpau_ctx->device, device_vdpau_ctx->get_proc_address, 0)){
 		printf("Unable to bind!!\n\n");	
 		return 0;
 	}	
 
-	s->hw_frames_ctx = hw_frames_ctx;
-	s->hwaccel_context = device_vdpau_ctx;
 }
 
 static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribute__((unused)), const enum AVPixelFormat *fmt)
@@ -1162,7 +1167,14 @@ static int libavcodec_decompress(void *state, unsigned char *dst, unsigned char 
                         }
                 }
                 if (ret != 0) {
+						printf("AVERROR_EOF: %d\n", AVERROR_EOF);
+						printf("AVERROR_EAGAIN: %d\n", AVERROR(EAGAIN));
+						printf("AVERROR_EINVAL: %d\n", AVERROR(EINVAL));
+						printf("AVERROR_ENOMEM: %d\n", AVERROR(ENOMEM));
                         print_decoder_error(MOD_NAME, ret);
+						//avcodec_send_packet(s->codec_ctx, NULL);
+						//while(avcodec_receive_frame(s->codec_ctx, s->frame) != AVERROR_EOF) {  }
+						//avcodec_flush_buffers(s->codec_ctx);
                 }
                 len = s->pkt.size;
 #endif
