@@ -1056,6 +1056,9 @@ static int vdpau_init(struct AVCodecContext *s){
 		printf("Unable to bind!!\n\n");	
 		return 0;
 	}	
+
+	s->hw_frames_ctx = hw_frames_ctx;
+	s->hwaccel_context = device_vdpau_ctx;
 }
 
 static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribute__((unused)), const enum AVPixelFormat *fmt)
