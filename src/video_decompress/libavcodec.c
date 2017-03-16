@@ -68,13 +68,19 @@ using std::min;
 
 #define MOD_NAME "[lavd] "
 
+struct hw_accel_state {
+	enum {HWACCEL_NONE, HWACCEL_VDPAU} type;
+	bool copy; 
+	AVFrame *tmp_frame;
+
+	AVHWFramesContext *frame_ctx;
+};
+
 struct state_libavcodec_decompress {
         pthread_mutex_t *global_lavcd_lock;
         AVCodecContext  *codec_ctx;
         AVFrame         *frame;
         AVPacket         pkt;
-
-		AVBufferRef *device_ref;
 
         int              width, height;
         int              pitch;
@@ -89,6 +95,8 @@ struct state_libavcodec_decompress {
         struct video_desc saved_desc;
         unsigned int     broken_h264_mt_decoding_workaroud_warning_displayed;
         bool             broken_h264_mt_decoding_workaroud_active;
+
+		struct hw_accel_state hwaccel;
 };
 
 static int change_pixfmt(AVFrame *frame, unsigned char *dst, int av_codec,
@@ -333,10 +341,10 @@ static void * libavcodec_decompress_init(void)
 
         av_log_set_callback(error_callback);
 
-		if(av_hwdevice_ctx_create(&s->device_ref, AV_HWDEVICE_TYPE_VDPAU, NULL, NULL, 0)){
-			printf("Unable to create hwdevice!!\n\n");	
-			return 0;
-		}
+		s->hwaccel.type = HWACCEL_NONE;
+		s->hwaccel.copy = false;
+		s->hwaccel.tmp_frame = NULL;
+		s->hwaccel.frame_ctx = NULL;
 
         return s;
 }
@@ -1036,10 +1044,17 @@ static int vdpau_init(struct AVCodecContext *s){
 	
 	struct state_libavcodec_decompress *state = s->opaque;
 
-	AVHWDeviceContext *device_ctx = (AVHWDeviceContext*)state->device_ref->data;
+	AVBufferRef *device_ref = NULL;
+
+	if(av_hwdevice_ctx_create(&device_ref, AV_HWDEVICE_TYPE_VDPAU, NULL, NULL, 0)){
+		printf("Unable to create hwdevice!!\n\n");	
+		return 0;
+	}
+
+	AVHWDeviceContext *device_ctx = (AVHWDeviceContext*)device_ref->data;
 	AVVDPAUDeviceContext *device_vdpau_ctx = device_ctx->hwctx;
 
-	AVBufferRef *hw_frames_ctx = av_hwframe_ctx_alloc(state->device_ref);
+	AVBufferRef *hw_frames_ctx = av_hwframe_ctx_alloc(device_ref);
 	if(!hw_frames_ctx){
 		printf("Failed to allocate hwframe_ctx!!\n\n");	
 		return 0;
@@ -1063,6 +1078,14 @@ static int vdpau_init(struct AVCodecContext *s){
 		printf("Unable to bind!!\n\n");	
 		return 0;
 	}	
+	state->hwaccel.type = HWACCEL_VDPAU;
+	state->hwaccel.copy = true;
+	state->hwaccel.tmp_frame = av_frame_alloc();
+
+	//state->hwaccel.tmp_frame->format = AV_PIX_FMT_YUV420P;
+
+	state->hwaccel.frame_ctx = frames_ctx;
+	av_buffer_unref(&device_ref);
 
 }
 
@@ -1142,6 +1165,16 @@ static void error_callback(void *ptr, int level, const char *fmt, va_list vl) {
         av_log_default_callback(ptr, level, fmt, vl);
 }
 
+static void transfer_frame(struct hw_accel_state *s, AVFrame *frame){
+	av_hwframe_transfer_data(s->tmp_frame, frame, 0);
+
+	av_frame_copy_props(s->tmp_frame, frame);
+
+	av_frame_unref(frame);
+	av_frame_move_ref(frame, s->tmp_frame);
+	//s->tmp_frame->format = AV_PIX_FMT_YUV420P;
+}
+
 static int libavcodec_decompress(void *state, unsigned char *dst, unsigned char *src,
                 unsigned int src_len, int frame_seq)
 {
@@ -1216,10 +1249,10 @@ static int libavcodec_decompress(void *state, unsigned char *dst, unsigned char 
                                                 s->last_frame_seq : -1, (unsigned) frame_seq);
                                 res = FALSE;
                         } else {
-							AVFrame *sw_frame = av_frame_alloc();
-							sw_frame->format = AV_PIX_FMT_YUV420P;
-							av_hwframe_transfer_data(sw_frame, s->frame, 0);
-                                res = change_pixfmt(sw_frame, dst, AV_PIX_FMT_YUV420P,
+							if(s->hwaccel.copy){
+								transfer_frame(&s->hwaccel, s->frame);
+							}
+                                res = change_pixfmt(s->frame, dst, s->frame->format,
                                                 s->out_codec, s->width, s->height, s->pitch);
                                 if(res == TRUE) {
                                         s->last_frame_seq_initialized = true;
