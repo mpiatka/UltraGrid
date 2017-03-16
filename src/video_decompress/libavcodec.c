@@ -1074,7 +1074,7 @@ static int vdpau_init(struct AVCodecContext *s){
 	s->hw_frames_ctx = hw_frames_ctx;
 	//s->hwaccel_context = device_vdpau_ctx;
 
-	if(av_vdpau_bind_context(s, device_vdpau_ctx->device, device_vdpau_ctx->get_proc_address, 0)){
+	if(av_vdpau_bind_context(s, device_vdpau_ctx->device, device_vdpau_ctx->get_proc_address, AV_HWACCEL_FLAG_ALLOW_HIGH_DEPTH)){
 		printf("Unable to bind!!\n\n");	
 		return 0;
 	}	
@@ -1091,9 +1091,7 @@ static int vdpau_init(struct AVCodecContext *s){
 
 static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribute__((unused)), const enum AVPixelFormat *fmt)
 {
-	
-	vdpau_init(s);
-	return AV_PIX_FMT_VDPAU;
+	//TODO: Uninit existing hwaccel
 
         if (log_level >= LOG_LEVEL_DEBUG) {
                 char out[1024] = "[lavd] Available output pixel formats:";
@@ -1104,9 +1102,13 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribu
                 }
                 log_msg(LOG_LEVEL_DEBUG, "%s\n", out);
         }
-
+	
         while (*fmt != AV_PIX_FMT_NONE) {
                 for (unsigned int i = 0; i < sizeof convert_funcs / sizeof convert_funcs[0]; ++i) {
+					if (*fmt == AV_PIX_FMT_VDPAU){
+						vdpau_init(s);
+						return AV_PIX_FMT_VDPAU;
+					}
                         if (convert_funcs[i].av_codec == *fmt) {
                                 return *fmt;
                         }
@@ -1166,6 +1168,7 @@ static void error_callback(void *ptr, int level, const char *fmt, va_list vl) {
 }
 
 static void transfer_frame(struct hw_accel_state *s, AVFrame *frame){
+	//s->tmp_frame->format = AV_PIX_FMT_YUV420P;
 	av_hwframe_transfer_data(s->tmp_frame, frame, 0);
 
 	av_frame_copy_props(s->tmp_frame, frame);
