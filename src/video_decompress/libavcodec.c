@@ -69,7 +69,11 @@ using std::min;
 #define MOD_NAME "[lavd] "
 
 struct hw_accel_state {
-	enum {HWACCEL_NONE, HWACCEL_VDPAU} type;
+	enum {
+		HWACCEL_NONE,
+		HWACCEL_VDPAU
+	} type;
+
 	bool copy; 
 	AVFrame *tmp_frame;
 
@@ -1074,7 +1078,9 @@ static int vdpau_init(struct AVCodecContext *s){
 	s->hw_frames_ctx = hw_frames_ctx;
 	//s->hwaccel_context = device_vdpau_ctx;
 
-	if(av_vdpau_bind_context(s, device_vdpau_ctx->device, device_vdpau_ctx->get_proc_address, AV_HWACCEL_FLAG_ALLOW_HIGH_DEPTH)){
+	if(av_vdpau_bind_context(s, device_vdpau_ctx->device, device_vdpau_ctx->get_proc_address,
+				AV_HWACCEL_FLAG_ALLOW_HIGH_DEPTH |
+				AV_HWACCEL_FLAG_IGNORE_LEVEL)){
 		printf("Unable to bind!!\n\n");	
 		return 0;
 	}	
