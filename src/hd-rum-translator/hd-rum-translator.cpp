@@ -476,7 +476,7 @@ struct cmdline_parameters {
     unsigned short port;
     vector<struct host_opts> hosts;
     int host_count;
-    int control_port = CONTROL_DEFAULT_PORT;
+    int control_port = -1;
     int control_connection_type = 0;
     struct hd_rum_output_conf out_conf = {NORMAL, 0, 0, 0};
     const char *capture_filter = NULL;
@@ -593,6 +593,7 @@ static bool parse_fmt(int argc, char **argv, struct cmdline_parameters *parsed)
                         parsed->hosts[host_idx].bitrate = RATE_AUTO;
                     } else {
                         parsed->hosts[host_idx].bitrate = unit_evaluate(argv[i + 1]);
+                        assert(parsed->hosts[host_idx].bitrate > 0);
                     }
                     break;
                 default:
@@ -710,11 +711,13 @@ int main(int argc, char **argv)
 
     state.replicas.resize(params.host_count);
 
-    if(control_init(params.control_port, params.control_connection_type, &state.control_state, &state.mod) != 0) {
-        fprintf(stderr, "Warning: Unable to create remote control.\n");
-        return EXIT_FAILURE;
+    if (params.control_port != -1) {
+        if(control_init(params.control_port, params.control_connection_type, &state.control_state, &state.mod) != 0) {
+            fprintf(stderr, "Warning: Unable to create remote control.\n");
+            return EXIT_FAILURE;
+        }
+        control_start(state.control_state);
     }
-    control_start(state.control_state);
 
     // we need only one shared receiver decompressor for all recompressing streams
     state.decompress = hd_rum_decompress_init(&state.mod, params.out_conf, params.capture_filter);
