@@ -714,7 +714,7 @@ int main(int argc, char **argv)
     if (params.control_port != -1) {
         if(control_init(params.control_port, params.control_connection_type, &state.control_state, &state.mod) != 0) {
             fprintf(stderr, "Warning: Unable to create remote control.\n");
-            return EXIT_FAILURE;
+            return EXIT_FAIL_CONTROL_SOCK;
         }
         control_start(state.control_state);
     }
