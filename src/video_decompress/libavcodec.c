@@ -68,6 +68,8 @@ using std::min;
 
 #define MOD_NAME "[lavd] "
 
+struct state_libavcodec_decompress;
+
 struct hw_accel_state {
 	enum {
 		HWACCEL_NONE,
@@ -75,9 +77,10 @@ struct hw_accel_state {
 	} type;
 
 	bool copy; 
-	AVFrame *tmp_frame;
 
-	AVHWFramesContext *frame_ctx;
+	void (*uninit)(struct state_libavcodec_decompress*);
+
+	AVFrame *tmp_frame;
 };
 
 struct state_libavcodec_decompress {
@@ -140,6 +143,10 @@ static void deconfigure(struct state_libavcodec_decompress *s)
         av_free(s->frame);
         s->frame = NULL;
         av_packet_unref(&s->pkt);
+
+		if(s->hwaccel.type != HWACCEL_NONE){
+			if(s->hwaccel.uninit) s->hwaccel.uninit(s);
+		}
 }
 
 static void set_codec_context_params(struct state_libavcodec_decompress *s)
@@ -348,7 +355,6 @@ static void * libavcodec_decompress_init(void)
 		s->hwaccel.type = HWACCEL_NONE;
 		s->hwaccel.copy = false;
 		s->hwaccel.tmp_frame = NULL;
-		s->hwaccel.frame_ctx = NULL;
 
         return s;
 }
@@ -1044,9 +1050,18 @@ static const struct {
         {AV_PIX_FMT_RGB24, RGB, rgb24_to_rgb},
 };
 
+static void vdpau_uninit(struct state_libavcodec_decompress *s){
+	s->hwaccel.type = HWACCEL_NONE;
+	s->hwaccel.copy = false;
+	s->hwaccel.uninit = NULL;
+
+	av_frame_free(&s->hwaccel.tmp_frame);
+}
+
 static int vdpau_init(struct AVCodecContext *s){
 	
 	struct state_libavcodec_decompress *state = s->opaque;
+	state->hwaccel.uninit = vdpau_uninit;
 
 	AVBufferRef *device_ref = NULL;
 
@@ -1090,14 +1105,17 @@ static int vdpau_init(struct AVCodecContext *s){
 
 	//state->hwaccel.tmp_frame->format = AV_PIX_FMT_YUV420P;
 
-	state->hwaccel.frame_ctx = frames_ctx;
 	av_buffer_unref(&device_ref);
 
 }
 
 static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribute__((unused)), const enum AVPixelFormat *fmt)
 {
-	//TODO: Uninit existing hwaccel
+	struct state_libavcodec_decompress *state = (struct state_libavcodec_decompress *) s->opaque;
+
+	if(state->hwaccel.type != HWACCEL_NONE){
+		if(state->hwaccel.uninit) state->hwaccel.uninit(state);
+	}
 
         if (log_level >= LOG_LEVEL_DEBUG) {
                 char out[1024] = "[lavd] Available output pixel formats:";
