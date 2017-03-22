@@ -1063,6 +1063,7 @@ static void vdpau_uninit(struct state_libavcodec_decompress *s){
 
 static int create_hw_frame_ctx(AVBufferRef *device_ref,
 		AVCodecContext *s,
+		enum AVPixelFormat format,
 		AVBufferRef **ctx)
 {
 	*ctx = av_hwframe_ctx_alloc(device_ref);
@@ -1072,7 +1073,7 @@ static int create_hw_frame_ctx(AVBufferRef *device_ref,
 	}
 
 	AVHWFramesContext *frames_ctx = (AVHWFramesContext *) (*ctx)->data;
-	frames_ctx->format    = AV_PIX_FMT_VDPAU;
+	frames_ctx->format    = format;
 	frames_ctx->width     = s->coded_width;
 	frames_ctx->height    = s->coded_height;
 	frames_ctx->sw_format = s->sw_pix_fmt;
@@ -1101,7 +1102,7 @@ static int vdpau_init(struct AVCodecContext *s){
 	AVVDPAUDeviceContext *device_vdpau_ctx = device_ctx->hwctx;
 
 	AVBufferRef *hw_frames_ctx = NULL;
-	create_hw_frame_ctx(device_ref, s, &hw_frames_ctx);
+	create_hw_frame_ctx(device_ref, s, AV_PIX_FMT_VDPAU, &hw_frames_ctx);
 
 	s->hw_frames_ctx = hw_frames_ctx;
 	//s->hwaccel_context = device_vdpau_ctx;
@@ -1113,6 +1114,37 @@ static int vdpau_init(struct AVCodecContext *s){
 		return 0;
 	}	
 	state->hwaccel.type = HWACCEL_VDPAU;
+	state->hwaccel.copy = true;
+	state->hwaccel.tmp_frame = av_frame_alloc();
+
+	//state->hwaccel.tmp_frame->format = AV_PIX_FMT_YUV420P;
+
+	av_buffer_unref(&device_ref);
+	return 0;
+}
+
+static int vaapi_init(struct AVCodecContext *s){
+	
+	struct state_libavcodec_decompress *state = s->opaque;
+	state->hwaccel.uninit = vdpau_uninit; //This can be used for vaapi for now
+
+	AVBufferRef *device_ref = NULL;
+
+	if(av_hwdevice_ctx_create(&device_ref, AV_HWDEVICE_TYPE_VAAPI, NULL, NULL, 0)){
+		printf("Unable to create hwdevice!!\n\n");	
+		return 0;
+	}
+
+	AVHWDeviceContext *device_ctx = (AVHWDeviceContext*)device_ref->data;
+	AVVDPAUDeviceContext *device_vdpau_ctx = device_ctx->hwctx;
+
+	AVBufferRef *hw_frames_ctx = NULL;
+	create_hw_frame_ctx(device_ref, s, AV_PIX_FMT_VAAPI, &hw_frames_ctx);
+
+	s->hw_frames_ctx = hw_frames_ctx;
+	//s->hwaccel_context = device_vdpau_ctx;
+
+	state->hwaccel.type = HWACCEL_VAAPI;
 	state->hwaccel.copy = true;
 	state->hwaccel.tmp_frame = av_frame_alloc();
 
