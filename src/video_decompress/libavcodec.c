@@ -114,6 +114,12 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s, const en
 
 static bool broken_h264_mt_decoding = false;
 
+static void hwaccel_state_reset(struct hw_accel_state *hwaccel){
+	hwaccel->type = HWACCEL_NONE;
+	hwaccel->copy = false;
+	hwaccel->tmp_frame = NULL;
+}
+
 static void deconfigure(struct state_libavcodec_decompress *s)
 {
 #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(57, 37, 100)
@@ -1049,12 +1055,6 @@ static const struct {
         {AV_PIX_FMT_RGB24, RGB, rgb24_to_rgb},
 };
 
-static void hwaccel_state_reset(struct hw_accel_state *hwaccel){
-	hwaccel->type = HWACCEL_NONE;
-	hwaccel->copy = false;
-	hwaccel->tmp_frame = NULL;
-}
-
 static void vdpau_uninit(struct state_libavcodec_decompress *s){
 	hwaccel_state_reset(&s->hwaccel);
 
@@ -1082,6 +1082,7 @@ static int create_hw_frame_ctx(AVBufferRef *device_ref,
 		return -1;
 	}
 
+	return 0;
 }
 
 static int vdpau_init(struct AVCodecContext *s){
@@ -1118,7 +1119,7 @@ static int vdpau_init(struct AVCodecContext *s){
 	//state->hwaccel.tmp_frame->format = AV_PIX_FMT_YUV420P;
 
 	av_buffer_unref(&device_ref);
-
+	return 0;
 }
 
 static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribute__((unused)), const enum AVPixelFormat *fmt)
