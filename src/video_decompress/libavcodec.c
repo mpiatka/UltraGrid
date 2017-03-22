@@ -73,7 +73,8 @@ struct state_libavcodec_decompress;
 struct hw_accel_state {
 	enum {
 		HWACCEL_NONE,
-		HWACCEL_VDPAU
+		HWACCEL_VDPAU,
+		HWACCEL_VAAPI
 	} type;
 
 	bool copy; 
@@ -1058,6 +1059,29 @@ static void vdpau_uninit(struct state_libavcodec_decompress *s){
 	av_frame_free(&s->hwaccel.tmp_frame);
 }
 
+static int create_hw_frame_ctx(AVBufferRef *device_ref,
+		AVCodecContext *s,
+		AVBufferRef **ctx)
+{
+	*ctx = av_hwframe_ctx_alloc(device_ref);
+	if(!*ctx){
+		printf("Failed to allocate hwframe_ctx!!\n\n");
+		return -1;
+	}
+
+	AVHWFramesContext *frames_ctx = (AVHWFramesContext *) (*ctx)->data;
+	frames_ctx->format    = AV_PIX_FMT_VDPAU;
+	frames_ctx->width     = s->coded_width;
+	frames_ctx->height    = s->coded_height;
+	frames_ctx->sw_format = s->sw_pix_fmt;
+
+	if(av_hwframe_ctx_init(*ctx)){
+		printf("Unable to init hwframe_ctx!!\n\n");
+		return -1;
+	}
+
+}
+
 static int vdpau_init(struct AVCodecContext *s){
 	
 	struct state_libavcodec_decompress *state = s->opaque;
@@ -1073,22 +1097,8 @@ static int vdpau_init(struct AVCodecContext *s){
 	AVHWDeviceContext *device_ctx = (AVHWDeviceContext*)device_ref->data;
 	AVVDPAUDeviceContext *device_vdpau_ctx = device_ctx->hwctx;
 
-	AVBufferRef *hw_frames_ctx = av_hwframe_ctx_alloc(device_ref);
-	if(!hw_frames_ctx){
-		printf("Failed to allocate hwframe_ctx!!\n\n");	
-		return 0;
-	}
-
-	AVHWFramesContext *frames_ctx = (AVHWFramesContext *) hw_frames_ctx->data;
-	frames_ctx->format    = AV_PIX_FMT_VDPAU;
-	frames_ctx->width     = s->coded_width;
-	frames_ctx->height    = s->coded_height;
-	frames_ctx->sw_format = s->sw_pix_fmt;
-
-	if(av_hwframe_ctx_init(hw_frames_ctx)){
-		printf("Unable to init hwframe_ctx!!\n\n");	
-		return 0;
-	}
+	AVBufferRef *hw_frames_ctx = NULL;
+	create_hw_frame_ctx(device_ref, s, &hw_frames_ctx);
 
 	s->hw_frames_ctx = hw_frames_ctx;
 	//s->hwaccel_context = device_vdpau_ctx;
