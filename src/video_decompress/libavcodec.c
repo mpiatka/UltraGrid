@@ -353,9 +353,7 @@ static void * libavcodec_decompress_init(void)
 
         av_log_set_callback(error_callback);
 
-		s->hwaccel.type = HWACCEL_NONE;
-		s->hwaccel.copy = false;
-		s->hwaccel.tmp_frame = NULL;
+		hwaccel_state_reset(&s->hwaccel);
 
         return s;
 }
@@ -1051,10 +1049,14 @@ static const struct {
         {AV_PIX_FMT_RGB24, RGB, rgb24_to_rgb},
 };
 
+static void hwaccel_state_reset(struct hw_accel_state *hwaccel){
+	hwaccel->type = HWACCEL_NONE;
+	hwaccel->copy = false;
+	hwaccel->tmp_frame = NULL;
+}
+
 static void vdpau_uninit(struct state_libavcodec_decompress *s){
-	s->hwaccel.type = HWACCEL_NONE;
-	s->hwaccel.copy = false;
-	s->hwaccel.uninit = NULL;
+	hwaccel_state_reset(&s->hwaccel);
 
 	av_frame_free(&s->hwaccel.tmp_frame);
 }
