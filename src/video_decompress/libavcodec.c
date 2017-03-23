@@ -1061,6 +1061,18 @@ static void vdpau_uninit(struct state_libavcodec_decompress *s){
 	av_frame_free(&s->hwaccel.tmp_frame);
 }
 
+static int create_hw_device_ctx(enum AVHWDeviceType type, AVBufferRef **device_ref){
+	int ret;
+	ret = av_hwdevice_ctx_create(device_ref, type, NULL, NULL, 0);
+
+	if(ret < 0){
+		printf("Unable to create hwdevice!!\n\n");	
+		return ret;
+	}
+
+	return 0;
+}
+
 static int create_hw_frame_ctx(AVBufferRef *device_ref,
 		AVCodecContext *s,
 		enum AVPixelFormat format,
@@ -1078,9 +1090,10 @@ static int create_hw_frame_ctx(AVBufferRef *device_ref,
 	frames_ctx->height    = s->coded_height;
 	frames_ctx->sw_format = s->sw_pix_fmt;
 
-	if(av_hwframe_ctx_init(*ctx)){
+	int ret = av_hwframe_ctx_init(*ctx);
+	if (ret < 0) {
 		printf("Unable to init hwframe_ctx!!\n\n");
-		return -1;
+		return ret;
 	}
 
 	return 0;
@@ -1089,23 +1102,25 @@ static int create_hw_frame_ctx(AVBufferRef *device_ref,
 static int vdpau_init(struct AVCodecContext *s){
 	
 	struct state_libavcodec_decompress *state = s->opaque;
-	state->hwaccel.uninit = vdpau_uninit;
 
 	AVBufferRef *device_ref = NULL;
-
-	if(av_hwdevice_ctx_create(&device_ref, AV_HWDEVICE_TYPE_VDPAU, NULL, NULL, 0)){
-		printf("Unable to create hwdevice!!\n\n");	
-		return 0;
-	}
+	int ret = create_hw_device_ctx(AV_HWDEVICE_TYPE_VDPAU, &device_ref);
+	if(ret < 0)
+		return ret;
 
 	AVHWDeviceContext *device_ctx = (AVHWDeviceContext*)device_ref->data;
 	AVVDPAUDeviceContext *device_vdpau_ctx = device_ctx->hwctx;
 
 	AVBufferRef *hw_frames_ctx = NULL;
-	create_hw_frame_ctx(device_ref, s, AV_PIX_FMT_VDPAU, &hw_frames_ctx);
+	ret = create_hw_frame_ctx(device_ref, s, AV_PIX_FMT_VDPAU, &hw_frames_ctx);
 
 	s->hw_frames_ctx = hw_frames_ctx;
 	//s->hwaccel_context = device_vdpau_ctx;
+
+	state->hwaccel.type = HWACCEL_VDPAU;
+	state->hwaccel.uninit = vdpau_uninit;
+	state->hwaccel.copy = true;
+	state->hwaccel.tmp_frame = av_frame_alloc();
 
 	if(av_vdpau_bind_context(s, device_vdpau_ctx->device, device_vdpau_ctx->get_proc_address,
 				AV_HWACCEL_FLAG_ALLOW_HIGH_DEPTH |
@@ -1113,9 +1128,6 @@ static int vdpau_init(struct AVCodecContext *s){
 		printf("Unable to bind!!\n\n");	
 		return 0;
 	}	
-	state->hwaccel.type = HWACCEL_VDPAU;
-	state->hwaccel.copy = true;
-	state->hwaccel.tmp_frame = av_frame_alloc();
 
 	//state->hwaccel.tmp_frame->format = AV_PIX_FMT_YUV420P;
 
