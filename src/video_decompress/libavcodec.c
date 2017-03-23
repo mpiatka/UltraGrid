@@ -1138,25 +1138,23 @@ static int vdpau_init(struct AVCodecContext *s){
 static int vaapi_init(struct AVCodecContext *s){
 	
 	struct state_libavcodec_decompress *state = s->opaque;
-	state->hwaccel.uninit = vdpau_uninit; //This can be used for vaapi for now
 
 	AVBufferRef *device_ref = NULL;
-
-	if(av_hwdevice_ctx_create(&device_ref, AV_HWDEVICE_TYPE_VAAPI, NULL, NULL, 0)){
-		printf("Unable to create hwdevice!!\n\n");	
-		return 0;
-	}
+	int ret = create_hw_device_ctx(AV_HWDEVICE_TYPE_VDPAU, &device_ref);
+	if(ret < 0)
+		return ret;
 
 	AVHWDeviceContext *device_ctx = (AVHWDeviceContext*)device_ref->data;
-	AVVDPAUDeviceContext *device_vdpau_ctx = device_ctx->hwctx;
+	//AVVDPAUDeviceContext *device_vdpau_ctx = device_ctx->hwctx;
 
 	AVBufferRef *hw_frames_ctx = NULL;
-	create_hw_frame_ctx(device_ref, s, AV_PIX_FMT_VAAPI, &hw_frames_ctx);
+	ret = create_hw_frame_ctx(device_ref, s, AV_PIX_FMT_VAAPI, &hw_frames_ctx);
 
 	s->hw_frames_ctx = hw_frames_ctx;
 	//s->hwaccel_context = device_vdpau_ctx;
 
 	state->hwaccel.type = HWACCEL_VAAPI;
+	state->hwaccel.uninit = vdpau_uninit; //This can be used for vaapi for now
 	state->hwaccel.copy = true;
 	state->hwaccel.tmp_frame = av_frame_alloc();
 
