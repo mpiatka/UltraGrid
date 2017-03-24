@@ -1140,7 +1140,7 @@ static int vaapi_init(struct AVCodecContext *s){
 	struct state_libavcodec_decompress *state = s->opaque;
 
 	AVBufferRef *device_ref = NULL;
-	int ret = create_hw_device_ctx(AV_HWDEVICE_TYPE_VDPAU, &device_ref);
+	int ret = create_hw_device_ctx(AV_HWDEVICE_TYPE_VAAPI, &device_ref);
 	if(ret < 0)
 		return ret;
 
