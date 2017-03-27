@@ -53,6 +53,7 @@
 
 #include <libavutil/hwcontext.h>
 #include <libavutil/hwcontext_vdpau.h>
+#include <libavutil/hwcontext_vaapi.h>
 #include <libavcodec/vdpau.h>
 
 #ifdef __cplusplus
@@ -78,10 +79,11 @@ struct hw_accel_state {
 	} type;
 
 	bool copy; 
-
-	void (*uninit)(struct state_libavcodec_decompress*);
-
 	AVFrame *tmp_frame;
+
+	void (*uninit)(struct hw_accel_state*);
+
+	void *ctx; //Type depends on hwaccel type
 };
 
 struct state_libavcodec_decompress {
@@ -115,9 +117,19 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s, const en
 static bool broken_h264_mt_decoding = false;
 
 static void hwaccel_state_reset(struct hw_accel_state *hwaccel){
+	if(hwaccel->ctx){
+		hwaccel->uninit(hwaccel);
+	}
+
 	hwaccel->type = HWACCEL_NONE;
 	hwaccel->copy = false;
-	hwaccel->tmp_frame = NULL;
+
+	if(hwaccel->tmp_frame){
+		av_frame_free(&hwaccel->tmp_frame);
+		hwaccel->tmp_frame = NULL;
+	}
+
+	hwaccel->uninit = NULL;
 }
 
 static void deconfigure(struct state_libavcodec_decompress *s)
@@ -151,9 +163,7 @@ static void deconfigure(struct state_libavcodec_decompress *s)
         s->frame = NULL;
         av_packet_unref(&s->pkt);
 
-		if(s->hwaccel.type != HWACCEL_NONE){
-			if(s->hwaccel.uninit) s->hwaccel.uninit(s);
-		}
+		hwaccel_state_reset(&s->hwaccel);
 }
 
 static void set_codec_context_params(struct state_libavcodec_decompress *s)
@@ -1055,12 +1065,6 @@ static const struct {
         {AV_PIX_FMT_RGB24, RGB, rgb24_to_rgb},
 };
 
-static void vdpau_uninit(struct state_libavcodec_decompress *s){
-	hwaccel_state_reset(&s->hwaccel);
-
-	av_frame_free(&s->hwaccel.tmp_frame);
-}
-
 static int create_hw_device_ctx(enum AVHWDeviceType type, AVBufferRef **device_ref){
 	int ret;
 	ret = av_hwdevice_ctx_create(device_ref, type, NULL, NULL, 0);
@@ -1118,7 +1122,6 @@ static int vdpau_init(struct AVCodecContext *s){
 	//s->hwaccel_context = device_vdpau_ctx;
 
 	state->hwaccel.type = HWACCEL_VDPAU;
-	state->hwaccel.uninit = vdpau_uninit;
 	state->hwaccel.copy = true;
 	state->hwaccel.tmp_frame = av_frame_alloc();
 
@@ -1145,16 +1148,14 @@ static int vaapi_init(struct AVCodecContext *s){
 		return ret;
 
 	AVHWDeviceContext *device_ctx = (AVHWDeviceContext*)device_ref->data;
-	//AVVDPAUDeviceContext *device_vdpau_ctx = device_ctx->hwctx;
+	AVVAAPIDeviceContext *device_vaapi_ctx = device_ctx->hwctx;
 
 	AVBufferRef *hw_frames_ctx = NULL;
 	ret = create_hw_frame_ctx(device_ref, s, AV_PIX_FMT_VAAPI, &hw_frames_ctx);
 
 	s->hw_frames_ctx = hw_frames_ctx;
-	//s->hwaccel_context = device_vdpau_ctx;
 
 	state->hwaccel.type = HWACCEL_VAAPI;
-	state->hwaccel.uninit = vdpau_uninit; //This can be used for vaapi for now
 	state->hwaccel.copy = true;
 	state->hwaccel.tmp_frame = av_frame_alloc();
 
@@ -1168,9 +1169,7 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribu
 {
 	struct state_libavcodec_decompress *state = (struct state_libavcodec_decompress *) s->opaque;
 
-	if(state->hwaccel.type != HWACCEL_NONE){
-		if(state->hwaccel.uninit) state->hwaccel.uninit(state);
-	}
+	hwaccel_state_reset(&state->hwaccel);
 
         if (log_level >= LOG_LEVEL_DEBUG) {
                 char out[1024] = "[lavd] Available output pixel formats:";
