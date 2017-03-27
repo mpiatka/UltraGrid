@@ -1138,9 +1138,23 @@ static int vdpau_init(struct AVCodecContext *s){
 	return 0;
 }
 
+struct vaapi_context{
+
+};
+
+static void vaapi_uninit(struct hw_accel_state *s){
+
+	free(s->ctx);
+}
+
 static int vaapi_init(struct AVCodecContext *s){
 	
 	struct state_libavcodec_decompress *state = s->opaque;
+	
+	struct vaapi_context *ctx = malloc(sizeof(struct vaapi_context));
+	if(!ctx){
+		return -1;
+	}
 
 	AVBufferRef *device_ref = NULL;
 	int ret = create_hw_device_ctx(AV_HWDEVICE_TYPE_VAAPI, &device_ref);
@@ -1157,6 +1171,9 @@ static int vaapi_init(struct AVCodecContext *s){
 
 	state->hwaccel.type = HWACCEL_VAAPI;
 	state->hwaccel.copy = true;
+	state->hwaccel.ctx = ctx;
+	state->hwaccel.uninit = vaapi_uninit;
+
 	state->hwaccel.tmp_frame = av_frame_alloc();
 
 	//state->hwaccel.tmp_frame->format = AV_PIX_FMT_YUV420P;
