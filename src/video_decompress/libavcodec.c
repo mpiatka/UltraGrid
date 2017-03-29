@@ -55,6 +55,7 @@
 #include <libavutil/hwcontext_vdpau.h>
 #include <libavutil/hwcontext_vaapi.h>
 #include <libavcodec/vdpau.h>
+#include <libavcodec/vaapi.h>
 
 #ifdef __cplusplus
 #include <algorithm>
@@ -1138,8 +1139,20 @@ static int vdpau_init(struct AVCodecContext *s){
 	return 0;
 }
 
-struct vaapi_context{
+struct vaapi_ctx{
+	AVBufferRef *device_ref;
+	AVHWDeviceContext *device_ctx; 
+	AVVAAPIDeviceContext *device_vaapi_ctx;
 
+	AVBufferRef *hw_frames_ctx;
+
+
+	VAProfile va_profile;
+	VAEntrypoint va_entrypoint;
+	VAConfigID va_config;
+	VAContextID va_context;
+
+	struct vaapi_context decoder_context;
 };
 
 static void vaapi_uninit(struct hw_accel_state *s){
@@ -1147,27 +1160,56 @@ static void vaapi_uninit(struct hw_accel_state *s){
 	free(s->ctx);
 }
 
+static int vaapi_create_context(struct vaapi_ctx *ctx,
+		AVCodecContext *codec_ctx)
+{
+	const AVCodecDescriptor *codec_desc;
+
+	codec_desc = avcodec_descriptor_get(codec_ctx->codec_id);
+	if(!codec_desc){
+		return -1;
+	}
+
+	int profile_count = vaMaxNumProfiles(ctx->device_vaapi_ctx->display);
+	printf("VAAPI Profile count: %d\n", profile_count);
+
+	VAProfile *list = av_malloc(profile_count * sizeof(VAProfile));
+	if(!list){
+		return -1;
+	}
+
+	VAStatus status = vaQueryConfigProfiles(ctx->device_vaapi_ctx->display,
+			list, &profile_count);
+	if(status != VA_STATUS_SUCCESS){
+		printf("Profile query failed: %d (%s)\n", status, vaErrorStr(status));
+		return -1;
+	}
+
+	return 0;
+}
+
 static int vaapi_init(struct AVCodecContext *s){
 	
 	struct state_libavcodec_decompress *state = s->opaque;
 	
-	struct vaapi_context *ctx = malloc(sizeof(struct vaapi_context));
+	struct vaapi_ctx *ctx = malloc(sizeof(struct vaapi_ctx));
 	if(!ctx){
 		return -1;
 	}
 
-	AVBufferRef *device_ref = NULL;
-	int ret = create_hw_device_ctx(AV_HWDEVICE_TYPE_VAAPI, &device_ref);
+	ctx->device_ref = NULL;
+	int ret = create_hw_device_ctx(AV_HWDEVICE_TYPE_VAAPI, &ctx->device_ref);
 	if(ret < 0)
 		return ret;
 
-	AVHWDeviceContext *device_ctx = (AVHWDeviceContext*)device_ref->data;
-	AVVAAPIDeviceContext *device_vaapi_ctx = device_ctx->hwctx;
+	ctx->device_ctx = (AVHWDeviceContext*)ctx->device_ref->data;
+	ctx->device_vaapi_ctx = ctx->device_ctx->hwctx;
 
-	AVBufferRef *hw_frames_ctx = NULL;
-	ret = create_hw_frame_ctx(device_ref, s, AV_PIX_FMT_VAAPI, &hw_frames_ctx);
+	vaapi_create_context(ctx, s);
+	ctx->hw_frames_ctx = NULL;
+	ret = create_hw_frame_ctx(ctx->device_ref, s, AV_PIX_FMT_VAAPI, &ctx->hw_frames_ctx);
 
-	s->hw_frames_ctx = hw_frames_ctx;
+	s->hw_frames_ctx = ctx->hw_frames_ctx;
 
 	state->hwaccel.type = HWACCEL_VAAPI;
 	state->hwaccel.copy = true;
@@ -1178,7 +1220,7 @@ static int vaapi_init(struct AVCodecContext *s){
 
 	//state->hwaccel.tmp_frame->format = AV_PIX_FMT_YUV420P;
 
-	av_buffer_unref(&device_ref);
+	av_buffer_unref(&ctx->device_ref);
 	return 0;
 }
 
