@@ -1145,6 +1145,7 @@ struct vaapi_ctx{
 	AVVAAPIDeviceContext *device_vaapi_ctx;
 
 	AVBufferRef *hw_frames_ctx;
+	AVHWFramesContext *frame_ctx;
 
 
 	VAProfile va_profile;
@@ -1185,6 +1186,22 @@ static int vaapi_create_context(struct vaapi_ctx *ctx,
 		return -1;
 	}
 
+	VAProfile profile = VAProfileNone;
+	int match = 0;
+
+	//TODO
+	ctx->va_profile = VAProfileH264High;
+	ctx->va_entrypoint = VAEntrypointVLD;
+
+	av_freep(&list);
+
+	status = vaCreateConfig(ctx->device_vaapi_ctx->display, ctx->va_profile,
+			ctx->va_entrypoint, 0, 0, &ctx->va_config);
+	if(status != VA_STATUS_SUCCESS){
+		printf("Create config failed: %d (%s)\n", status, vaErrorStr(status));
+		return -1;
+	}
+
 	return 0;
 }
 
@@ -1208,6 +1225,7 @@ static int vaapi_init(struct AVCodecContext *s){
 	vaapi_create_context(ctx, s);
 	ctx->hw_frames_ctx = NULL;
 	ret = create_hw_frame_ctx(ctx->device_ref, s, AV_PIX_FMT_VAAPI, &ctx->hw_frames_ctx);
+	ctx->frame_ctx = (AVHWFramesContext *) (ctx->hw_frames_ctx->data);
 
 	s->hw_frames_ctx = ctx->hw_frames_ctx;
 
@@ -1218,7 +1236,23 @@ static int vaapi_init(struct AVCodecContext *s){
 
 	state->hwaccel.tmp_frame = av_frame_alloc();
 
+	//TODO
+	AVVAAPIFramesContext *avfc = ctx->frame_ctx->hwctx;
+	VAStatus status = vaCreateContext(ctx->device_vaapi_ctx->display,
+			ctx->va_config, s->coded_width, s->coded_height,
+			VA_PROGRESSIVE,
+			avfc->surface_ids,
+			avfc->nb_surfaces,
+			&ctx->va_context);
+
+
+	ctx->decoder_context.display = ctx->device_vaapi_ctx->display;
+	ctx->decoder_context.config_id = ctx->va_config;
+	ctx->decoder_context.context_id = ctx->va_context;
 	//state->hwaccel.tmp_frame->format = AV_PIX_FMT_YUV420P;
+	//
+	
+	s->hwaccel_context = &ctx->decoder_context;
 
 	av_buffer_unref(&ctx->device_ref);
 	return 0;
