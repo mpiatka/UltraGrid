@@ -1161,6 +1161,22 @@ static void vaapi_uninit(struct hw_accel_state *s){
 	free(s->ctx);
 }
 
+static const struct {
+	enum AVCodecID av_codec_id;
+	int codec_profile;
+	VAProfile va_profile;
+} vaapi_profiles[] = {
+	{AV_CODEC_ID_MPEG2VIDEO, FF_PROFILE_MPEG2_SIMPLE, VAProfileMPEG2Simple},
+	{AV_CODEC_ID_MPEG2VIDEO, FF_PROFILE_MPEG2_MAIN, VAProfileMPEG2Main},
+	{AV_CODEC_ID_H264, FF_PROFILE_H264_CONSTRAINED_BASELINE, VAProfileH264ConstrainedBaseline},
+	{AV_CODEC_ID_H264, FF_PROFILE_H264_BASELINE, VAProfileH264Baseline},
+	{AV_CODEC_ID_H264, FF_PROFILE_H264_MAIN, VAProfileH264Main},
+	{AV_CODEC_ID_H264, FF_PROFILE_H264_HIGH, VAProfileH264High},
+#if VA_CHECK_VERSION(0, 37, 0)
+	{AV_CODEC_ID_HEVC, FF_PROFILE_HEVC_MAIN, VAProfileHEVCMain},
+#endif
+};
+
 static int vaapi_create_context(struct vaapi_ctx *ctx,
 		AVCodecContext *codec_ctx)
 {
@@ -1172,7 +1188,7 @@ static int vaapi_create_context(struct vaapi_ctx *ctx,
 	}
 
 	int profile_count = vaMaxNumProfiles(ctx->device_vaapi_ctx->display);
-	printf("VAAPI Profile count: %d\n", profile_count);
+	//printf("VAAPI Profile count: %d\n", profile_count);
 
 	VAProfile *list = av_malloc(profile_count * sizeof(VAProfile));
 	if(!list){
@@ -1189,8 +1205,27 @@ static int vaapi_create_context(struct vaapi_ctx *ctx,
 	VAProfile profile = VAProfileNone;
 	int match = 0;
 
-	//TODO
-	ctx->va_profile = VAProfileH264High;
+	for(unsigned i = 0; i < FF_ARRAY_ELEMS(vaapi_profiles); i++){
+		if(vaapi_profiles[i].av_codec_id != codec_ctx->codec_id)
+			continue;
+
+		if(vaapi_profiles[i].codec_profile == codec_ctx->profile){
+			profile = vaapi_profiles[i].va_profile;
+			break;
+		}
+	}
+
+	for(int i = 0; i < profile_count; i++){
+		if(profile == list[i])
+			match = 1;
+	}
+
+	if(!match){
+		printf("Profile not supported \n");
+		return -1;
+	}
+
+	ctx->va_profile = profile;
 	ctx->va_entrypoint = VAEntrypointVLD;
 
 	av_freep(&list);
