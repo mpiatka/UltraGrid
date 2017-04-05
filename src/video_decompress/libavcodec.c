@@ -1122,6 +1122,9 @@ static int vdpau_init(struct AVCodecContext *s){
 
 	AVBufferRef *hw_frames_ctx = NULL;
 	ret = create_hw_frame_ctx(device_ref, s, AV_PIX_FMT_VDPAU, &hw_frames_ctx);
+	if(ret < 0)
+		//TODO: Cleanup
+		return ret;
 
 	s->hw_frames_ctx = hw_frames_ctx;
 	//s->hwaccel_context = device_vdpau_ctx;
@@ -1129,12 +1132,16 @@ static int vdpau_init(struct AVCodecContext *s){
 	state->hwaccel.type = HWACCEL_VDPAU;
 	state->hwaccel.copy = true;
 	state->hwaccel.tmp_frame = av_frame_alloc();
+	if(!state->hwaccel.tmp_frame)
+		//TODO: Cleanup
+		return -1;
 
 	if(av_vdpau_bind_context(s, device_vdpau_ctx->device, device_vdpau_ctx->get_proc_address,
 				AV_HWACCEL_FLAG_ALLOW_HIGH_DEPTH |
 				AV_HWACCEL_FLAG_IGNORE_LEVEL)){
 		printf("Unable to bind!!\n\n");	
-		return 0;
+		//TODO: Cleanup
+		return -1;
 	}	
 
 	//state->hwaccel.tmp_frame->format = AV_PIX_FMT_YUV420P;
@@ -1261,9 +1268,16 @@ static int vaapi_init(struct AVCodecContext *s){
 	ctx->device_ctx = (AVHWDeviceContext*)ctx->device_ref->data;
 	ctx->device_vaapi_ctx = ctx->device_ctx->hwctx;
 
-	vaapi_create_context(ctx, s);
+	ret = vaapi_create_context(ctx, s);
+	if(ret < 0)
+		//TODO
+		return ret;
+
 	ctx->hw_frames_ctx = NULL;
 	ret = create_hw_frame_ctx(ctx->device_ref, s, AV_PIX_FMT_VAAPI, &ctx->hw_frames_ctx);
+	if(ret < 0)
+		//TODO
+		return ret;
 	ctx->frame_ctx = (AVHWFramesContext *) (ctx->hw_frames_ctx->data);
 
 	s->hw_frames_ctx = ctx->hw_frames_ctx;
@@ -1274,6 +1288,9 @@ static int vaapi_init(struct AVCodecContext *s){
 	state->hwaccel.uninit = vaapi_uninit;
 
 	state->hwaccel.tmp_frame = av_frame_alloc();
+	if(!state->hwaccel.tmp_frame)
+		//TODO: Cleanup
+		return -1;
 
 	//TODO
 	AVVAAPIFramesContext *avfc = ctx->frame_ctx->hwctx;
@@ -1284,6 +1301,10 @@ static int vaapi_init(struct AVCodecContext *s){
 			avfc->nb_surfaces,
 			&ctx->va_context);
 
+	if(status != VA_STATUS_SUCCESS){
+		printf("Create config failed: %d (%s)\n", status, vaErrorStr(status));
+		return -1;
+	}
 
 	ctx->decoder_context.display = ctx->device_vaapi_ctx->display;
 	ctx->decoder_context.config_id = ctx->va_config;
@@ -1319,11 +1340,15 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribu
         while (*fmt != AV_PIX_FMT_NONE) {
                 for (unsigned int i = 0; i < sizeof convert_funcs / sizeof convert_funcs[0]; ++i) {
 					if (hwaccel && *fmt == AV_PIX_FMT_VDPAU && strcmp(param, "vdpau") == 0){
-						vdpau_init(s);
+						int ret = vdpau_init(s);
+						if(ret < 0)
+							continue;
 						return AV_PIX_FMT_VDPAU;
 					}
 					if (hwaccel && *fmt == AV_PIX_FMT_VAAPI && strcmp(param, "vaapi") == 0){
-						vaapi_init(s);
+						int ret = vaapi_init(s);
+						if(ret < 0)
+							continue;
 						return AV_PIX_FMT_VAAPI;
 					}
                         if (convert_funcs[i].av_codec == *fmt) {
