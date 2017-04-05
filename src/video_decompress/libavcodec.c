@@ -234,6 +234,10 @@ static const struct decoder_info decoders[] = {
 
 ADD_TO_PARAM(force_lavd_decoder, "force-lavd-decoder", "* force-lavd-decoder=<decoder>[:<decoder2>...]\n"
                 "  Forces specified Libavcodec decoder. If more need to be specified, use colon as a delimiter\n");
+
+ADD_TO_PARAM(force_hw_accel, "force-hw-accel", "* force-hw-accel=<hwaccel>\n"
+		"  Forces specified hardware acceleration. \n");
+
 static bool configure_with(struct state_libavcodec_decompress *s,
                 struct video_desc desc)
 {
@@ -1299,6 +1303,9 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribu
 
 	hwaccel_state_reset(&state->hwaccel);
 
+	const char *param = get_commandline_param("force-hw-accel");
+	bool hwaccel = param != NULL;
+
         if (log_level >= LOG_LEVEL_DEBUG) {
                 char out[1024] = "[lavd] Available output pixel formats:";
                 const enum AVPixelFormat *it = fmt;
@@ -1311,9 +1318,13 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribu
 	
         while (*fmt != AV_PIX_FMT_NONE) {
                 for (unsigned int i = 0; i < sizeof convert_funcs / sizeof convert_funcs[0]; ++i) {
-					if (*fmt == AV_PIX_FMT_VDPAU){
+					if (hwaccel && *fmt == AV_PIX_FMT_VDPAU && strcmp(param, "vdpau") == 0){
 						vdpau_init(s);
 						return AV_PIX_FMT_VDPAU;
+					}
+					if (hwaccel && *fmt == AV_PIX_FMT_VAAPI && strcmp(param, "vaapi") == 0){
+						vaapi_init(s);
+						return AV_PIX_FMT_VAAPI;
 					}
                         if (convert_funcs[i].av_codec == *fmt) {
                                 return *fmt;
