@@ -1342,13 +1342,13 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribu
 					if (hwaccel && *fmt == AV_PIX_FMT_VDPAU && strcmp(param, "vdpau") == 0){
 						int ret = vdpau_init(s);
 						if(ret < 0)
-							continue;
+							break;
 						return AV_PIX_FMT_VDPAU;
 					}
 					if (hwaccel && *fmt == AV_PIX_FMT_VAAPI && strcmp(param, "vaapi") == 0){
 						int ret = vaapi_init(s);
 						if(ret < 0)
-							continue;
+							break;
 						return AV_PIX_FMT_VAAPI;
 					}
                         if (convert_funcs[i].av_codec == *fmt) {
