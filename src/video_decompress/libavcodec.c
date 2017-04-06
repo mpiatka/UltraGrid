@@ -51,11 +51,13 @@
 #include "video.h"
 #include "video_decompress.h"
 
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(55, 22, 100)
 #include <libavutil/hwcontext.h>
 #include <libavutil/hwcontext_vdpau.h>
 #include <libavutil/hwcontext_vaapi.h>
 #include <libavcodec/vdpau.h>
 #include <libavcodec/vaapi.h>
+#endif
 
 #ifdef __cplusplus
 #include <algorithm>
@@ -235,9 +237,10 @@ static const struct decoder_info decoders[] = {
 ADD_TO_PARAM(force_lavd_decoder, "force-lavd-decoder", "* force-lavd-decoder=<decoder>[:<decoder2>...]\n"
                 "  Forces specified Libavcodec decoder. If more need to be specified, use colon as a delimiter\n");
 
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(55, 22, 100)
 ADD_TO_PARAM(force_hw_accel, "force-hw-accel", "* force-hw-accel\n"
 		"  Tries to use hardware acceleration. \n");
-
+#endif
 static bool configure_with(struct state_libavcodec_decompress *s,
                 struct video_desc desc)
 {
@@ -1070,6 +1073,7 @@ static const struct {
         {AV_PIX_FMT_RGB24, RGB, rgb24_to_rgb},
 };
 
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(55, 22, 100)
 static int create_hw_device_ctx(enum AVHWDeviceType type, AVBufferRef **device_ref){
 	int ret;
 	ret = av_hwdevice_ctx_create(device_ref, type, NULL, NULL, 0);
@@ -1317,6 +1321,7 @@ static int vaapi_init(struct AVCodecContext *s){
 	av_buffer_unref(&ctx->device_ref);
 	return 0;
 }
+#endif
 
 static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribute__((unused)), const enum AVPixelFormat *fmt)
 {
@@ -1324,8 +1329,10 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribu
 
 	hwaccel_state_reset(&state->hwaccel);
 
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(55, 22, 100)
 	const char *param = get_commandline_param("force-hw-accel");
 	bool hwaccel = param != NULL;
+#endif
 
         if (log_level >= LOG_LEVEL_DEBUG) {
                 char out[1024] = "[lavd] Available output pixel formats:";
@@ -1339,6 +1346,7 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribu
 	
         while (*fmt != AV_PIX_FMT_NONE) {
                 for (unsigned int i = 0; i < sizeof convert_funcs / sizeof convert_funcs[0]; ++i) {
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(55, 22, 100)
 					if (hwaccel && *fmt == AV_PIX_FMT_VDPAU){
 						int ret = vdpau_init(s);
 						if(ret < 0)
@@ -1351,6 +1359,7 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribu
 							break;
 						return AV_PIX_FMT_VAAPI;
 					}
+#endif
 
                         if (convert_funcs[i].av_codec == *fmt) {
                                 return *fmt;
@@ -1411,6 +1420,7 @@ static void error_callback(void *ptr, int level, const char *fmt, va_list vl) {
 }
 
 static void transfer_frame(struct hw_accel_state *s, AVFrame *frame){
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(55, 22, 100)
 	//s->tmp_frame->format = AV_PIX_FMT_YUV420P;
 	av_hwframe_transfer_data(s->tmp_frame, frame, 0);
 
@@ -1419,6 +1429,7 @@ static void transfer_frame(struct hw_accel_state *s, AVFrame *frame){
 	av_frame_unref(frame);
 	av_frame_move_ref(frame, s->tmp_frame);
 	//s->tmp_frame->format = AV_PIX_FMT_YUV420P;
+#endif
 }
 
 static int libavcodec_decompress(void *state, unsigned char *dst, unsigned char *src,
