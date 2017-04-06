@@ -235,8 +235,8 @@ static const struct decoder_info decoders[] = {
 ADD_TO_PARAM(force_lavd_decoder, "force-lavd-decoder", "* force-lavd-decoder=<decoder>[:<decoder2>...]\n"
                 "  Forces specified Libavcodec decoder. If more need to be specified, use colon as a delimiter\n");
 
-ADD_TO_PARAM(force_hw_accel, "force-hw-accel", "* force-hw-accel=<hwaccel>\n"
-		"  Forces specified hardware acceleration. \n");
+ADD_TO_PARAM(force_hw_accel, "force-hw-accel", "* force-hw-accel\n"
+		"  Tries to use hardware acceleration. \n");
 
 static bool configure_with(struct state_libavcodec_decompress *s,
                 struct video_desc desc)
@@ -1339,18 +1339,19 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribu
 	
         while (*fmt != AV_PIX_FMT_NONE) {
                 for (unsigned int i = 0; i < sizeof convert_funcs / sizeof convert_funcs[0]; ++i) {
-					if (hwaccel && *fmt == AV_PIX_FMT_VDPAU && strcmp(param, "vdpau") == 0){
+					if (hwaccel && *fmt == AV_PIX_FMT_VDPAU){
 						int ret = vdpau_init(s);
 						if(ret < 0)
 							break;
 						return AV_PIX_FMT_VDPAU;
 					}
-					if (hwaccel && *fmt == AV_PIX_FMT_VAAPI && strcmp(param, "vaapi") == 0){
+					if (hwaccel && *fmt == AV_PIX_FMT_VAAPI){
 						int ret = vaapi_init(s);
 						if(ret < 0)
 							break;
 						return AV_PIX_FMT_VAAPI;
 					}
+
                         if (convert_funcs[i].av_codec == *fmt) {
                                 return *fmt;
                         }
