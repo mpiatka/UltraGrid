@@ -1105,6 +1105,8 @@ static int create_hw_frame_ctx(AVBufferRef *device_ref,
 
 	int ret = av_hwframe_ctx_init(*ctx);
 	if (ret < 0) {
+		av_buffer_unref(ctx);
+		*ctx = NULL;
 		log_msg(LOG_LEVEL_ERROR, "[lavd] Unable to init hwframe_ctx!!\n\n");
 		return ret;
 	}
@@ -1127,31 +1129,37 @@ static int vdpau_init(struct AVCodecContext *s){
 	AVBufferRef *hw_frames_ctx = NULL;
 	ret = create_hw_frame_ctx(device_ref, s, AV_PIX_FMT_VDPAU, &hw_frames_ctx);
 	if(ret < 0)
-		//TODO: Cleanup
-		return ret;
+		goto fail_frame_ctx;
 
 	s->hw_frames_ctx = hw_frames_ctx;
-	//s->hwaccel_context = device_vdpau_ctx;
 
 	state->hwaccel.type = HWACCEL_VDPAU;
 	state->hwaccel.copy = true;
 	state->hwaccel.tmp_frame = av_frame_alloc();
-	if(!state->hwaccel.tmp_frame)
-		//TODO: Cleanup
-		return -1;
+	if(!state->hwaccel.tmp_frame){
+		ret = -1;
+		goto fail_frame_ctx;
+	}
+
 
 	if(av_vdpau_bind_context(s, device_vdpau_ctx->device, device_vdpau_ctx->get_proc_address,
 				AV_HWACCEL_FLAG_ALLOW_HIGH_DEPTH |
 				AV_HWACCEL_FLAG_IGNORE_LEVEL)){
 		log_msg(LOG_LEVEL_ERROR, "[lavd] Unable to bind vdpau context!\n");	
-		//TODO: Cleanup
-		return -1;
+		ret = -1;
+		goto fail_bind;
 	}	
-
-	//state->hwaccel.tmp_frame->format = AV_PIX_FMT_YUV420P;
 
 	av_buffer_unref(&device_ref);
 	return 0;
+
+
+fail_bind:
+	av_frame_free(&state->hwaccel.tmp_frame);
+	state->hwaccel.tmp_frame = NULL;
+fail_frame_ctx:
+	av_buffer_unref(&device_ref);
+	return ret;
 }
 
 struct vaapi_ctx{
