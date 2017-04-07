@@ -1079,7 +1079,7 @@ static int create_hw_device_ctx(enum AVHWDeviceType type, AVBufferRef **device_r
 	ret = av_hwdevice_ctx_create(device_ref, type, NULL, NULL, 0);
 
 	if(ret < 0){
-		printf("Unable to create hwdevice!!\n\n");	
+		log_msg(LOG_LEVEL_ERROR, "[lavd] Unable to create hwdevice!!\n");	
 		return ret;
 	}
 
@@ -1093,7 +1093,7 @@ static int create_hw_frame_ctx(AVBufferRef *device_ref,
 {
 	*ctx = av_hwframe_ctx_alloc(device_ref);
 	if(!*ctx){
-		printf("Failed to allocate hwframe_ctx!!\n\n");
+		log_msg(LOG_LEVEL_ERROR, "[lavd] Failed to allocate hwframe_ctx!!\n");
 		return -1;
 	}
 
@@ -1105,7 +1105,7 @@ static int create_hw_frame_ctx(AVBufferRef *device_ref,
 
 	int ret = av_hwframe_ctx_init(*ctx);
 	if (ret < 0) {
-		printf("Unable to init hwframe_ctx!!\n\n");
+		log_msg(LOG_LEVEL_ERROR, "[lavd] Unable to init hwframe_ctx!!\n\n");
 		return ret;
 	}
 
@@ -1143,7 +1143,7 @@ static int vdpau_init(struct AVCodecContext *s){
 	if(av_vdpau_bind_context(s, device_vdpau_ctx->device, device_vdpau_ctx->get_proc_address,
 				AV_HWACCEL_FLAG_ALLOW_HIGH_DEPTH |
 				AV_HWACCEL_FLAG_IGNORE_LEVEL)){
-		printf("Unable to bind!!\n\n");	
+		log_msg(LOG_LEVEL_ERROR, "[lavd] Unable to bind vdpau context!\n");	
 		//TODO: Cleanup
 		return -1;
 	}	
@@ -1213,7 +1213,7 @@ static int vaapi_create_context(struct vaapi_ctx *ctx,
 	VAStatus status = vaQueryConfigProfiles(ctx->device_vaapi_ctx->display,
 			list, &profile_count);
 	if(status != VA_STATUS_SUCCESS){
-		printf("Profile query failed: %d (%s)\n", status, vaErrorStr(status));
+		log_msg(LOG_LEVEL_ERROR, "[lavd] Profile query failed: %d (%s)\n", status, vaErrorStr(status));
 		return -1;
 	}
 
@@ -1236,7 +1236,7 @@ static int vaapi_create_context(struct vaapi_ctx *ctx,
 	}
 
 	if(!match){
-		printf("Profile not supported \n");
+		log_msg(LOG_LEVEL_ERROR, "[lavd] Profile not supported \n");
 		return -1;
 	}
 
@@ -1248,7 +1248,7 @@ static int vaapi_create_context(struct vaapi_ctx *ctx,
 	status = vaCreateConfig(ctx->device_vaapi_ctx->display, ctx->va_profile,
 			ctx->va_entrypoint, 0, 0, &ctx->va_config);
 	if(status != VA_STATUS_SUCCESS){
-		printf("Create config failed: %d (%s)\n", status, vaErrorStr(status));
+		log_msg(LOG_LEVEL_ERROR, "[lavd] Create config failed: %d (%s)\n", status, vaErrorStr(status));
 		return -1;
 	}
 
@@ -1306,7 +1306,7 @@ static int vaapi_init(struct AVCodecContext *s){
 			&ctx->va_context);
 
 	if(status != VA_STATUS_SUCCESS){
-		printf("Create config failed: %d (%s)\n", status, vaErrorStr(status));
+		log_msg(LOG_LEVEL_ERROR, "[lavd] Create config failed: %d (%s)\n", status, vaErrorStr(status));
 		return -1;
 	}
 
