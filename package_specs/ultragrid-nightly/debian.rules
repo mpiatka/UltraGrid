@@ -2,6 +2,7 @@
 
 SHELL=/bin/bash
 DEB_UPSTREAM_URL = https://github.com/CESNET/UltraGrid
+DEB_HOST_MULTIARCH ?= $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
 
 #####################################################
 # > bluefish
@@ -46,12 +47,15 @@ CUDA:=--with-cuda=/usr/local/cuda-8.0
 # < cuda
 #####################################################
 
+LIBDIR=/usr/lib/$(DEB_HOST_MULTIARCH)
+UGLIBDIR=$(LIBDIR)/ultragrid
+
 %:
 	dh $@ -- --fail-missing
 
 override_dh_auto_configure:
-	./autogen.sh
-	dh_auto_configure -- --disable-profile --disable-debug --enable-ipv6 --enable-plugins \
+	./autogen.sh || true
+	dh_auto_configure -- --disable-profile --libdir=$(LIBDIR) --disable-debug --enable-ipv6 --enable-plugins \
 		--enable-sdl --enable-gl --enable-rtdxt --enable-jpeg \
 		--enable-portaudio --disable-jack-transport --enable-jack \
 		--enable-alsa --enable-scale --enable-qt --disable-quicktime \
@@ -62,16 +66,20 @@ override_dh_auto_configure:
 		$(CUDA) \
 		$(CARDCONF)
 
+#override_dh_auto_build:
+#	dh_auto_build -- LDFLAGS="$$LDFLAGS -Wl,-rpath=$(UGLIBDIR)"
+
 override_dh_auto_install:
-	mkdir -p usr/share/doc/ultragrid
-	mkdir -p usr/lib/ultragrid
-	echo 1.3-20150306 > usr/share/doc/ultragrid/ultragrid.version
-	cp usr/share/doc/ultragrid/ultragrid.version usr/share/doc/ultragrid/ultragrid-full.version
-	cp speex-1.2rc1/COPYING usr/share/doc/ultragrid/COPYING-speex
-	cp dxt_compress/LICENSE usr/share/doc/ultragrid/LICENSE-dxt_compress
-	cp dxt_compress/LICENSE-rtdxt usr/share/doc/ultragrid/
+	mkdir -p debian/tmp/usr/share/doc/ultragrid
+	mkdir -p debian/tmp/$(UGLIBDIR)
+	echo 1.4-20170401 > debian/tmp/usr/share/doc/ultragrid/ultragrid.version
+	cp speex-1.2rc1/COPYING debian/tmp/usr/share/doc/ultragrid/COPYING-speex
+	cp dxt_compress/LICENSE debian/tmp/usr/share/doc/ultragrid/LICENSE-dxt_compress
+	cp dxt_compress/LICENSE-rtdxt debian/tmp/usr/share/doc/ultragrid/
 	dh_auto_install
-	#cp ${DELTACAST_DIRECTORY}/License.txt usr/share/doc/ultragrid/LICENSE-Deltacast
+#	cp ${DELTACAST_DIRECTORY}/License.txt usr/share/doc/ultragrid/LICENSE-Deltacast
+#	mkdir -p debian/tmp/$(UGLIBDIR)
+#	sh -c "$$(ldd bin/uv $$(find . -name '*.so*') 2>/dev/null | grep cuda | grep -E '^[[:space:]]+' | sed -r 's#[[:space:]]+([^[:space:]]+)[[:space:]]+=>[[:space:]]+([^[:space:]].*)[[:space:]]+[(][^)]+[)]#cp "$$(realpath "\2")" debian/tmp$(UGLIBDIR)/\1#g' | uniq | tr $$'\n' ';')"
 
 override_dh_shlibdeps:
 	env LD_LIBRARY_PATH=$${LD_LIBRARY_PATH}:$$((find /usr/local -maxdepth 1 -type d -iname "*cuda*" ; echo /usr) | sort -r -n)/lib64:$$((find /usr/local -maxdepth 1 -type d -iname "*cuda*" ; echo /usr) | sort -r -n)/lib dh_shlibdeps -- --ignore-missing-info

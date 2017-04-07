@@ -2,7 +2,7 @@
 	<service name="tar_scm">
 		<param name="scm">git</param>
 		<param name="url">https://github.com/CESNET/UltraGrid.git</param>
-		<param name="version">1.3</param>
+		<param name="version">1.4</param>
 		<param name="revision">nightly</param>
 		<param name="filename">ultragrid-nightly</param>
 		<param name="package-meta">yes</param>
@@ -10,7 +10,7 @@
 	</service>
 	<service name="extract_file">
 		<param name="archive">*ultragrid*.tar</param>
-		<param name="files">*/specs/ultragrid-nightly/*</param>
+		<param name="files">*/package_specs/ultragrid-nightly/*</param>
 	</service>
 	<service name="recompress">
 		<param name="file">*ultragrid*.tar</param>
