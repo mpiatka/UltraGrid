@@ -1138,7 +1138,7 @@ static int vdpau_init(struct AVCodecContext *s){
 	state->hwaccel.tmp_frame = av_frame_alloc();
 	if(!state->hwaccel.tmp_frame){
 		ret = -1;
-		goto fail_frame_ctx;
+		goto fail_tmp_frame;
 	}
 
 
@@ -1157,6 +1157,8 @@ static int vdpau_init(struct AVCodecContext *s){
 fail_bind:
 	av_frame_free(&state->hwaccel.tmp_frame);
 	state->hwaccel.tmp_frame = NULL;
+fail_tmp_frame:
+	av_buffer_unref(&hw_frames_ctx);
 fail_frame_ctx:
 	av_buffer_unref(&device_ref);
 	return ret;
@@ -1211,7 +1213,7 @@ static int vaapi_create_context(struct vaapi_ctx *ctx,
 	}
 
 	int profile_count = vaMaxNumProfiles(ctx->device_vaapi_ctx->display);
-	//printf("VAAPI Profile count: %d\n", profile_count);
+	log_msg(LOG_LEVEL_VERBOSE, "VAAPI Profile count: %d\n", profile_count);
 
 	VAProfile *list = av_malloc(profile_count * sizeof(VAProfile));
 	if(!list){
@@ -1222,6 +1224,7 @@ static int vaapi_create_context(struct vaapi_ctx *ctx,
 			list, &profile_count);
 	if(status != VA_STATUS_SUCCESS){
 		log_msg(LOG_LEVEL_ERROR, "[lavd] Profile query failed: %d (%s)\n", status, vaErrorStr(status));
+		av_free(list);
 		return -1;
 	}
 
@@ -1245,6 +1248,7 @@ static int vaapi_create_context(struct vaapi_ctx *ctx,
 
 	if(!match){
 		log_msg(LOG_LEVEL_ERROR, "[lavd] Profile not supported \n");
+		av_free(list);
 		return -1;
 	}
 
@@ -1275,36 +1279,35 @@ static int vaapi_init(struct AVCodecContext *s){
 	ctx->device_ref = NULL;
 	int ret = create_hw_device_ctx(AV_HWDEVICE_TYPE_VAAPI, &ctx->device_ref);
 	if(ret < 0)
-		return ret;
+		goto fail_device;
 
 	ctx->device_ctx = (AVHWDeviceContext*)ctx->device_ref->data;
 	ctx->device_vaapi_ctx = ctx->device_ctx->hwctx;
 
 	ret = vaapi_create_context(ctx, s);
 	if(ret < 0)
-		//TODO
-		return ret;
+		goto fail_vaapi_ctx;
 
 	ctx->hw_frames_ctx = NULL;
 	ret = create_hw_frame_ctx(ctx->device_ref, s, AV_PIX_FMT_VAAPI, &ctx->hw_frames_ctx);
 	if(ret < 0)
-		//TODO
-		return ret;
+		goto fail_vaapi_ctx;
+
 	ctx->frame_ctx = (AVHWFramesContext *) (ctx->hw_frames_ctx->data);
 
 	s->hw_frames_ctx = ctx->hw_frames_ctx;
 
+	state->hwaccel.tmp_frame = av_frame_alloc();
+	if(!state->hwaccel.tmp_frame){
+		ret = -1;
+		goto fail_tmp_frame;
+	}
 	state->hwaccel.type = HWACCEL_VAAPI;
 	state->hwaccel.copy = true;
 	state->hwaccel.ctx = ctx;
 	state->hwaccel.uninit = vaapi_uninit;
 
-	state->hwaccel.tmp_frame = av_frame_alloc();
-	if(!state->hwaccel.tmp_frame)
-		//TODO: Cleanup
-		return -1;
-
-	//TODO
+	//TODO: Check hw limits
 	AVVAAPIFramesContext *avfc = ctx->frame_ctx->hwctx;
 	VAStatus status = vaCreateContext(ctx->device_vaapi_ctx->display,
 			ctx->va_config, s->coded_width, s->coded_height,
@@ -1315,19 +1318,31 @@ static int vaapi_init(struct AVCodecContext *s){
 
 	if(status != VA_STATUS_SUCCESS){
 		log_msg(LOG_LEVEL_ERROR, "[lavd] Create config failed: %d (%s)\n", status, vaErrorStr(status));
-		return -1;
+		ret = -1;
+		goto fail_create_ctx;
 	}
 
 	ctx->decoder_context.display = ctx->device_vaapi_ctx->display;
 	ctx->decoder_context.config_id = ctx->va_config;
 	ctx->decoder_context.context_id = ctx->va_context;
 	//state->hwaccel.tmp_frame->format = AV_PIX_FMT_YUV420P;
-	//
 	
 	s->hwaccel_context = &ctx->decoder_context;
 
 	av_buffer_unref(&ctx->device_ref);
 	return 0;
+
+
+fail_create_ctx:
+	av_frame_free(&state->hwaccel.tmp_frame);
+	state->hwaccel.tmp_frame = NULL;
+fail_tmp_frame:
+	av_buffer_unref(&ctx->hw_frames_ctx);
+fail_vaapi_ctx:
+	av_buffer_unref(&ctx->device_ref);
+fail_device:
+	free(ctx);
+	return ret;
 }
 #endif
 
