@@ -57,6 +57,7 @@
 #include <libavutil/hwcontext_vaapi.h>
 #include <libavcodec/vdpau.h>
 #include <libavcodec/vaapi.h>
+#define DEFAULT_SURFACES 20
 #endif
 
 #ifdef __cplusplus
@@ -1089,6 +1090,8 @@ static int create_hw_device_ctx(enum AVHWDeviceType type, AVBufferRef **device_r
 static int create_hw_frame_ctx(AVBufferRef *device_ref,
 		AVCodecContext *s,
 		enum AVPixelFormat format,
+		enum AVPixelFormat sw_format,
+		int decode_surfaces,
 		AVBufferRef **ctx)
 {
 	*ctx = av_hwframe_ctx_alloc(device_ref);
@@ -1101,7 +1104,8 @@ static int create_hw_frame_ctx(AVBufferRef *device_ref,
 	frames_ctx->format    = format;
 	frames_ctx->width     = s->coded_width;
 	frames_ctx->height    = s->coded_height;
-	frames_ctx->sw_format = s->sw_pix_fmt;
+	frames_ctx->sw_format = sw_format;
+	frames_ctx->initial_pool_size = decode_surfaces;
 
 	int ret = av_hwframe_ctx_init(*ctx);
 	if (ret < 0) {
@@ -1127,7 +1131,12 @@ static int vdpau_init(struct AVCodecContext *s){
 	AVVDPAUDeviceContext *device_vdpau_ctx = device_ctx->hwctx;
 
 	AVBufferRef *hw_frames_ctx = NULL;
-	ret = create_hw_frame_ctx(device_ref, s, AV_PIX_FMT_VDPAU, &hw_frames_ctx);
+	ret = create_hw_frame_ctx(device_ref,
+		   	s,
+		   	AV_PIX_FMT_VDPAU,
+		   	s->sw_pix_fmt,
+			DEFAULT_SURFACES,
+		  	&hw_frames_ctx);
 	if(ret < 0)
 		goto fail_frame_ctx;
 
@@ -1171,7 +1180,6 @@ struct vaapi_ctx{
 
 	AVBufferRef *hw_frames_ctx;
 	AVHWFramesContext *frame_ctx;
-
 
 	VAProfile va_profile;
 	VAEntrypoint va_entrypoint;
@@ -1264,6 +1272,20 @@ static int vaapi_create_context(struct vaapi_ctx *ctx,
 		return -1;
 	}
 
+	
+	AVVAAPIHWConfig *hwconfig = av_hwdevice_hwconfig_alloc(ctx->device_ref);
+	if(!hwconfig){
+		log_msg(LOG_LEVEL_WARNING, "[lavd] Failed to get constraints. Will try to continue anyways...\n");
+		return 0;
+	}
+
+	hwconfig->config_id = ctx->va_config;
+	AVHWFramesConstraints *constraints = av_hwdevice_get_hwframe_constraints(ctx->device_ref, hwconfig); 
+	if (!constraints){
+		log_msg(LOG_LEVEL_WARNING, "[lavd] Failed to get constraints. Will try to continue anyways...\n");
+		return 0;
+	}
+
 	return 0;
 }
 
@@ -1289,9 +1311,20 @@ static int vaapi_init(struct AVCodecContext *s){
 		goto fail_vaapi_ctx;
 
 	ctx->hw_frames_ctx = NULL;
-	ret = create_hw_frame_ctx(ctx->device_ref, s, AV_PIX_FMT_VAAPI, &ctx->hw_frames_ctx);
+
+	int decode_surfaces = DEFAULT_SURFACES;
+
+	if (s->active_thread_type & FF_THREAD_FRAME)
+		decode_surfaces += s->thread_count;
+
+	ret = create_hw_frame_ctx(ctx->device_ref,
+		   	s,
+		   	AV_PIX_FMT_VAAPI,
+		   	s->sw_pix_fmt,
+			decode_surfaces,
+		   	&ctx->hw_frames_ctx);
 	if(ret < 0)
-		goto fail_vaapi_ctx;
+		goto fail_hw_frames_ctx;
 
 	ctx->frame_ctx = (AVHWFramesContext *) (ctx->hw_frames_ctx->data);
 
@@ -1307,7 +1340,6 @@ static int vaapi_init(struct AVCodecContext *s){
 	state->hwaccel.ctx = ctx;
 	state->hwaccel.uninit = vaapi_uninit;
 
-	//TODO: Check hw limits
 	AVVAAPIFramesContext *avfc = ctx->frame_ctx->hwctx;
 	VAStatus status = vaCreateContext(ctx->device_vaapi_ctx->display,
 			ctx->va_config, s->coded_width, s->coded_height,
@@ -1338,6 +1370,8 @@ fail_create_ctx:
 	state->hwaccel.tmp_frame = NULL;
 fail_tmp_frame:
 	av_buffer_unref(&ctx->hw_frames_ctx);
+fail_hw_frames_ctx:
+	vaDestroyConfig(ctx->device_vaapi_ctx->display, ctx->va_config);
 fail_vaapi_ctx:
 	av_buffer_unref(&ctx->device_ref);
 fail_device:
