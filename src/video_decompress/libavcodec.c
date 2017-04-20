@@ -1181,12 +1181,14 @@ struct vaapi_ctx{
 	AVBufferRef *hw_frames_ctx;
 	AVHWFramesContext *frame_ctx;
 
+#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(57, 74, 100)
 	VAProfile va_profile;
 	VAEntrypoint va_entrypoint;
 	VAConfigID va_config;
 	VAContextID va_context;
 
 	struct vaapi_context decoder_context;
+#endif
 };
 
 static void vaapi_uninit(struct hw_accel_state *s){
@@ -1194,6 +1196,7 @@ static void vaapi_uninit(struct hw_accel_state *s){
 	free(s->ctx);
 }
 
+#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(57, 74, 100)
 static const struct {
 	enum AVCodecID av_codec_id;
 	int codec_profile;
@@ -1288,6 +1291,7 @@ static int vaapi_create_context(struct vaapi_ctx *ctx,
 
 	return 0;
 }
+#endif
 
 static int vaapi_init(struct AVCodecContext *s){
 	
@@ -1306,9 +1310,11 @@ static int vaapi_init(struct AVCodecContext *s){
 	ctx->device_ctx = (AVHWDeviceContext*)ctx->device_ref->data;
 	ctx->device_vaapi_ctx = ctx->device_ctx->hwctx;
 
+#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(57, 74, 100)
 	ret = vaapi_create_context(ctx, s);
 	if(ret < 0)
 		goto fail_vaapi_ctx;
+#endif
 
 	ctx->hw_frames_ctx = NULL;
 
@@ -1340,6 +1346,7 @@ static int vaapi_init(struct AVCodecContext *s){
 	state->hwaccel.ctx = ctx;
 	state->hwaccel.uninit = vaapi_uninit;
 
+#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(57, 74, 100)
 	AVVAAPIFramesContext *avfc = ctx->frame_ctx->hwctx;
 	VAStatus status = vaCreateContext(ctx->device_vaapi_ctx->display,
 			ctx->va_config, s->coded_width, s->coded_height,
@@ -1360,6 +1367,7 @@ static int vaapi_init(struct AVCodecContext *s){
 	//state->hwaccel.tmp_frame->format = AV_PIX_FMT_YUV420P;
 	
 	s->hwaccel_context = &ctx->decoder_context;
+#endif
 
 	av_buffer_unref(&ctx->device_ref);
 	return 0;
@@ -1371,7 +1379,9 @@ fail_create_ctx:
 fail_tmp_frame:
 	av_buffer_unref(&ctx->hw_frames_ctx);
 fail_hw_frames_ctx:
+#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(57, 74, 100)
 	vaDestroyConfig(ctx->device_vaapi_ctx->display, ctx->va_config);
+#endif
 fail_vaapi_ctx:
 	av_buffer_unref(&ctx->device_ref);
 fail_device:
