@@ -1289,14 +1289,14 @@ static int vaapi_create_context(struct vaapi_ctx *ctx,
 		return 0;
 	}
 
-    if (avctx->coded_width  < constraints->min_width  ||
-        avctx->coded_height < constraints->min_height ||
-        avctx->coded_width  > constraints->max_width  ||
-        avctx->coded_height > constraints->max_height)
+    if (codec_ctx->coded_width  < constraints->min_width  ||
+        codec_ctx->coded_height < constraints->min_height ||
+        codec_ctx->coded_width  > constraints->max_width  ||
+        codec_ctx->coded_height > constraints->max_height)
 	{
 		log_msg(LOG_LEVEL_WARNING, "[lavd] VAAPI hw does not support the resolution %dx%d\n",
-				avctx->coded_width,
-				avctx->coded_height);
+				codec_ctx->coded_width,
+				codec_ctx->coded_height);
 	}
 
 
