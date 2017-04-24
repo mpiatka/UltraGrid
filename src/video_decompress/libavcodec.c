@@ -73,8 +73,6 @@ using std::min;
 
 #define MOD_NAME "[lavd] "
 
-struct state_libavcodec_decompress;
-
 #ifdef USE_HWDEC
 struct hw_accel_state {
         enum {
@@ -1385,7 +1383,6 @@ static int vaapi_init(struct AVCodecContext *s){
         ctx->decoder_context.display = ctx->device_vaapi_ctx->display;
         ctx->decoder_context.config_id = ctx->va_config;
         ctx->decoder_context.context_id = ctx->va_context;
-        //state->hwaccel.tmp_frame->format = AV_PIX_FMT_YUV420P;
 
         s->hwaccel_context = &ctx->decoder_context;
 #endif
@@ -1544,14 +1541,7 @@ static int libavcodec_decompress(void *state, unsigned char *dst, unsigned char 
                         }
                 }
                 if (ret != 0) {
-                        printf("AVERROR_EOF: %d\n", AVERROR_EOF);
-                        printf("AVERROR_EAGAIN: %d\n", AVERROR(EAGAIN));
-                        printf("AVERROR_EINVAL: %d\n", AVERROR(EINVAL));
-                        printf("AVERROR_ENOMEM: %d\n", AVERROR(ENOMEM));
                         print_decoder_error(MOD_NAME, ret);
-                        //avcodec_send_packet(s->codec_ctx, NULL);
-                        //while(avcodec_receive_frame(s->codec_ctx, s->frame) != AVERROR_EOF) {  }
-                        //avcodec_flush_buffers(s->codec_ctx);
                 }
                 len = s->pkt.size;
 #endif
