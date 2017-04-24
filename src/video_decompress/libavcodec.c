@@ -77,18 +77,18 @@ struct state_libavcodec_decompress;
 
 #ifdef USE_HWDEC
 struct hw_accel_state {
-	enum {
-		HWACCEL_NONE,
-		HWACCEL_VDPAU,
-		HWACCEL_VAAPI
-	} type;
+        enum {
+                HWACCEL_NONE,
+                HWACCEL_VDPAU,
+                HWACCEL_VAAPI
+        } type;
 
-	bool copy; 
-	AVFrame *tmp_frame;
+        bool copy;
+        AVFrame *tmp_frame;
 
-	void (*uninit)(struct hw_accel_state*);
+        void (*uninit)(struct hw_accel_state*);
 
-	void *ctx; //Type depends on hwaccel type
+        void *ctx; //Type depends on hwaccel type
 };
 #endif
 
@@ -113,7 +113,7 @@ struct state_libavcodec_decompress {
         bool             broken_h264_mt_decoding_workaroud_active;
 
 #ifdef USE_HWDEC
-		struct hw_accel_state hwaccel;
+        struct hw_accel_state hwaccel;
 #endif
 };
 
@@ -126,19 +126,19 @@ static bool broken_h264_mt_decoding = false;
 
 #ifdef USE_HWDEC
 static void hwaccel_state_reset(struct hw_accel_state *hwaccel){
-	if(hwaccel->ctx){
-		hwaccel->uninit(hwaccel);
-	}
+        if(hwaccel->ctx){
+                hwaccel->uninit(hwaccel);
+        }
 
-	hwaccel->type = HWACCEL_NONE;
-	hwaccel->copy = false;
+        hwaccel->type = HWACCEL_NONE;
+        hwaccel->copy = false;
 
-	if(hwaccel->tmp_frame){
-		av_frame_free(&hwaccel->tmp_frame);
-		hwaccel->tmp_frame = NULL;
-	}
+        if(hwaccel->tmp_frame){
+                av_frame_free(&hwaccel->tmp_frame);
+                hwaccel->tmp_frame = NULL;
+        }
 
-	hwaccel->uninit = NULL;
+        hwaccel->uninit = NULL;
 }
 #endif
 
@@ -174,7 +174,7 @@ static void deconfigure(struct state_libavcodec_decompress *s)
         av_packet_unref(&s->pkt);
 
 #ifdef USE_HWDEC
-		hwaccel_state_reset(&s->hwaccel);
+        hwaccel_state_reset(&s->hwaccel);
 #endif
 }
 
@@ -208,7 +208,7 @@ static void set_codec_context_params(struct state_libavcodec_decompress *s)
         // callback to negotiate pixel format that is supported by UG
         s->codec_ctx->get_format = get_format_callback;
 
-		s->codec_ctx->opaque = s;
+        s->codec_ctx->opaque = s;
 }
 
 static void jpeg_callback(void)
@@ -248,7 +248,7 @@ ADD_TO_PARAM(force_lavd_decoder, "force-lavd-decoder", "* force-lavd-decoder=<de
 
 #ifdef USE_HWDEC
 ADD_TO_PARAM(force_hw_accel, "force-hw-accel", "* force-hw-accel\n"
-		"  Tries to use hardware acceleration. \n");
+                "  Tries to use hardware acceleration. \n");
 #endif
 static bool configure_with(struct state_libavcodec_decompress *s,
                 struct video_desc desc)
@@ -364,7 +364,7 @@ static bool configure_with(struct state_libavcodec_decompress *s,
 static void * libavcodec_decompress_init(void)
 {
         struct state_libavcodec_decompress *s;
-        
+
         s = (struct state_libavcodec_decompress *)
                 calloc(1, sizeof(struct state_libavcodec_decompress));
 
@@ -387,7 +387,7 @@ static void * libavcodec_decompress_init(void)
         av_log_set_callback(error_callback);
 
 #ifdef USE_HWDEC
-		hwaccel_state_reset(&s->hwaccel);
+        hwaccel_state_reset(&s->hwaccel);
 #endif
 
         return s;
@@ -398,7 +398,7 @@ static int libavcodec_decompress_reconfigure(void *state, struct video_desc desc
 {
         struct state_libavcodec_decompress *s =
                 (struct state_libavcodec_decompress *) state;
-        
+
         s->pitch = pitch;
         assert(out_codec == UYVY || out_codec == RGB || out_codec == v210);
 
@@ -1086,339 +1086,339 @@ static const struct {
 
 #ifdef USE_HWDEC
 static int create_hw_device_ctx(enum AVHWDeviceType type, AVBufferRef **device_ref){
-	int ret;
-	ret = av_hwdevice_ctx_create(device_ref, type, NULL, NULL, 0);
+        int ret;
+        ret = av_hwdevice_ctx_create(device_ref, type, NULL, NULL, 0);
 
-	if(ret < 0){
-		log_msg(LOG_LEVEL_ERROR, "[lavd] Unable to create hwdevice!!\n");	
-		return ret;
-	}
+        if(ret < 0){
+                log_msg(LOG_LEVEL_ERROR, "[lavd] Unable to create hwdevice!!\n");
+                return ret;
+        }
 
-	return 0;
+        return 0;
 }
 
 static int create_hw_frame_ctx(AVBufferRef *device_ref,
-		AVCodecContext *s,
-		enum AVPixelFormat format,
-		enum AVPixelFormat sw_format,
-		int decode_surfaces,
-		AVBufferRef **ctx)
+                AVCodecContext *s,
+                enum AVPixelFormat format,
+                enum AVPixelFormat sw_format,
+                int decode_surfaces,
+                AVBufferRef **ctx)
 {
-	*ctx = av_hwframe_ctx_alloc(device_ref);
-	if(!*ctx){
-		log_msg(LOG_LEVEL_ERROR, "[lavd] Failed to allocate hwframe_ctx!!\n");
-		return -1;
-	}
+        *ctx = av_hwframe_ctx_alloc(device_ref);
+        if(!*ctx){
+                log_msg(LOG_LEVEL_ERROR, "[lavd] Failed to allocate hwframe_ctx!!\n");
+                return -1;
+        }
 
-	AVHWFramesContext *frames_ctx = (AVHWFramesContext *) (*ctx)->data;
-	frames_ctx->format    = format;
-	frames_ctx->width     = s->coded_width;
-	frames_ctx->height    = s->coded_height;
-	frames_ctx->sw_format = sw_format;
-	frames_ctx->initial_pool_size = decode_surfaces;
+        AVHWFramesContext *frames_ctx = (AVHWFramesContext *) (*ctx)->data;
+        frames_ctx->format    = format;
+        frames_ctx->width     = s->coded_width;
+        frames_ctx->height    = s->coded_height;
+        frames_ctx->sw_format = sw_format;
+        frames_ctx->initial_pool_size = decode_surfaces;
 
-	int ret = av_hwframe_ctx_init(*ctx);
-	if (ret < 0) {
-		av_buffer_unref(ctx);
-		*ctx = NULL;
-		log_msg(LOG_LEVEL_ERROR, "[lavd] Unable to init hwframe_ctx!!\n\n");
-		return ret;
-	}
+        int ret = av_hwframe_ctx_init(*ctx);
+        if (ret < 0) {
+                av_buffer_unref(ctx);
+                *ctx = NULL;
+                log_msg(LOG_LEVEL_ERROR, "[lavd] Unable to init hwframe_ctx!!\n\n");
+                return ret;
+        }
 
-	return 0;
+        return 0;
 }
 
 static int vdpau_init(struct AVCodecContext *s){
-	
-	struct state_libavcodec_decompress *state = s->opaque;
 
-	AVBufferRef *device_ref = NULL;
-	int ret = create_hw_device_ctx(AV_HWDEVICE_TYPE_VDPAU, &device_ref);
-	if(ret < 0)
-		return ret;
+        struct state_libavcodec_decompress *state = s->opaque;
 
-	AVHWDeviceContext *device_ctx = (AVHWDeviceContext*)device_ref->data;
-	AVVDPAUDeviceContext *device_vdpau_ctx = device_ctx->hwctx;
+        AVBufferRef *device_ref = NULL;
+        int ret = create_hw_device_ctx(AV_HWDEVICE_TYPE_VDPAU, &device_ref);
+        if(ret < 0)
+                return ret;
 
-	AVBufferRef *hw_frames_ctx = NULL;
-	ret = create_hw_frame_ctx(device_ref,
-		   	s,
-		   	AV_PIX_FMT_VDPAU,
-		   	s->sw_pix_fmt,
-			DEFAULT_SURFACES,
-		  	&hw_frames_ctx);
-	if(ret < 0)
-		goto fail_frame_ctx;
+        AVHWDeviceContext *device_ctx = (AVHWDeviceContext*)device_ref->data;
+        AVVDPAUDeviceContext *device_vdpau_ctx = device_ctx->hwctx;
 
-	s->hw_frames_ctx = hw_frames_ctx;
+        AVBufferRef *hw_frames_ctx = NULL;
+        ret = create_hw_frame_ctx(device_ref,
+                        s,
+                        AV_PIX_FMT_VDPAU,
+                        s->sw_pix_fmt,
+                        DEFAULT_SURFACES,
+                        &hw_frames_ctx);
+        if(ret < 0)
+                goto fail_frame_ctx;
 
-	state->hwaccel.type = HWACCEL_VDPAU;
-	state->hwaccel.copy = true;
-	state->hwaccel.tmp_frame = av_frame_alloc();
-	if(!state->hwaccel.tmp_frame){
-		ret = -1;
-		goto fail_tmp_frame;
-	}
+        s->hw_frames_ctx = hw_frames_ctx;
+
+        state->hwaccel.type = HWACCEL_VDPAU;
+        state->hwaccel.copy = true;
+        state->hwaccel.tmp_frame = av_frame_alloc();
+        if(!state->hwaccel.tmp_frame){
+                ret = -1;
+                goto fail_tmp_frame;
+        }
 
 
-	if(av_vdpau_bind_context(s, device_vdpau_ctx->device, device_vdpau_ctx->get_proc_address,
-				AV_HWACCEL_FLAG_ALLOW_HIGH_DEPTH |
-				AV_HWACCEL_FLAG_IGNORE_LEVEL)){
-		log_msg(LOG_LEVEL_ERROR, "[lavd] Unable to bind vdpau context!\n");	
-		ret = -1;
-		goto fail_bind;
-	}	
+        if(av_vdpau_bind_context(s, device_vdpau_ctx->device, device_vdpau_ctx->get_proc_address,
+                                AV_HWACCEL_FLAG_ALLOW_HIGH_DEPTH |
+                                AV_HWACCEL_FLAG_IGNORE_LEVEL)){
+                log_msg(LOG_LEVEL_ERROR, "[lavd] Unable to bind vdpau context!\n");
+                ret = -1;
+                goto fail_bind;
+        }
 
-	av_buffer_unref(&device_ref);
-	return 0;
+        av_buffer_unref(&device_ref);
+        return 0;
 
 
 fail_bind:
-	av_frame_free(&state->hwaccel.tmp_frame);
-	state->hwaccel.tmp_frame = NULL;
+        av_frame_free(&state->hwaccel.tmp_frame);
+        state->hwaccel.tmp_frame = NULL;
 fail_tmp_frame:
-	av_buffer_unref(&hw_frames_ctx);
+        av_buffer_unref(&hw_frames_ctx);
 fail_frame_ctx:
-	av_buffer_unref(&device_ref);
-	return ret;
+        av_buffer_unref(&device_ref);
+        return ret;
 }
 
 struct vaapi_ctx{
-	AVBufferRef *device_ref;
-	AVHWDeviceContext *device_ctx; 
-	AVVAAPIDeviceContext *device_vaapi_ctx;
+        AVBufferRef *device_ref;
+        AVHWDeviceContext *device_ctx;
+        AVVAAPIDeviceContext *device_vaapi_ctx;
 
-	AVBufferRef *hw_frames_ctx;
-	AVHWFramesContext *frame_ctx;
+        AVBufferRef *hw_frames_ctx;
+        AVHWFramesContext *frame_ctx;
 
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(57, 74, 100)
-	VAProfile va_profile;
-	VAEntrypoint va_entrypoint;
-	VAConfigID va_config;
-	VAContextID va_context;
+        VAProfile va_profile;
+        VAEntrypoint va_entrypoint;
+        VAConfigID va_config;
+        VAContextID va_context;
 
-	struct vaapi_context decoder_context;
+        struct vaapi_context decoder_context;
 #endif
 };
 
 static void vaapi_uninit(struct hw_accel_state *s){
 
-	free(s->ctx);
+        free(s->ctx);
 }
 
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(57, 74, 100)
 static const struct {
-	enum AVCodecID av_codec_id;
-	int codec_profile;
-	VAProfile va_profile;
+        enum AVCodecID av_codec_id;
+        int codec_profile;
+        VAProfile va_profile;
 } vaapi_profiles[] = {
-	{AV_CODEC_ID_MPEG2VIDEO, FF_PROFILE_MPEG2_SIMPLE, VAProfileMPEG2Simple},
-	{AV_CODEC_ID_MPEG2VIDEO, FF_PROFILE_MPEG2_MAIN, VAProfileMPEG2Main},
-	{AV_CODEC_ID_H264, FF_PROFILE_H264_CONSTRAINED_BASELINE, VAProfileH264ConstrainedBaseline},
-	{AV_CODEC_ID_H264, FF_PROFILE_H264_BASELINE, VAProfileH264Baseline},
-	{AV_CODEC_ID_H264, FF_PROFILE_H264_MAIN, VAProfileH264Main},
-	{AV_CODEC_ID_H264, FF_PROFILE_H264_HIGH, VAProfileH264High},
+        {AV_CODEC_ID_MPEG2VIDEO, FF_PROFILE_MPEG2_SIMPLE, VAProfileMPEG2Simple},
+        {AV_CODEC_ID_MPEG2VIDEO, FF_PROFILE_MPEG2_MAIN, VAProfileMPEG2Main},
+        {AV_CODEC_ID_H264, FF_PROFILE_H264_CONSTRAINED_BASELINE, VAProfileH264ConstrainedBaseline},
+        {AV_CODEC_ID_H264, FF_PROFILE_H264_BASELINE, VAProfileH264Baseline},
+        {AV_CODEC_ID_H264, FF_PROFILE_H264_MAIN, VAProfileH264Main},
+        {AV_CODEC_ID_H264, FF_PROFILE_H264_HIGH, VAProfileH264High},
 #if VA_CHECK_VERSION(0, 37, 0)
-	{AV_CODEC_ID_HEVC, FF_PROFILE_HEVC_MAIN, VAProfileHEVCMain},
+        {AV_CODEC_ID_HEVC, FF_PROFILE_HEVC_MAIN, VAProfileHEVCMain},
 #endif
 };
 
 static int vaapi_create_context(struct vaapi_ctx *ctx,
-		AVCodecContext *codec_ctx)
+                AVCodecContext *codec_ctx)
 {
-	const AVCodecDescriptor *codec_desc;
+        const AVCodecDescriptor *codec_desc;
 
-	codec_desc = avcodec_descriptor_get(codec_ctx->codec_id);
-	if(!codec_desc){
-		return -1;
-	}
+        codec_desc = avcodec_descriptor_get(codec_ctx->codec_id);
+        if(!codec_desc){
+                return -1;
+        }
 
-	int profile_count = vaMaxNumProfiles(ctx->device_vaapi_ctx->display);
-	log_msg(LOG_LEVEL_VERBOSE, "VAAPI Profile count: %d\n", profile_count);
+        int profile_count = vaMaxNumProfiles(ctx->device_vaapi_ctx->display);
+        log_msg(LOG_LEVEL_VERBOSE, "VAAPI Profile count: %d\n", profile_count);
 
-	VAProfile *list = av_malloc(profile_count * sizeof(VAProfile));
-	if(!list){
-		return -1;
-	}
+        VAProfile *list = av_malloc(profile_count * sizeof(VAProfile));
+        if(!list){
+                return -1;
+        }
 
-	VAStatus status = vaQueryConfigProfiles(ctx->device_vaapi_ctx->display,
-			list, &profile_count);
-	if(status != VA_STATUS_SUCCESS){
-		log_msg(LOG_LEVEL_ERROR, "[lavd] Profile query failed: %d (%s)\n", status, vaErrorStr(status));
-		av_free(list);
-		return -1;
-	}
+        VAStatus status = vaQueryConfigProfiles(ctx->device_vaapi_ctx->display,
+                        list, &profile_count);
+        if(status != VA_STATUS_SUCCESS){
+                log_msg(LOG_LEVEL_ERROR, "[lavd] Profile query failed: %d (%s)\n", status, vaErrorStr(status));
+                av_free(list);
+                return -1;
+        }
 
-	VAProfile profile = VAProfileNone;
-	int match = 0;
+        VAProfile profile = VAProfileNone;
+        int match = 0;
 
-	for(unsigned i = 0; i < FF_ARRAY_ELEMS(vaapi_profiles); i++){
-		if(vaapi_profiles[i].av_codec_id != codec_ctx->codec_id)
-			continue;
+        for(unsigned i = 0; i < FF_ARRAY_ELEMS(vaapi_profiles); i++){
+                if(vaapi_profiles[i].av_codec_id != codec_ctx->codec_id)
+                        continue;
 
-		if(vaapi_profiles[i].codec_profile == codec_ctx->profile){
-			profile = vaapi_profiles[i].va_profile;
-			break;
-		}
-	}
+                if(vaapi_profiles[i].codec_profile == codec_ctx->profile){
+                        profile = vaapi_profiles[i].va_profile;
+                        break;
+                }
+        }
 
-	for(int i = 0; i < profile_count; i++){
-		if(profile == list[i])
-			match = 1;
-	}
+        for(int i = 0; i < profile_count; i++){
+                if(profile == list[i])
+                        match = 1;
+        }
 
-	if(!match){
-		log_msg(LOG_LEVEL_ERROR, "[lavd] Profile not supported \n");
-		av_free(list);
-		return -1;
-	}
+        if(!match){
+                log_msg(LOG_LEVEL_ERROR, "[lavd] Profile not supported \n");
+                av_free(list);
+                return -1;
+        }
 
-	ctx->va_profile = profile;
-	ctx->va_entrypoint = VAEntrypointVLD;
+        ctx->va_profile = profile;
+        ctx->va_entrypoint = VAEntrypointVLD;
 
-	av_freep(&list);
+        av_freep(&list);
 
-	status = vaCreateConfig(ctx->device_vaapi_ctx->display, ctx->va_profile,
-			ctx->va_entrypoint, 0, 0, &ctx->va_config);
-	if(status != VA_STATUS_SUCCESS){
-		log_msg(LOG_LEVEL_ERROR, "[lavd] Create config failed: %d (%s)\n", status, vaErrorStr(status));
-		return -1;
-	}
-
-	
-	AVVAAPIHWConfig *hwconfig = av_hwdevice_hwconfig_alloc(ctx->device_ref);
-	if(!hwconfig){
-		log_msg(LOG_LEVEL_WARNING, "[lavd] Failed to get constraints. Will try to continue anyways...\n");
-		return 0;
-	}
-
-	hwconfig->config_id = ctx->va_config;
-	AVHWFramesConstraints *constraints = av_hwdevice_get_hwframe_constraints(ctx->device_ref, hwconfig); 
-	if (!constraints){
-		log_msg(LOG_LEVEL_WARNING, "[lavd] Failed to get constraints. Will try to continue anyways...\n");
-		return 0;
-	}
-
-    if (codec_ctx->coded_width  < constraints->min_width  ||
-        codec_ctx->coded_height < constraints->min_height ||
-        codec_ctx->coded_width  > constraints->max_width  ||
-        codec_ctx->coded_height > constraints->max_height)
-	{
-		log_msg(LOG_LEVEL_WARNING, "[lavd] VAAPI hw does not support the resolution %dx%d\n",
-				codec_ctx->coded_width,
-				codec_ctx->coded_height);
-	}
+        status = vaCreateConfig(ctx->device_vaapi_ctx->display, ctx->va_profile,
+                        ctx->va_entrypoint, 0, 0, &ctx->va_config);
+        if(status != VA_STATUS_SUCCESS){
+                log_msg(LOG_LEVEL_ERROR, "[lavd] Create config failed: %d (%s)\n", status, vaErrorStr(status));
+                return -1;
+        }
 
 
-	return 0;
+        AVVAAPIHWConfig *hwconfig = av_hwdevice_hwconfig_alloc(ctx->device_ref);
+        if(!hwconfig){
+                log_msg(LOG_LEVEL_WARNING, "[lavd] Failed to get constraints. Will try to continue anyways...\n");
+                return 0;
+        }
+
+        hwconfig->config_id = ctx->va_config;
+        AVHWFramesConstraints *constraints = av_hwdevice_get_hwframe_constraints(ctx->device_ref, hwconfig);
+        if (!constraints){
+                log_msg(LOG_LEVEL_WARNING, "[lavd] Failed to get constraints. Will try to continue anyways...\n");
+                return 0;
+        }
+
+        if (codec_ctx->coded_width  < constraints->min_width  ||
+                        codec_ctx->coded_height < constraints->min_height ||
+                        codec_ctx->coded_width  > constraints->max_width  ||
+                        codec_ctx->coded_height > constraints->max_height)
+        {
+                log_msg(LOG_LEVEL_WARNING, "[lavd] VAAPI hw does not support the resolution %dx%d\n",
+                                codec_ctx->coded_width,
+                                codec_ctx->coded_height);
+        }
+
+
+        return 0;
 }
 #endif
 
 static int vaapi_init(struct AVCodecContext *s){
-	
-	struct state_libavcodec_decompress *state = s->opaque;
-	
-	struct vaapi_ctx *ctx = malloc(sizeof(struct vaapi_ctx));
-	if(!ctx){
-		return -1;
-	}
 
-	ctx->device_ref = NULL;
-	int ret = create_hw_device_ctx(AV_HWDEVICE_TYPE_VAAPI, &ctx->device_ref);
-	if(ret < 0)
-		goto fail_device;
+        struct state_libavcodec_decompress *state = s->opaque;
 
-	ctx->device_ctx = (AVHWDeviceContext*)ctx->device_ref->data;
-	ctx->device_vaapi_ctx = ctx->device_ctx->hwctx;
+        struct vaapi_ctx *ctx = malloc(sizeof(struct vaapi_ctx));
+        if(!ctx){
+                return -1;
+        }
 
-#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(57, 74, 100)
-	ret = vaapi_create_context(ctx, s);
-	if(ret < 0)
-		goto fail_vaapi_ctx;
-#endif
+        ctx->device_ref = NULL;
+        int ret = create_hw_device_ctx(AV_HWDEVICE_TYPE_VAAPI, &ctx->device_ref);
+        if(ret < 0)
+                goto fail_device;
 
-	ctx->hw_frames_ctx = NULL;
-
-	int decode_surfaces = DEFAULT_SURFACES;
-
-	if (s->active_thread_type & FF_THREAD_FRAME)
-		decode_surfaces += s->thread_count;
-
-	ret = create_hw_frame_ctx(ctx->device_ref,
-		   	s,
-		   	AV_PIX_FMT_VAAPI,
-		   	s->sw_pix_fmt,
-			decode_surfaces,
-		   	&ctx->hw_frames_ctx);
-	if(ret < 0)
-		goto fail_hw_frames_ctx;
-
-	ctx->frame_ctx = (AVHWFramesContext *) (ctx->hw_frames_ctx->data);
-
-	s->hw_frames_ctx = ctx->hw_frames_ctx;
-
-	state->hwaccel.tmp_frame = av_frame_alloc();
-	if(!state->hwaccel.tmp_frame){
-		ret = -1;
-		goto fail_tmp_frame;
-	}
-	state->hwaccel.type = HWACCEL_VAAPI;
-	state->hwaccel.copy = true;
-	state->hwaccel.ctx = ctx;
-	state->hwaccel.uninit = vaapi_uninit;
+        ctx->device_ctx = (AVHWDeviceContext*)ctx->device_ref->data;
+        ctx->device_vaapi_ctx = ctx->device_ctx->hwctx;
 
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(57, 74, 100)
-	AVVAAPIFramesContext *avfc = ctx->frame_ctx->hwctx;
-	VAStatus status = vaCreateContext(ctx->device_vaapi_ctx->display,
-			ctx->va_config, s->coded_width, s->coded_height,
-			VA_PROGRESSIVE,
-			avfc->surface_ids,
-			avfc->nb_surfaces,
-			&ctx->va_context);
-
-	if(status != VA_STATUS_SUCCESS){
-		log_msg(LOG_LEVEL_ERROR, "[lavd] Create config failed: %d (%s)\n", status, vaErrorStr(status));
-		ret = -1;
-		goto fail_create_ctx;
-	}
-
-	ctx->decoder_context.display = ctx->device_vaapi_ctx->display;
-	ctx->decoder_context.config_id = ctx->va_config;
-	ctx->decoder_context.context_id = ctx->va_context;
-	//state->hwaccel.tmp_frame->format = AV_PIX_FMT_YUV420P;
-	
-	s->hwaccel_context = &ctx->decoder_context;
+        ret = vaapi_create_context(ctx, s);
+        if(ret < 0)
+                goto fail_vaapi_ctx;
 #endif
 
-	av_buffer_unref(&ctx->device_ref);
-	return 0;
+        ctx->hw_frames_ctx = NULL;
+
+        int decode_surfaces = DEFAULT_SURFACES;
+
+        if (s->active_thread_type & FF_THREAD_FRAME)
+                decode_surfaces += s->thread_count;
+
+        ret = create_hw_frame_ctx(ctx->device_ref,
+                        s,
+                        AV_PIX_FMT_VAAPI,
+                        s->sw_pix_fmt,
+                        decode_surfaces,
+                        &ctx->hw_frames_ctx);
+        if(ret < 0)
+                goto fail_hw_frames_ctx;
+
+        ctx->frame_ctx = (AVHWFramesContext *) (ctx->hw_frames_ctx->data);
+
+        s->hw_frames_ctx = ctx->hw_frames_ctx;
+
+        state->hwaccel.tmp_frame = av_frame_alloc();
+        if(!state->hwaccel.tmp_frame){
+                ret = -1;
+                goto fail_tmp_frame;
+        }
+        state->hwaccel.type = HWACCEL_VAAPI;
+        state->hwaccel.copy = true;
+        state->hwaccel.ctx = ctx;
+        state->hwaccel.uninit = vaapi_uninit;
+
+#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(57, 74, 100)
+        AVVAAPIFramesContext *avfc = ctx->frame_ctx->hwctx;
+        VAStatus status = vaCreateContext(ctx->device_vaapi_ctx->display,
+                        ctx->va_config, s->coded_width, s->coded_height,
+                        VA_PROGRESSIVE,
+                        avfc->surface_ids,
+                        avfc->nb_surfaces,
+                        &ctx->va_context);
+
+        if(status != VA_STATUS_SUCCESS){
+                log_msg(LOG_LEVEL_ERROR, "[lavd] Create config failed: %d (%s)\n", status, vaErrorStr(status));
+                ret = -1;
+                goto fail_create_ctx;
+        }
+
+        ctx->decoder_context.display = ctx->device_vaapi_ctx->display;
+        ctx->decoder_context.config_id = ctx->va_config;
+        ctx->decoder_context.context_id = ctx->va_context;
+        //state->hwaccel.tmp_frame->format = AV_PIX_FMT_YUV420P;
+
+        s->hwaccel_context = &ctx->decoder_context;
+#endif
+
+        av_buffer_unref(&ctx->device_ref);
+        return 0;
 
 
 fail_create_ctx:
-	av_frame_free(&state->hwaccel.tmp_frame);
-	state->hwaccel.tmp_frame = NULL;
+        av_frame_free(&state->hwaccel.tmp_frame);
+        state->hwaccel.tmp_frame = NULL;
 fail_tmp_frame:
-	av_buffer_unref(&ctx->hw_frames_ctx);
+        av_buffer_unref(&ctx->hw_frames_ctx);
 fail_hw_frames_ctx:
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(57, 74, 100)
-	vaDestroyConfig(ctx->device_vaapi_ctx->display, ctx->va_config);
+        vaDestroyConfig(ctx->device_vaapi_ctx->display, ctx->va_config);
 #endif
 fail_vaapi_ctx:
-	av_buffer_unref(&ctx->device_ref);
+        av_buffer_unref(&ctx->device_ref);
 fail_device:
-	free(ctx);
-	return ret;
+        free(ctx);
+        return ret;
 }
 #endif
 
 static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribute__((unused)), const enum AVPixelFormat *fmt)
 {
-	struct state_libavcodec_decompress *state = (struct state_libavcodec_decompress *) s->opaque;
+        struct state_libavcodec_decompress *state = (struct state_libavcodec_decompress *) s->opaque;
 
 #ifdef USE_HWDEC
-	hwaccel_state_reset(&state->hwaccel);
-	const char *param = get_commandline_param("force-hw-accel");
-	bool hwaccel = param != NULL;
+        hwaccel_state_reset(&state->hwaccel);
+        const char *param = get_commandline_param("force-hw-accel");
+        bool hwaccel = param != NULL;
 #endif
 
         if (log_level >= LOG_LEVEL_DEBUG) {
@@ -1430,22 +1430,22 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribu
                 }
                 log_msg(LOG_LEVEL_DEBUG, "%s\n", out);
         }
-	
+
         while (*fmt != AV_PIX_FMT_NONE) {
                 for (unsigned int i = 0; i < sizeof convert_funcs / sizeof convert_funcs[0]; ++i) {
 #ifdef USE_HWDEC
-					if (hwaccel && *fmt == AV_PIX_FMT_VDPAU){
-						int ret = vdpau_init(s);
-						if(ret < 0)
-							break;
-						return AV_PIX_FMT_VDPAU;
-					}
-					if (hwaccel && *fmt == AV_PIX_FMT_VAAPI){
-						int ret = vaapi_init(s);
-						if(ret < 0)
-							break;
-						return AV_PIX_FMT_VAAPI;
-					}
+                        if (hwaccel && *fmt == AV_PIX_FMT_VDPAU){
+                                int ret = vdpau_init(s);
+                                if(ret < 0)
+                                        break;
+                                return AV_PIX_FMT_VDPAU;
+                        }
+                        if (hwaccel && *fmt == AV_PIX_FMT_VAAPI){
+                                int ret = vaapi_init(s);
+                                if(ret < 0)
+                                        break;
+                                return AV_PIX_FMT_VAAPI;
+                        }
 #endif
 
                         if (convert_funcs[i].av_codec == *fmt) {
@@ -1508,14 +1508,14 @@ static void error_callback(void *ptr, int level, const char *fmt, va_list vl) {
 
 #ifdef USE_HWDEC
 static void transfer_frame(struct hw_accel_state *s, AVFrame *frame){
-	//s->tmp_frame->format = AV_PIX_FMT_YUV420P;
-	av_hwframe_transfer_data(s->tmp_frame, frame, 0);
+        //s->tmp_frame->format = AV_PIX_FMT_YUV420P;
+        av_hwframe_transfer_data(s->tmp_frame, frame, 0);
 
-	av_frame_copy_props(s->tmp_frame, frame);
+        av_frame_copy_props(s->tmp_frame, frame);
 
-	av_frame_unref(frame);
-	av_frame_move_ref(frame, s->tmp_frame);
-	//s->tmp_frame->format = AV_PIX_FMT_YUV420P;
+        av_frame_unref(frame);
+        av_frame_move_ref(frame, s->tmp_frame);
+        //s->tmp_frame->format = AV_PIX_FMT_YUV420P;
 }
 #endif
 
@@ -1528,7 +1528,7 @@ static int libavcodec_decompress(void *state, unsigned char *dst, unsigned char 
 
         s->pkt.size = src_len;
         s->pkt.data = src;
-        
+
         while (s->pkt.size > 0) {
                 struct timeval t0, t1;
                 gettimeofday(&t0, NULL);
@@ -1544,14 +1544,14 @@ static int libavcodec_decompress(void *state, unsigned char *dst, unsigned char 
                         }
                 }
                 if (ret != 0) {
-						printf("AVERROR_EOF: %d\n", AVERROR_EOF);
-						printf("AVERROR_EAGAIN: %d\n", AVERROR(EAGAIN));
-						printf("AVERROR_EINVAL: %d\n", AVERROR(EINVAL));
-						printf("AVERROR_ENOMEM: %d\n", AVERROR(ENOMEM));
+                        printf("AVERROR_EOF: %d\n", AVERROR_EOF);
+                        printf("AVERROR_EAGAIN: %d\n", AVERROR(EAGAIN));
+                        printf("AVERROR_EINVAL: %d\n", AVERROR(EINVAL));
+                        printf("AVERROR_ENOMEM: %d\n", AVERROR(ENOMEM));
                         print_decoder_error(MOD_NAME, ret);
-						//avcodec_send_packet(s->codec_ctx, NULL);
-						//while(avcodec_receive_frame(s->codec_ctx, s->frame) != AVERROR_EOF) {  }
-						//avcodec_flush_buffers(s->codec_ctx);
+                        //avcodec_send_packet(s->codec_ctx, NULL);
+                        //while(avcodec_receive_frame(s->codec_ctx, s->frame) != AVERROR_EOF) {  }
+                        //avcodec_flush_buffers(s->codec_ctx);
                 }
                 len = s->pkt.size;
 #endif
@@ -1594,9 +1594,9 @@ static int libavcodec_decompress(void *state, unsigned char *dst, unsigned char 
                                 res = FALSE;
                         } else {
 #ifdef USE_HWDEC
-							if(s->hwaccel.copy){
-								transfer_frame(&s->hwaccel, s->frame);
-							}
+                                if(s->hwaccel.copy){
+                                        transfer_frame(&s->hwaccel, s->frame);
+                                }
 #endif
                                 res = change_pixfmt(s->frame, dst, s->frame->format,
                                                 s->out_codec, s->width, s->height, s->pitch);
