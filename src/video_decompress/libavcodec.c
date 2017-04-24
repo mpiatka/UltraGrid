@@ -51,7 +51,7 @@
 #include "video.h"
 #include "video_decompress.h"
 
-#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(55, 22, 100)
+#ifdef USE_HWDEC
 #include <libavutil/hwcontext.h>
 #include <libavutil/hwcontext_vdpau.h>
 #include <libavutil/hwcontext_vaapi.h>
@@ -75,6 +75,7 @@ using std::min;
 
 struct state_libavcodec_decompress;
 
+#ifdef USE_HWDEC
 struct hw_accel_state {
 	enum {
 		HWACCEL_NONE,
@@ -89,6 +90,7 @@ struct hw_accel_state {
 
 	void *ctx; //Type depends on hwaccel type
 };
+#endif
 
 struct state_libavcodec_decompress {
         pthread_mutex_t *global_lavcd_lock;
@@ -110,7 +112,9 @@ struct state_libavcodec_decompress {
         unsigned int     broken_h264_mt_decoding_workaroud_warning_displayed;
         bool             broken_h264_mt_decoding_workaroud_active;
 
+#ifdef USE_HWDEC
 		struct hw_accel_state hwaccel;
+#endif
 };
 
 static int change_pixfmt(AVFrame *frame, unsigned char *dst, int av_codec,
@@ -120,6 +124,7 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s, const en
 
 static bool broken_h264_mt_decoding = false;
 
+#ifdef USE_HWDEC
 static void hwaccel_state_reset(struct hw_accel_state *hwaccel){
 	if(hwaccel->ctx){
 		hwaccel->uninit(hwaccel);
@@ -135,6 +140,7 @@ static void hwaccel_state_reset(struct hw_accel_state *hwaccel){
 
 	hwaccel->uninit = NULL;
 }
+#endif
 
 static void deconfigure(struct state_libavcodec_decompress *s)
 {
@@ -167,7 +173,9 @@ static void deconfigure(struct state_libavcodec_decompress *s)
         s->frame = NULL;
         av_packet_unref(&s->pkt);
 
+#ifdef USE_HWDEC
 		hwaccel_state_reset(&s->hwaccel);
+#endif
 }
 
 static void set_codec_context_params(struct state_libavcodec_decompress *s)
@@ -238,7 +246,7 @@ static const struct decoder_info decoders[] = {
 ADD_TO_PARAM(force_lavd_decoder, "force-lavd-decoder", "* force-lavd-decoder=<decoder>[:<decoder2>...]\n"
                 "  Forces specified Libavcodec decoder. If more need to be specified, use colon as a delimiter\n");
 
-#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(55, 22, 100)
+#ifdef USE_HWDEC
 ADD_TO_PARAM(force_hw_accel, "force-hw-accel", "* force-hw-accel\n"
 		"  Tries to use hardware acceleration. \n");
 #endif
@@ -378,7 +386,9 @@ static void * libavcodec_decompress_init(void)
 
         av_log_set_callback(error_callback);
 
+#ifdef USE_HWDEC
 		hwaccel_state_reset(&s->hwaccel);
+#endif
 
         return s;
 }
@@ -1074,7 +1084,7 @@ static const struct {
         {AV_PIX_FMT_RGB24, RGB, rgb24_to_rgb},
 };
 
-#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(55, 22, 100)
+#ifdef USE_HWDEC
 static int create_hw_device_ctx(enum AVHWDeviceType type, AVBufferRef **device_ref){
 	int ret;
 	ret = av_hwdevice_ctx_create(device_ref, type, NULL, NULL, 0);
@@ -1405,9 +1415,8 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribu
 {
 	struct state_libavcodec_decompress *state = (struct state_libavcodec_decompress *) s->opaque;
 
+#ifdef USE_HWDEC
 	hwaccel_state_reset(&state->hwaccel);
-
-#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(55, 22, 100)
 	const char *param = get_commandline_param("force-hw-accel");
 	bool hwaccel = param != NULL;
 #endif
@@ -1424,7 +1433,7 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribu
 	
         while (*fmt != AV_PIX_FMT_NONE) {
                 for (unsigned int i = 0; i < sizeof convert_funcs / sizeof convert_funcs[0]; ++i) {
-#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(55, 22, 100)
+#ifdef USE_HWDEC
 					if (hwaccel && *fmt == AV_PIX_FMT_VDPAU){
 						int ret = vdpau_init(s);
 						if(ret < 0)
@@ -1497,8 +1506,8 @@ static void error_callback(void *ptr, int level, const char *fmt, va_list vl) {
         av_log_default_callback(ptr, level, fmt, vl);
 }
 
+#ifdef USE_HWDEC
 static void transfer_frame(struct hw_accel_state *s, AVFrame *frame){
-#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(55, 22, 100)
 	//s->tmp_frame->format = AV_PIX_FMT_YUV420P;
 	av_hwframe_transfer_data(s->tmp_frame, frame, 0);
 
@@ -1507,8 +1516,8 @@ static void transfer_frame(struct hw_accel_state *s, AVFrame *frame){
 	av_frame_unref(frame);
 	av_frame_move_ref(frame, s->tmp_frame);
 	//s->tmp_frame->format = AV_PIX_FMT_YUV420P;
-#endif
 }
+#endif
 
 static int libavcodec_decompress(void *state, unsigned char *dst, unsigned char *src,
                 unsigned int src_len, int frame_seq)
@@ -1584,9 +1593,11 @@ static int libavcodec_decompress(void *state, unsigned char *dst, unsigned char 
                                                 s->last_frame_seq : -1, (unsigned) frame_seq);
                                 res = FALSE;
                         } else {
+#ifdef USE_HWDEC
 							if(s->hwaccel.copy){
 								transfer_frame(&s->hwaccel, s->frame);
 							}
+#endif
                                 res = change_pixfmt(s->frame, dst, s->frame->format,
                                                 s->out_codec, s->width, s->height, s->pitch);
                                 if(res == TRUE) {
