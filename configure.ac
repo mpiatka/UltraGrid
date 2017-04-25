@@ -2694,8 +2694,6 @@ fi
 lavc_hwdec=no
 
 define(lavc_hwdec_dep, libavutil >= 55.22.1 libva)
-LAVC_HWDEC_CFLAGS="-DUSE_HWDEC"
-LAVC_HWDEC_LIBS="-lva"
 
 AC_ARG_ENABLE(lavc-hw-decoding,
 [  --disable-lavc-hw-decoding   disable lavc-hw-decoding (default is auto)]
@@ -2704,12 +2702,12 @@ AC_ARG_ENABLE(lavc-hw-decoding,
     [lavc_hwdec_req=auto]
     )
 
-PKG_CHECK_MODULES([LAVC_HWDEC_DEP], [lavc_hwdec_dep], [FOUND_HWDEC_DEP=yes], [FOUND_HWDEC_DEP=no])
+PKG_CHECK_MODULES([LAVC_HWDEC], [lavc_hwdec_dep], [FOUND_HWDEC_DEP=yes], [FOUND_HWDEC_DEP=no])
 
 if test $lavc_hwdec_req != no -a $FOUND_HWDEC_DEP = yes
 then
-        CFLAGS="$CFLAGS ${LAVC_HWDEC_CFLAGS}"
-        CXXFLAGS="$CXXFLAGS ${LAVC_HWDEC_CFLAGS}"
+        CFLAGS="$CFLAGS -DUSE_HWDEC ${LAVC_HWDEC_CFLAGS}"
+        CXXFLAGS="$CXXFLAGS -DUSE_HWDEC ${LAVC_HWDEC_CFLAGS}"
 		LIBS="$LIBS ${LAVC_HWDEC_LIBS}"
         lavc_hwdec=yes
 fi
