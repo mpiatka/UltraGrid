@@ -1152,7 +1152,7 @@ static int vdpau_init(struct AVCodecContext *s){
                         DEFAULT_SURFACES,
                         &hw_frames_ctx);
         if(ret < 0)
-                goto fail_frame_ctx;
+                goto fail;
 
         s->hw_frames_ctx = hw_frames_ctx;
 
@@ -1161,7 +1161,7 @@ static int vdpau_init(struct AVCodecContext *s){
         state->hwaccel.tmp_frame = av_frame_alloc();
         if(!state->hwaccel.tmp_frame){
                 ret = -1;
-                goto fail_tmp_frame;
+                goto fail;
         }
 
 
@@ -1170,19 +1170,16 @@ static int vdpau_init(struct AVCodecContext *s){
                                 AV_HWACCEL_FLAG_IGNORE_LEVEL)){
                 log_msg(LOG_LEVEL_ERROR, "[lavd] Unable to bind vdpau context!\n");
                 ret = -1;
-                goto fail_bind;
+                goto fail;
         }
 
         av_buffer_unref(&device_ref);
         return 0;
 
 
-fail_bind:
+fail:
         av_frame_free(&state->hwaccel.tmp_frame);
-        state->hwaccel.tmp_frame = NULL;
-fail_tmp_frame:
         av_buffer_unref(&hw_frames_ctx);
-fail_frame_ctx:
         av_buffer_unref(&device_ref);
         return ret;
 }
