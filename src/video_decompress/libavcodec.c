@@ -1405,7 +1405,8 @@ fail:
         state->hwaccel.tmp_frame = NULL;
         av_buffer_unref(&ctx->hw_frames_ctx);
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(57, 74, 100)
-        vaDestroyConfig(ctx->device_vaapi_ctx->display, ctx->va_config);
+        if(ctx->device_vaapi_ctx)
+                vaDestroyConfig(ctx->device_vaapi_ctx->display, ctx->va_config);
 #endif
         av_buffer_unref(&ctx->device_ref);
         free(ctx);
