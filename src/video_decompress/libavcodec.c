@@ -123,20 +123,26 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s, const en
 static bool broken_h264_mt_decoding = false;
 
 #ifdef USE_HWDEC
+static void hwaccel_state_init(struct hw_accel_state *hwaccel){
+        hwaccel->type = HWACCEL_NONE;
+        hwaccel->copy = false;
+        hwaccel->uninit = NULL;
+        hwaccel->tmp_frame = NULL;
+        hwaccel->uninit = NULL;
+        hwaccel->ctx = NULL;
+}
+
 static void hwaccel_state_reset(struct hw_accel_state *hwaccel){
         if(hwaccel->ctx){
                 hwaccel->uninit(hwaccel);
         }
-
-        hwaccel->type = HWACCEL_NONE;
-        hwaccel->copy = false;
 
         if(hwaccel->tmp_frame){
                 av_frame_free(&hwaccel->tmp_frame);
                 hwaccel->tmp_frame = NULL;
         }
 
-        hwaccel->uninit = NULL;
+        hwaccel_state_init(hwaccel);
 }
 #endif
 
@@ -385,7 +391,7 @@ static void * libavcodec_decompress_init(void)
         av_log_set_callback(error_callback);
 
 #ifdef USE_HWDEC
-        hwaccel_state_reset(&s->hwaccel);
+        hwaccel_state_init(&s->hwaccel);
 #endif
 
         return s;
