@@ -1328,9 +1328,14 @@ static int vaapi_init(struct AVCodecContext *s){
         }
 
         ctx->device_ref = NULL;
+        ctx->hw_frames_ctx = NULL;
+        ctx->device_ctx = NULL;
+        ctx->device_vaapi_ctx = NULL;
+        ctx->frame_ctx = NULL;
+
         int ret = create_hw_device_ctx(AV_HWDEVICE_TYPE_VAAPI, &ctx->device_ref);
         if(ret < 0)
-                goto fail_device;
+                goto fail;
 
         ctx->device_ctx = (AVHWDeviceContext*)ctx->device_ref->data;
         ctx->device_vaapi_ctx = ctx->device_ctx->hwctx;
@@ -1338,10 +1343,8 @@ static int vaapi_init(struct AVCodecContext *s){
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(57, 74, 100)
         ret = vaapi_create_context(ctx, s);
         if(ret < 0)
-                goto fail_vaapi_ctx;
+                goto fail;
 #endif
-
-        ctx->hw_frames_ctx = NULL;
 
         int decode_surfaces = DEFAULT_SURFACES;
 
@@ -1355,7 +1358,7 @@ static int vaapi_init(struct AVCodecContext *s){
                         decode_surfaces,
                         &ctx->hw_frames_ctx);
         if(ret < 0)
-                goto fail_hw_frames_ctx;
+                goto fail;
 
         ctx->frame_ctx = (AVHWFramesContext *) (ctx->hw_frames_ctx->data);
 
@@ -1364,7 +1367,7 @@ static int vaapi_init(struct AVCodecContext *s){
         state->hwaccel.tmp_frame = av_frame_alloc();
         if(!state->hwaccel.tmp_frame){
                 ret = -1;
-                goto fail_tmp_frame;
+                goto fail;
         }
         state->hwaccel.type = HWACCEL_VAAPI;
         state->hwaccel.copy = true;
@@ -1383,7 +1386,7 @@ static int vaapi_init(struct AVCodecContext *s){
         if(status != VA_STATUS_SUCCESS){
                 log_msg(LOG_LEVEL_ERROR, "[lavd] Create config failed: %d (%s)\n", status, vaErrorStr(status));
                 ret = -1;
-                goto fail_create_ctx;
+                goto fail;
         }
 
         ctx->decoder_context.display = ctx->device_vaapi_ctx->display;
@@ -1397,18 +1400,14 @@ static int vaapi_init(struct AVCodecContext *s){
         return 0;
 
 
-fail_create_ctx:
+fail:
         av_frame_free(&state->hwaccel.tmp_frame);
         state->hwaccel.tmp_frame = NULL;
-fail_tmp_frame:
         av_buffer_unref(&ctx->hw_frames_ctx);
-fail_hw_frames_ctx:
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(57, 74, 100)
         vaDestroyConfig(ctx->device_vaapi_ctx->display, ctx->va_config);
 #endif
-fail_vaapi_ctx:
         av_buffer_unref(&ctx->device_ref);
-fail_device:
         free(ctx);
         return ret;
 }
