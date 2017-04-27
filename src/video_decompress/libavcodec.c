@@ -1427,23 +1427,30 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribu
                 log_msg(LOG_LEVEL_DEBUG, "%s\n", out);
         }
 
-        while (*fmt != AV_PIX_FMT_NONE) {
-                for (unsigned int i = 0; i < sizeof convert_funcs / sizeof convert_funcs[0]; ++i) {
 #ifdef USE_HWDEC
-                        if (hwaccel && *fmt == AV_PIX_FMT_VDPAU){
+        if(hwaccel){
+                for(enum AVPixelFormat *it = fmt; it != AV_PIX_FMT_NONE; it++){
+                        if (*fmt == AV_PIX_FMT_VDPAU){
                                 int ret = vdpau_init(s);
                                 if(ret < 0)
                                         break;
                                 return AV_PIX_FMT_VDPAU;
                         }
-                        if (hwaccel && *fmt == AV_PIX_FMT_VAAPI){
+                        if (*fmt == AV_PIX_FMT_VAAPI){
                                 int ret = vaapi_init(s);
                                 if(ret < 0)
                                         break;
                                 return AV_PIX_FMT_VAAPI;
                         }
+                }
+
+                log_msg(LOG_LEVEL_WARNING, "[lavd] Falling back to software decoding!\n");
+        }
+
 #endif
 
+        while (*fmt != AV_PIX_FMT_NONE) {
+                for (unsigned int i = 0; i < sizeof convert_funcs / sizeof convert_funcs[0]; ++i) {
                         if (convert_funcs[i].av_codec == *fmt) {
                                 return *fmt;
                         }
