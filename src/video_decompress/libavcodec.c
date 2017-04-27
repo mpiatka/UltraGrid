@@ -1294,6 +1294,7 @@ static int vaapi_create_context(struct vaapi_ctx *ctx,
         AVHWFramesConstraints *constraints = av_hwdevice_get_hwframe_constraints(ctx->device_ref, hwconfig);
         if (!constraints){
                 log_msg(LOG_LEVEL_WARNING, "[lavd] Failed to get constraints. Will try to continue anyways...\n");
+                av_freep(&hwconfig);
                 return 0;
         }
 
@@ -1305,11 +1306,13 @@ static int vaapi_create_context(struct vaapi_ctx *ctx,
                 log_msg(LOG_LEVEL_WARNING, "[lavd] VAAPI hw does not support the resolution %dx%d\n",
                                 codec_ctx->coded_width,
                                 codec_ctx->coded_height);
+                av_hwframe_constraints_free(&constraints);
+                av_freep(&hwconfig);
+                return -1;
         }
 
-		av_hwframe_constraints_free(&constraints);
-		av_freep(&hwconfig);
-
+        av_hwframe_constraints_free(&constraints);
+        av_freep(&hwconfig);
 
         return 0;
 }
