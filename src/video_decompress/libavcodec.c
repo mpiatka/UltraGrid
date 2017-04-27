@@ -1411,12 +1411,6 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribu
 {
         struct state_libavcodec_decompress *state = (struct state_libavcodec_decompress *) s->opaque;
 
-#ifdef USE_HWDEC
-        hwaccel_state_reset(&state->hwaccel);
-        const char *param = get_commandline_param("force-hw-accel");
-        bool hwaccel = param != NULL;
-#endif
-
         if (log_level >= LOG_LEVEL_DEBUG) {
                 char out[1024] = "[lavd] Available output pixel formats:";
                 const enum AVPixelFormat *it = fmt;
@@ -1427,7 +1421,12 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribu
                 log_msg(LOG_LEVEL_DEBUG, "%s\n", out);
         }
 
+
 #ifdef USE_HWDEC
+        hwaccel_state_reset(&state->hwaccel);
+        const char *param = get_commandline_param("force-hw-accel");
+        bool hwaccel = param != NULL;
+
         if(hwaccel){
                 for(const enum AVPixelFormat *it = fmt; *it != AV_PIX_FMT_NONE; it++){
                         if (*it == AV_PIX_FMT_VDPAU){
