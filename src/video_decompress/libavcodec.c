@@ -139,7 +139,6 @@ static void hwaccel_state_reset(struct hw_accel_state *hwaccel){
 
         if(hwaccel->tmp_frame){
                 av_frame_free(&hwaccel->tmp_frame);
-                hwaccel->tmp_frame = NULL;
         }
 
         hwaccel_state_init(hwaccel);
@@ -1268,16 +1267,15 @@ static int vaapi_create_context(struct vaapi_ctx *ctx,
                         match = 1;
         }
 
+        av_freep(&list);
+
         if(!match){
                 log_msg(LOG_LEVEL_ERROR, "[lavd] Profile not supported \n");
-                av_free(list);
                 return -1;
         }
 
         ctx->va_profile = profile;
         ctx->va_entrypoint = VAEntrypointVLD;
-
-        av_freep(&list);
 
         status = vaCreateConfig(ctx->device_vaapi_ctx->display, ctx->va_profile,
                         ctx->va_entrypoint, 0, 0, &ctx->va_config);
@@ -1285,7 +1283,6 @@ static int vaapi_create_context(struct vaapi_ctx *ctx,
                 log_msg(LOG_LEVEL_ERROR, "[lavd] Create config failed: %d (%s)\n", status, vaErrorStr(status));
                 return -1;
         }
-
 
         AVVAAPIHWConfig *hwconfig = av_hwdevice_hwconfig_alloc(ctx->device_ref);
         if(!hwconfig){
@@ -1310,6 +1307,9 @@ static int vaapi_create_context(struct vaapi_ctx *ctx,
                                 codec_ctx->coded_height);
         }
 
+		av_hwframe_constraints_free(&constraints);
+		av_freep(&hwconfig);
+
 
         return 0;
 }
@@ -1319,16 +1319,10 @@ static int vaapi_init(struct AVCodecContext *s){
 
         struct state_libavcodec_decompress *state = s->opaque;
 
-        struct vaapi_ctx *ctx = malloc(sizeof(struct vaapi_ctx));
+        struct vaapi_ctx *ctx = calloc(1, sizeof(struct vaapi_ctx));
         if(!ctx){
                 return -1;
         }
-
-        ctx->device_ref = NULL;
-        ctx->hw_frames_ctx = NULL;
-        ctx->device_ctx = NULL;
-        ctx->device_vaapi_ctx = NULL;
-        ctx->frame_ctx = NULL;
 
         int ret = create_hw_device_ctx(AV_HWDEVICE_TYPE_VAAPI, &ctx->device_ref);
         if(ret < 0)
@@ -1399,7 +1393,6 @@ static int vaapi_init(struct AVCodecContext *s){
 
 fail:
         av_frame_free(&state->hwaccel.tmp_frame);
-        state->hwaccel.tmp_frame = NULL;
         av_buffer_unref(&ctx->hw_frames_ctx);
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(57, 74, 100)
         if(ctx->device_vaapi_ctx)
