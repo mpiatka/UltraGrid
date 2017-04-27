@@ -1429,17 +1429,21 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribu
 
 #ifdef USE_HWDEC
         if(hwaccel){
-                for(enum AVPixelFormat *it = fmt; it != AV_PIX_FMT_NONE; it++){
-                        if (*fmt == AV_PIX_FMT_VDPAU){
+                for(const enum AVPixelFormat *it = fmt; *it != AV_PIX_FMT_NONE; it++){
+                        if (*it == AV_PIX_FMT_VDPAU){
                                 int ret = vdpau_init(s);
-                                if(ret < 0)
-                                        break;
+                                if(ret < 0){
+                                        hwaccel_state_reset(&state->hwaccel);
+                                        continue;
+                                }
                                 return AV_PIX_FMT_VDPAU;
                         }
-                        if (*fmt == AV_PIX_FMT_VAAPI){
+                        if (*it == AV_PIX_FMT_VAAPI){
                                 int ret = vaapi_init(s);
-                                if(ret < 0)
-                                        break;
+                                if(ret < 0){
+                                        hwaccel_state_reset(&state->hwaccel);
+                                        continue;
+                                }
                                 return AV_PIX_FMT_VAAPI;
                         }
                 }
