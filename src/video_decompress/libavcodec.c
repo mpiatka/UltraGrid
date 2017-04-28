@@ -1163,7 +1163,6 @@ static int vdpau_init(struct AVCodecContext *s){
                 goto fail;
         }
 
-
         if(av_vdpau_bind_context(s, device_vdpau_ctx->device, device_vdpau_ctx->get_proc_address,
                                 AV_HWACCEL_FLAG_ALLOW_HIGH_DEPTH |
                                 AV_HWACCEL_FLAG_IGNORE_LEVEL)){
@@ -1174,7 +1173,6 @@ static int vdpau_init(struct AVCodecContext *s){
 
         av_buffer_unref(&device_ref);
         return 0;
-
 
 fail:
         av_frame_free(&state->hwaccel.tmp_frame);
@@ -1299,8 +1297,8 @@ static int vaapi_create_context(struct vaapi_ctx *ctx,
         }
 
         if (codec_ctx->coded_width  < constraints->min_width  ||
-                        codec_ctx->coded_height < constraints->min_height ||
                         codec_ctx->coded_width  > constraints->max_width  ||
+                        codec_ctx->coded_height < constraints->min_height ||
                         codec_ctx->coded_height > constraints->max_height)
         {
                 log_msg(LOG_LEVEL_WARNING, "[lavd] VAAPI hw does not support the resolution %dx%d\n",
@@ -1514,14 +1512,12 @@ static void error_callback(void *ptr, int level, const char *fmt, va_list vl) {
 
 #ifdef USE_HWDEC
 static void transfer_frame(struct hw_accel_state *s, AVFrame *frame){
-        //s->tmp_frame->format = AV_PIX_FMT_YUV420P;
         av_hwframe_transfer_data(s->tmp_frame, frame, 0);
 
         av_frame_copy_props(s->tmp_frame, frame);
 
         av_frame_unref(frame);
         av_frame_move_ref(frame, s->tmp_frame);
-        //s->tmp_frame->format = AV_PIX_FMT_YUV420P;
 }
 #endif
 
