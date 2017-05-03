@@ -250,7 +250,7 @@ ADD_TO_PARAM(force_lavd_decoder, "force-lavd-decoder", "* force-lavd-decoder=<de
                 "  Forces specified Libavcodec decoder. If more need to be specified, use colon as a delimiter\n");
 
 #ifdef USE_HWDEC
-ADD_TO_PARAM(force_hw_accel, "force-hw-accel", "* force-hw-accel\n"
+ADD_TO_PARAM(force_hw_accel, "use-hw-accel", "* use-hw-accel\n"
                 "  Tries to use hardware acceleration. \n");
 #endif
 static bool configure_with(struct state_libavcodec_decompress *s,
@@ -1422,7 +1422,7 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribu
 
 #ifdef USE_HWDEC
         hwaccel_state_reset(&state->hwaccel);
-        const char *param = get_commandline_param("force-hw-accel");
+        const char *param = get_commandline_param("use-hw-accel");
         bool hwaccel = param != NULL;
 
         if(hwaccel){
