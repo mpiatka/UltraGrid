@@ -109,8 +109,6 @@ extern bool color_nix_term;
 #define MODE_SENDER   (1<<0)
 #define MODE_RECEIVER (1<<1)
 
-// if not NULL, data should be exported
-extern char *export_dir;
 extern char *sage_network_device;
 
 // Both of following varables are non-negative. It indicates amount of milliseconds that
@@ -134,6 +132,7 @@ bool common_preinit(int argc, char *argv[]);
 void print_capabilities(struct module *root, bool use_vidcap);
 
 void print_version(void);
+void print_configuration(void);
 
 const char *get_commandline_param(const char *key);
 

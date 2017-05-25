@@ -229,7 +229,7 @@ vidcap_import_probe(bool verbose)
 
 static bool init_audio(struct vidcap_import_state *s, char *audio_filename)
 {
-        FILE *audio_file = fopen(audio_filename, "r");
+        FILE *audio_file = fopen(audio_filename, "rb");
         if(!audio_file) {
                 perror("Cannot open audio file");
                 return false;
@@ -992,7 +992,7 @@ static void *video_reader_callback(void *arg)
                 }
                 if (fstat(fd, &sb)) {
                         perror("fstat");
-                        CLOSESOCKET(fd);
+                        close(fd);
                         free_entry(data->entry);
                         return NULL;
                 }
@@ -1016,13 +1016,13 @@ static void *video_reader_callback(void *arg)
                                         aligned_free(data->entry->tiles[i].data);
                                 }
                                 free(data->entry);
-                                CLOSESOCKET(fd);
+                                close(fd);
                                 return NULL;
                         }
                         bytes += res;
                 } while (bytes < data->entry->tiles[i].data_len);
 
-                CLOSESOCKET(fd);
+                close(fd);
         }
 
         return data;
