@@ -1181,7 +1181,7 @@ static void v210_to_yuv444p10le(AVFrame *out_frame, unsigned char *in_data, int 
 static pixfmt_callback_t select_pixfmt_callback(AVPixelFormat fmt, codec_t src) {
         if(fmt == AV_PIX_FMT_VAAPI){
                 //We need nv12 frames to transfer to gpu
-                fmt == AV_PIX_FMT_NV12;
+                fmt = AV_PIX_FMT_NV12;
         }
 
         if (src == v210) {
