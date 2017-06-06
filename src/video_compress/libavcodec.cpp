@@ -64,11 +64,14 @@
 #include <thread>
 #include <unordered_map>
 
+extern "C"
+{
 #include <libavutil/hwcontext.h>
 #include <libavutil/hwcontext_vdpau.h>
 #include <libavutil/hwcontext_vaapi.h>
 #include <libavcodec/vdpau.h>
 #include <libavcodec/vaapi.h>
+}
 
 #define DEFAULT_SURFACES 20
 
@@ -863,6 +866,10 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
 		break;
 	}
 
+		if (pix_fmt == AV_PIX_FMT_VAAPI){
+			vaapi_init(s->codec_ctx);
+		}
+
         if (pix_fmt == AV_PIX_FMT_NONE) {
                 log_msg(LOG_LEVEL_WARNING, "[lavc] Unable to find suitable pixel format.\n");
                 if (s->requested_subsampling != 0) {
@@ -961,7 +968,6 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
         s->out_codec = s->compressed_desc.color_spec;
 
         return true;
-		vaapi_init(s->codec_ctx);
 }
 
 static void to_yuv420p(AVFrame *out_frame, unsigned char *in_data, int width, int height)
@@ -1173,6 +1179,11 @@ static void v210_to_yuv444p10le(AVFrame *out_frame, unsigned char *in_data, int 
 }
 
 static pixfmt_callback_t select_pixfmt_callback(AVPixelFormat fmt, codec_t src) {
+        if(fmt == AV_PIX_FMT_VAAPI){
+                //We need nv12 frames to transfer to gpu
+                fmt == AV_PIX_FMT_NV12;
+        }
+
         if (src == v210) {
                 if (fmt == AV_PIX_FMT_YUV420P10LE) {
                         return v210_to_yuv420p10le;
