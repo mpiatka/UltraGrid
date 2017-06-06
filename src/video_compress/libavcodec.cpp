@@ -504,8 +504,8 @@ static int create_hw_frame_ctx(AVBufferRef *device_ref,
 
         AVHWFramesContext *frames_ctx = (AVHWFramesContext *) (*ctx)->data;
         frames_ctx->format    = format;
-        frames_ctx->width     = s->coded_width;
-        frames_ctx->height    = s->coded_height;
+        frames_ctx->width     = s->width;
+        frames_ctx->height    = s->height;
         frames_ctx->sw_format = sw_format;
         frames_ctx->initial_pool_size = decode_surfaces;
 
