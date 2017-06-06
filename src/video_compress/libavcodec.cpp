@@ -854,6 +854,9 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
 
                 log_msg(LOG_LEVEL_VERBOSE, "[lavc] Trying pixfmt: %s\n", av_get_pix_fmt_name(pix_fmt));
                 pthread_mutex_lock(s->lavcd_global_lock);
+		if (pix_fmt == AV_PIX_FMT_VAAPI){
+			vaapi_init(s->codec_ctx);
+		}
                 /* open it */
                 if (avcodec_open2(s->codec_ctx, codec, NULL) < 0) {
                         avcodec_free_context(&s->codec_ctx);
@@ -862,13 +865,10 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
                         pthread_mutex_unlock(s->lavcd_global_lock);
                         continue;
                 }
+
                 pthread_mutex_unlock(s->lavcd_global_lock);
 		break;
 	}
-
-		if (pix_fmt == AV_PIX_FMT_VAAPI){
-			vaapi_init(s->codec_ctx);
-		}
 
         if (pix_fmt == AV_PIX_FMT_NONE) {
                 log_msg(LOG_LEVEL_WARNING, "[lavc] Unable to find suitable pixel format.\n");
