@@ -208,6 +208,9 @@ struct state_video_compress_libav {
         int                 requested_gop;
 
         map<string, string> lavc_opts; ///< user-supplied options from command-line
+
+		bool hwenc;
+		AVFrame *hwframe;
 };
 
 static void to_yuv420p(AVFrame *out_frame, unsigned char *in_data, int width, int height);
@@ -455,6 +458,9 @@ struct module * libavcodec_compress_init(struct module *parent, const char *opts
         s->module_data.priv_data = s;
         s->module_data.deleter = libavcodec_compress_done;
         module_register(&s->module_data, parent);
+
+		s->hwenc = false;
+		s->hwframe = NULL;
 
         return &s->module_data;
 }
@@ -856,6 +862,9 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
                 pthread_mutex_lock(s->lavcd_global_lock);
 		if (pix_fmt == AV_PIX_FMT_VAAPI){
 			vaapi_init(s->codec_ctx);
+			s->hwenc = true;
+			s->hwframe = av_frame_alloc();
+			pix_fmt = AV_PIX_FMT_NV12;
 		}
                 /* open it */
                 if (avcodec_open2(s->codec_ctx, codec, NULL) < 0) {
@@ -932,12 +941,6 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
         s->in_frame->width = s->codec_ctx->width;
         s->in_frame->height = s->codec_ctx->height;
 #endif
-
-		AVPixelFormat fmt = s->codec_ctx->pix_fmt;
-
-		if(s->codec_ctx == AV_PIX_FMT_VAAPI){
-			fmt = AV_PIX_FMT_NV12;
-		}
 
         /* the image can be allocated by any means and av_image_alloc() is
          * just the most convenient way if av_malloc() is to be used */
