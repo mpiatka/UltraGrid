@@ -864,6 +864,8 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
 			vaapi_init(s->codec_ctx);
 			s->hwenc = true;
 			s->hwframe = av_frame_alloc();
+			av_hwframe_get_buffer(s->codec_ctx->hw_frames_ctx, s->hwframe, 0);
+			//s->hwframe->hw_frames_ctx = s->codec_ctx->hw_frames_ctx;
 			pix_fmt = AV_PIX_FMT_NV12;
 		}
                 /* open it */
@@ -942,11 +944,16 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
         s->in_frame->height = s->codec_ctx->height;
 #endif
 
+	AVPixelFormat fmt = s->codec_ctx->pix_fmt;
+
+	if(s->codec_ctx->pix_fmt == AV_PIX_FMT_VAAPI){
+		fmt = AV_PIX_FMT_NV12;
+	}
         /* the image can be allocated by any means and av_image_alloc() is
          * just the most convenient way if av_malloc() is to be used */
         ret = av_image_alloc(s->in_frame->data, s->in_frame->linesize,
                         s->codec_ctx->width, s->codec_ctx->height,
-                        s->codec_ctx->pix_fmt, 32);
+                        fmt, 32);
         if (ret < 0) {
                 log_msg(LOG_LEVEL_ERROR, "Could not allocate raw picture buffer\n");
                 return false;
@@ -1326,10 +1333,12 @@ static shared_ptr<video_frame> libavcodec_compress_tile(struct module *mod, shar
                 }
         }
 
+	av_hwframe_transfer_data(s->hwframe, s->in_frame, NULL);
+
         /* encode the image */
 #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(57, 37, 100)
         out->tiles[0].data_len = 0;
-        ret = avcodec_send_frame(s->codec_ctx, s->in_frame);
+        ret = avcodec_send_frame(s->codec_ctx, s->hwframe);
         if (ret == 0) {
                 AVPacket pkt;
                 av_init_packet(&pkt);
@@ -1351,7 +1360,7 @@ static shared_ptr<video_frame> libavcodec_compress_tile(struct module *mod, shar
         }
 #elif LIBAVCODEC_VERSION_MAJOR >= 54
         ret = avcodec_encode_video2(s->codec_ctx, pkt,
-                        s->in_frame, &got_output);
+                        s->hwframe, &got_output);
         if (ret < 0) {
                 log_msg(LOG_LEVEL_INFO, "Error encoding frame\n");
                 return {};
