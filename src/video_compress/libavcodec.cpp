@@ -933,6 +933,12 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
         s->in_frame->height = s->codec_ctx->height;
 #endif
 
+		AVPixelFormat fmt = s->codec_ctx->pix_fmt;
+
+		if(s->codec_ctx == AV_PIX_FMT_VAAPI){
+			fmt = AV_PIX_FMT_NV12;
+		}
+
         /* the image can be allocated by any means and av_image_alloc() is
          * just the most convenient way if av_malloc() is to be used */
         ret = av_image_alloc(s->in_frame->data, s->in_frame->linesize,
