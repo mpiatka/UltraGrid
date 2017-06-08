@@ -512,7 +512,7 @@ static int create_hw_frame_ctx(AVBufferRef *device_ref,
         frames_ctx->format    = format;
         frames_ctx->width     = s->width;
         frames_ctx->height    = s->height;
-        frames_ctx->sw_format = sw_format;
+        frames_ctx->sw_format = AV_PIX_FMT_NV12; //TODO
         frames_ctx->initial_pool_size = decode_surfaces;
 
         int ret = av_hwframe_ctx_init(*ctx);
@@ -939,7 +939,7 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
                 return false;
         }
 #if LIBAVCODEC_VERSION_MAJOR >= 53
-        s->in_frame->format = s->codec_ctx->pix_fmt;
+        s->in_frame->format = (s->hwenc) ? AV_PIX_FMT_NV12 : s->codec_ctx->pix_fmt;
         s->in_frame->width = s->codec_ctx->width;
         s->in_frame->height = s->codec_ctx->height;
 #endif
@@ -1333,7 +1333,11 @@ static shared_ptr<video_frame> libavcodec_compress_tile(struct module *mod, shar
                 }
         }
 
-	av_hwframe_transfer_data(s->hwframe, s->in_frame, NULL);
+	if(s->hwenc){
+		av_hwframe_transfer_data(s->hwframe, s->in_frame, NULL);
+	}
+
+	//TODO
 
         /* encode the image */
 #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(57, 37, 100)
