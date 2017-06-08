@@ -512,7 +512,7 @@ static int create_hw_frame_ctx(AVBufferRef *device_ref,
         frames_ctx->format    = format;
         frames_ctx->width     = s->width;
         frames_ctx->height    = s->height;
-        frames_ctx->sw_format = AV_PIX_FMT_NV12; //TODO
+        frames_ctx->sw_format = sw_format;
         frames_ctx->initial_pool_size = decode_surfaces;
 
         int ret = av_hwframe_ctx_init(*ctx);
@@ -549,7 +549,7 @@ static int vaapi_init(struct AVCodecContext *s){
         ret = create_hw_frame_ctx(ctx->device_ref,
                         s,
                         AV_PIX_FMT_VAAPI,
-                        s->sw_pix_fmt,
+                        AV_PIX_FMT_NV12,
                         decode_surfaces,
                         &ctx->hw_frames_ctx);
         if(ret < 0)
@@ -1333,16 +1333,16 @@ static shared_ptr<video_frame> libavcodec_compress_tile(struct module *mod, shar
                 }
         }
 
+	AVFrame *frame = s->in_frame;
 	if(s->hwenc){
-		av_hwframe_transfer_data(s->hwframe, s->in_frame, NULL);
+		av_hwframe_transfer_data(s->hwframe, s->in_frame, 0);
+		frame = s->hwframe;
 	}
-
-	//TODO
 
         /* encode the image */
 #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(57, 37, 100)
         out->tiles[0].data_len = 0;
-        ret = avcodec_send_frame(s->codec_ctx, s->hwframe);
+        ret = avcodec_send_frame(s->codec_ctx, frame);
         if (ret == 0) {
                 AVPacket pkt;
                 av_init_packet(&pkt);
@@ -1364,7 +1364,7 @@ static shared_ptr<video_frame> libavcodec_compress_tile(struct module *mod, shar
         }
 #elif LIBAVCODEC_VERSION_MAJOR >= 54
         ret = avcodec_encode_video2(s->codec_ctx, pkt,
-                        s->hwframe, &got_output);
+                        frame, &got_output);
         if (ret < 0) {
                 log_msg(LOG_LEVEL_INFO, "Error encoding frame\n");
                 return {};
@@ -1380,7 +1380,7 @@ static shared_ptr<video_frame> libavcodec_compress_tile(struct module *mod, shar
 #else
         ret = avcodec_encode_video(s->codec_ctx, (uint8_t *) out->tiles[0].data,
                         out->tiles[0].width * out->tiles[0].height * 4,
-                        s->in_frame);
+                        frame);
         if (ret < 0) {
                 log_msg(LOG_LEVEL_INFO, "Error encoding frame\n");
                 return {};
