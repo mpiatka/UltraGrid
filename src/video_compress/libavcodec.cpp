@@ -528,45 +528,42 @@ static int create_hw_frame_ctx(AVBufferRef *device_ref,
 
 static int vaapi_init(struct AVCodecContext *s){
 
-        struct vaapi_ctx *ctx = (struct vaapi_ctx *) calloc(1, sizeof(struct vaapi_ctx));
-        if(!ctx){
-                return -1;
-        }
-
         int decode_surfaces = DEFAULT_SURFACES;
 
-        int ret = create_hw_device_ctx(AV_HWDEVICE_TYPE_VAAPI, &ctx->device_ref);
+	AVBufferRef *device_ref;
+        AVBufferRef *hw_frames_ctx;
+        int ret = create_hw_device_ctx(AV_HWDEVICE_TYPE_VAAPI, &device_ref);
         if(ret < 0)
                 goto fail;
 
-        ctx->device_ctx = (AVHWDeviceContext*)ctx->device_ref->data;
-        ctx->device_vaapi_ctx = (AVVAAPIDeviceContext *) ctx->device_ctx->hwctx;
+        //AVHWDeviceContext *device_ctx = (AVHWDeviceContext*) device_ref->data;
+        //AVVAAPIDeviceContext *device_vaapi_ctx = (AVVAAPIDeviceContext *) device_ctx->hwctx;
 
 
         if (s->active_thread_type & FF_THREAD_FRAME)
                 decode_surfaces += s->thread_count;
 
-        ret = create_hw_frame_ctx(ctx->device_ref,
+
+        ret = create_hw_frame_ctx(device_ref,
                         s,
                         AV_PIX_FMT_VAAPI,
                         AV_PIX_FMT_NV12,
                         decode_surfaces,
-                        &ctx->hw_frames_ctx);
+                        &hw_frames_ctx);
         if(ret < 0)
                 goto fail;
 
-        ctx->frame_ctx = (AVHWFramesContext *) (ctx->hw_frames_ctx->data);
+        //AVHWFramesContext *frame_ctx = (AVHWFramesContext *) (hw_frames_ctx->data);
 
-        s->hw_frames_ctx = ctx->hw_frames_ctx;
+        s->hw_frames_ctx = hw_frames_ctx;
 
-        av_buffer_unref(&ctx->device_ref);
+        av_buffer_unref(&device_ref);
         return 0;
 
 
 fail:
-        av_buffer_unref(&ctx->hw_frames_ctx);
-        av_buffer_unref(&ctx->device_ref);
-        free(ctx);
+        av_buffer_unref(&hw_frames_ctx);
+        av_buffer_unref(&device_ref);
         return ret;
 }
 
