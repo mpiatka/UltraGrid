@@ -73,8 +73,6 @@ extern "C"
 #include <libavcodec/vaapi.h>
 }
 
-#define DEFAULT_SURFACES 20
-
 using namespace std;
 
 static constexpr const codec_t DEFAULT_CODEC = MJPG;
@@ -465,24 +463,6 @@ struct module * libavcodec_compress_init(struct module *parent, const char *opts
         return &s->module_data;
 }
 
-struct vaapi_ctx{
-        AVBufferRef *device_ref;
-        AVHWDeviceContext *device_ctx;
-        AVVAAPIDeviceContext *device_vaapi_ctx;
-
-        AVBufferRef *hw_frames_ctx;
-        AVHWFramesContext *frame_ctx;
-
-#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(57, 74, 100)
-        VAProfile va_profile;
-        VAEntrypoint va_entrypoint;
-        VAConfigID va_config;
-        VAContextID va_context;
-
-        struct vaapi_context decoder_context;
-#endif
-};
-
 static int create_hw_device_ctx(enum AVHWDeviceType type, AVBufferRef **device_ref){
         int ret;
         ret = av_hwdevice_ctx_create(device_ref, type, NULL, NULL, 0);
@@ -499,7 +479,7 @@ static int create_hw_frame_ctx(AVBufferRef *device_ref,
                 AVCodecContext *s,
                 enum AVPixelFormat format,
                 enum AVPixelFormat sw_format,
-                int decode_surfaces,
+                int pool_size,
                 AVBufferRef **ctx)
 {
         *ctx = av_hwframe_ctx_alloc(device_ref);
@@ -513,7 +493,7 @@ static int create_hw_frame_ctx(AVBufferRef *device_ref,
         frames_ctx->width     = s->width;
         frames_ctx->height    = s->height;
         frames_ctx->sw_format = sw_format;
-        frames_ctx->initial_pool_size = decode_surfaces;
+        frames_ctx->initial_pool_size = pool_size;
 
         int ret = av_hwframe_ctx_init(*ctx);
         if (ret < 0) {
@@ -528,7 +508,7 @@ static int create_hw_frame_ctx(AVBufferRef *device_ref,
 
 static int vaapi_init(struct AVCodecContext *s){
 
-        int decode_surfaces = DEFAULT_SURFACES;
+        int pool_size = 20; //Default in ffmpeg examples
 
 	AVBufferRef *device_ref;
         AVBufferRef *hw_frames_ctx;
@@ -536,24 +516,17 @@ static int vaapi_init(struct AVCodecContext *s){
         if(ret < 0)
                 goto fail;
 
-        //AVHWDeviceContext *device_ctx = (AVHWDeviceContext*) device_ref->data;
-        //AVVAAPIDeviceContext *device_vaapi_ctx = (AVVAAPIDeviceContext *) device_ctx->hwctx;
-
-
         if (s->active_thread_type & FF_THREAD_FRAME)
-                decode_surfaces += s->thread_count;
-
+                pool_size += s->thread_count;
 
         ret = create_hw_frame_ctx(device_ref,
                         s,
                         AV_PIX_FMT_VAAPI,
                         AV_PIX_FMT_NV12,
-                        decode_surfaces,
+                        pool_size,
                         &hw_frames_ctx);
         if(ret < 0)
                 goto fail;
-
-        //AVHWFramesContext *frame_ctx = (AVHWFramesContext *) (hw_frames_ctx->data);
 
         s->hw_frames_ctx = hw_frames_ctx;
 
