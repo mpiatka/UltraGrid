@@ -64,6 +64,7 @@
 #include <thread>
 #include <unordered_map>
 
+#ifdef USE_HWACC
 extern "C"
 {
 #include <libavutil/hwcontext.h>
@@ -72,6 +73,7 @@ extern "C"
 #include <libavcodec/vdpau.h>
 #include <libavcodec/vaapi.h>
 }
+#endif
 
 using namespace std;
 
@@ -207,8 +209,8 @@ struct state_video_compress_libav {
 
         map<string, string> lavc_opts; ///< user-supplied options from command-line
 
-		bool hwenc;
-		AVFrame *hwframe;
+        bool hwenc;
+        AVFrame *hwframe;
 };
 
 static void to_yuv420p(AVFrame *out_frame, unsigned char *in_data, int width, int height);
@@ -457,12 +459,13 @@ struct module * libavcodec_compress_init(struct module *parent, const char *opts
         s->module_data.deleter = libavcodec_compress_done;
         module_register(&s->module_data, parent);
 
-		s->hwenc = false;
-		s->hwframe = NULL;
+        s->hwenc = false;
+        s->hwframe = NULL;
 
         return &s->module_data;
 }
 
+#ifdef USE_HWACC
 static int create_hw_device_ctx(enum AVHWDeviceType type, AVBufferRef **device_ref){
         int ret;
         ret = av_hwdevice_ctx_create(device_ref, type, NULL, NULL, 0);
@@ -510,7 +513,7 @@ static int vaapi_init(struct AVCodecContext *s){
 
         int pool_size = 20; //Default in ffmpeg examples
 
-	AVBufferRef *device_ref;
+        AVBufferRef *device_ref;
         AVBufferRef *hw_frames_ctx;
         int ret = create_hw_device_ctx(AV_HWDEVICE_TYPE_VAAPI, &device_ref);
         if(ret < 0)
@@ -539,6 +542,7 @@ fail:
         av_buffer_unref(&device_ref);
         return ret;
 }
+#endif
 
 /**
  * Finds best pixel format
@@ -830,14 +834,15 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
 
                 log_msg(LOG_LEVEL_VERBOSE, "[lavc] Trying pixfmt: %s\n", av_get_pix_fmt_name(pix_fmt));
                 pthread_mutex_lock(s->lavcd_global_lock);
-		if (pix_fmt == AV_PIX_FMT_VAAPI){
+#ifdef USE_HWACC
+                if (pix_fmt == AV_PIX_FMT_VAAPI){
 			vaapi_init(s->codec_ctx);
 			s->hwenc = true;
 			s->hwframe = av_frame_alloc();
 			av_hwframe_get_buffer(s->codec_ctx->hw_frames_ctx, s->hwframe, 0);
-			//s->hwframe->hw_frames_ctx = s->codec_ctx->hw_frames_ctx;
 			pix_fmt = AV_PIX_FMT_NV12;
 		}
+#endif
                 /* open it */
                 if (avcodec_open2(s->codec_ctx, codec, NULL) < 0) {
                         avcodec_free_context(&s->codec_ctx);
@@ -908,17 +913,14 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
                 log_msg(LOG_LEVEL_ERROR, "Could not allocate video frame\n");
                 return false;
         }
+
+	AVPixelFormat fmt = (s->hwenc) ? AV_PIX_FMT_NV12 : s->codec_ctx->pix_fmt;
 #if LIBAVCODEC_VERSION_MAJOR >= 53
-        s->in_frame->format = (s->hwenc) ? AV_PIX_FMT_NV12 : s->codec_ctx->pix_fmt;
+        s->in_frame->format = fmt;
         s->in_frame->width = s->codec_ctx->width;
         s->in_frame->height = s->codec_ctx->height;
 #endif
 
-	AVPixelFormat fmt = s->codec_ctx->pix_fmt;
-
-	if(s->codec_ctx->pix_fmt == AV_PIX_FMT_VAAPI){
-		fmt = AV_PIX_FMT_NV12;
-	}
         /* the image can be allocated by any means and av_image_alloc() is
          * just the most convenient way if av_malloc() is to be used */
         ret = av_image_alloc(s->in_frame->data, s->in_frame->linesize,
@@ -1165,10 +1167,6 @@ static void v210_to_yuv444p10le(AVFrame *out_frame, unsigned char *in_data, int 
 }
 
 static pixfmt_callback_t select_pixfmt_callback(AVPixelFormat fmt, codec_t src) {
-        if(fmt == AV_PIX_FMT_VAAPI){
-                //We need nv12 frames to transfer to gpu
-                fmt = AV_PIX_FMT_NV12;
-        }
 
         if (src == v210) {
                 if (fmt == AV_PIX_FMT_YUV420P10LE) {
@@ -1304,10 +1302,12 @@ static shared_ptr<video_frame> libavcodec_compress_tile(struct module *mod, shar
         }
 
 	AVFrame *frame = s->in_frame;
+#ifdef USE_HWACC
 	if(s->hwenc){
 		av_hwframe_transfer_data(s->hwframe, s->in_frame, 0);
 		frame = s->hwframe;
 	}
+#endif
 
         /* encode the image */
 #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(57, 37, 100)
