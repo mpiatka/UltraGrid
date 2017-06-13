@@ -471,7 +471,7 @@ static int create_hw_device_ctx(enum AVHWDeviceType type, AVBufferRef **device_r
         ret = av_hwdevice_ctx_create(device_ref, type, NULL, NULL, 0);
 
         if(ret < 0){
-                log_msg(LOG_LEVEL_ERROR, "[lavd] Unable to create hwdevice!!\n");
+                log_msg(LOG_LEVEL_ERROR, "[lavc] Unable to create hwdevice!!\n");
                 return ret;
         }
 
@@ -487,7 +487,7 @@ static int create_hw_frame_ctx(AVBufferRef *device_ref,
 {
         *ctx = av_hwframe_ctx_alloc(device_ref);
         if(!*ctx){
-                log_msg(LOG_LEVEL_ERROR, "[lavd] Failed to allocate hwframe_ctx!!\n");
+                log_msg(LOG_LEVEL_ERROR, "[lavc] Failed to allocate hwframe_ctx!!\n");
                 return -1;
         }
 
@@ -502,7 +502,7 @@ static int create_hw_frame_ctx(AVBufferRef *device_ref,
         if (ret < 0) {
                 av_buffer_unref(ctx);
                 *ctx = NULL;
-                log_msg(LOG_LEVEL_ERROR, "[lavd] Unable to init hwframe_ctx!!\n\n");
+                log_msg(LOG_LEVEL_ERROR, "[lavc] Unable to init hwframe_ctx!!\n\n");
                 return ret;
         }
 
@@ -557,21 +557,23 @@ static enum AVPixelFormat get_first_matching_pix_fmt(const enum AVPixelFormat **
         if(codec_pix_fmts == NULL)
                 return AV_PIX_FMT_NONE;
 
-        if (log_level >= LOG_LEVEL_DEBUG) {
-                char out[1024] = "[lavd] Available codec pixel formats:";
-                const enum AVPixelFormat *it = codec_pix_fmts;
-                while (*it != AV_PIX_FMT_NONE) {
-                        strncat(out, " ", sizeof out - strlen(out) - 1);
-                        strncat(out, av_get_pix_fmt_name(*it++), sizeof out - strlen(out) - 1);
-                }
-				strncat(out, " | ", sizeof out - strlen(out) - 1);
-				it = *req_pix_fmt_it;
-                while (*it != AV_PIX_FMT_NONE) {
-                        strncat(out, " ", sizeof out - strlen(out) - 1);
-                        strncat(out, av_get_pix_fmt_name(*it++), sizeof out - strlen(out) - 1);
-                }
-                log_msg(LOG_LEVEL_DEBUG, "%s\n", out);
-        }
+	if (log_level >= LOG_LEVEL_DEBUG) {
+		char out[1024] = "[lavc] Available codec pixel formats:";
+		const enum AVPixelFormat *it = codec_pix_fmts;
+		while (*it != AV_PIX_FMT_NONE) {
+			strncat(out, " ", sizeof out - strlen(out) - 1);
+			strncat(out, av_get_pix_fmt_name(*it++), sizeof out - strlen(out) - 1);
+		}
+		log_msg(LOG_LEVEL_DEBUG, "%s\n", out);
+		out[0] = '\0';
+		strncat(out, "[lavc] Requested pixel formats:", sizeof out - strlen(out) - 1);
+		it = *req_pix_fmt_it;
+		while (*it != AV_PIX_FMT_NONE) {
+			strncat(out, " ", sizeof out - strlen(out) - 1);
+			strncat(out, av_get_pix_fmt_name(*it++), sizeof out - strlen(out) - 1);
+		}
+		log_msg(LOG_LEVEL_DEBUG, "%s\n", out);
+	}
 
         enum AVPixelFormat req;
         while((req = *(*req_pix_fmt_it)++) != AV_PIX_FMT_NONE) {
@@ -683,6 +685,10 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
         codec_t ug_codec = VIDEO_CODEC_NONE;
         AVPixelFormat pix_fmt;
         AVCodec *codec = nullptr;
+
+        s->params.fps = desc.fps;
+        s->params.interlaced = desc.interlacing == INTERLACED_MERGED;
+        s->params.cpu_count = s->cpu_count;
 
         // Open encoder specified by user if given
         if (!s->backend.empty()) {
@@ -908,10 +914,6 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
         }
 
         s->decoded = (unsigned char *) malloc(vc_get_linesize(desc.width, s->decoded_codec) * desc.height);
-
-        s->params.fps = desc.fps;
-        s->params.interlaced = desc.interlacing == INTERLACED_MERGED;
-        s->params.cpu_count = s->cpu_count;
 
         s->in_frame = av_frame_alloc();
         if (!s->in_frame) {
@@ -1409,6 +1411,10 @@ static void cleanup(struct state_video_compress_libav *s)
         }
         free(s->decoded);
         s->decoded = NULL;
+
+	if(s->hwframe){
+		av_frame_free(&s->hwframe);
+	}
 }
 
 static void libavcodec_compress_done(struct module *mod)
