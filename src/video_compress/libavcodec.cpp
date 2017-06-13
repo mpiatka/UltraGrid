@@ -557,23 +557,23 @@ static enum AVPixelFormat get_first_matching_pix_fmt(const enum AVPixelFormat **
         if(codec_pix_fmts == NULL)
                 return AV_PIX_FMT_NONE;
 
-	if (log_level >= LOG_LEVEL_DEBUG) {
-		char out[1024] = "[lavc] Available codec pixel formats:";
-		const enum AVPixelFormat *it = codec_pix_fmts;
-		while (*it != AV_PIX_FMT_NONE) {
-			strncat(out, " ", sizeof out - strlen(out) - 1);
-			strncat(out, av_get_pix_fmt_name(*it++), sizeof out - strlen(out) - 1);
-		}
-		log_msg(LOG_LEVEL_DEBUG, "%s\n", out);
-		out[0] = '\0';
-		strncat(out, "[lavc] Requested pixel formats:", sizeof out - strlen(out) - 1);
-		it = *req_pix_fmt_it;
-		while (*it != AV_PIX_FMT_NONE) {
-			strncat(out, " ", sizeof out - strlen(out) - 1);
-			strncat(out, av_get_pix_fmt_name(*it++), sizeof out - strlen(out) - 1);
-		}
-		log_msg(LOG_LEVEL_DEBUG, "%s\n", out);
-	}
+        if (log_level >= LOG_LEVEL_DEBUG) {
+                char out[1024] = "[lavc] Available codec pixel formats:";
+                const enum AVPixelFormat *it = codec_pix_fmts;
+                while (*it != AV_PIX_FMT_NONE) {
+                        strncat(out, " ", sizeof out - strlen(out) - 1);
+                        strncat(out, av_get_pix_fmt_name(*it++), sizeof out - strlen(out) - 1);
+                }
+                log_msg(LOG_LEVEL_DEBUG, "%s\n", out);
+                out[0] = '\0';
+                strncat(out, "[lavd] Requested pixel formats:", sizeof out - strlen(out) - 1);
+                it = *req_pix_fmt_it;
+                while (*it != AV_PIX_FMT_NONE) {
+                        strncat(out, " ", sizeof out - strlen(out) - 1);
+                        strncat(out, av_get_pix_fmt_name(*it++), sizeof out - strlen(out) - 1);
+                }
+                log_msg(LOG_LEVEL_DEBUG, "%s\n", out);
+        }
 
         enum AVPixelFormat req;
         while((req = *(*req_pix_fmt_it)++) != AV_PIX_FMT_NONE) {
@@ -921,7 +921,7 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
                 return false;
         }
 
-	AVPixelFormat fmt = (s->hwenc) ? AV_PIX_FMT_NV12 : s->codec_ctx->pix_fmt;
+        AVPixelFormat fmt = (s->hwenc) ? AV_PIX_FMT_NV12 : s->codec_ctx->pix_fmt;
 #if LIBAVCODEC_VERSION_MAJOR >= 53
         s->in_frame->format = fmt;
         s->in_frame->width = s->codec_ctx->width;
@@ -1308,12 +1308,12 @@ static shared_ptr<video_frame> libavcodec_compress_tile(struct module *mod, shar
                 }
         }
 
-	AVFrame *frame = s->in_frame;
+        AVFrame *frame = s->in_frame;
 #ifdef USE_HWACC
-	if(s->hwenc){
-		av_hwframe_transfer_data(s->hwframe, s->in_frame, 0);
-		frame = s->hwframe;
-	}
+        if(s->hwenc){
+                av_hwframe_transfer_data(s->hwframe, s->in_frame, 0);
+                frame = s->hwframe;
+        }
 #endif
 
         /* encode the image */
@@ -1412,9 +1412,9 @@ static void cleanup(struct state_video_compress_libav *s)
         free(s->decoded);
         s->decoded = NULL;
 
-	if(s->hwframe){
-		av_frame_free(&s->hwframe);
-	}
+        if(s->hwframe){
+                av_frame_free(&s->hwframe);
+        }
 }
 
 static void libavcodec_compress_done(struct module *mod)
