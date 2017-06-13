@@ -536,7 +536,6 @@ static int vaapi_init(struct AVCodecContext *s){
         av_buffer_unref(&device_ref);
         return 0;
 
-
 fail:
         av_buffer_unref(&hw_frames_ctx);
         av_buffer_unref(&device_ref);
@@ -584,7 +583,7 @@ static enum AVPixelFormat get_first_matching_pix_fmt(const enum AVPixelFormat **
                 }
         }
 
-        return AV_PIX_FMT_VAAPI;
+        return AV_PIX_FMT_NONE;
 }
 
 bool set_codec_ctx_params(struct state_video_compress_libav *s, AVPixelFormat pix_fmt, struct video_desc desc, codec_t ug_codec)
@@ -754,6 +753,12 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
         enum AVPixelFormat requested_pix_fmts[100];
         int total_pix_fmts = 0;
 
+#ifdef USE_HWACC
+        if (regex_match(codec->name, regex(".*vaapi.*"))) {
+                requested_pix_fmts[total_pix_fmts++] = AV_PIX_FMT_VAAPI;
+        }
+#endif
+
         if (s->requested_subsampling == 0) {
                 // for interlaced formats, it is better to use either 422 or 444
                 if (desc.interlacing == INTERLACED_MERGED) {
@@ -836,12 +841,12 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
                 pthread_mutex_lock(s->lavcd_global_lock);
 #ifdef USE_HWACC
                 if (pix_fmt == AV_PIX_FMT_VAAPI){
-			vaapi_init(s->codec_ctx);
-			s->hwenc = true;
-			s->hwframe = av_frame_alloc();
-			av_hwframe_get_buffer(s->codec_ctx->hw_frames_ctx, s->hwframe, 0);
-			pix_fmt = AV_PIX_FMT_NV12;
-		}
+                        vaapi_init(s->codec_ctx);
+                        s->hwenc = true;
+                        s->hwframe = av_frame_alloc();
+                        av_hwframe_get_buffer(s->codec_ctx->hw_frames_ctx, s->hwframe, 0);
+                        pix_fmt = AV_PIX_FMT_NV12;
+                }
 #endif
                 /* open it */
                 if (avcodec_open2(s->codec_ctx, codec, NULL) < 0) {
