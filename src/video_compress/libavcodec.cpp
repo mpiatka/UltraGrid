@@ -75,6 +75,8 @@ extern "C"
 }
 #endif
 
+#include <pmmintrin.h>
+
 using namespace std;
 
 static constexpr const codec_t DEFAULT_CODEC = MJPG;
@@ -1041,19 +1043,21 @@ static void to_nv12(AVFrame *out_frame, unsigned char *in_data, int width, int h
 				__m128i uv2;
 				__m128i uv3;
 				__m128i uv4;
-				__m128i ymask = _mm_set1_epi32(0x00FF00FF);
+				__m128i ymask = _mm_set1_epi32(0xFF00FF00);
 				__m128i dsty;
 				__m128i dsty2;
 				__m128i dstuv;
 #if 1
-				while (x < (width / 8)){
+				while (x < (width / 16)){
 					yuv = _mm_lddqu_si128((__m128i const*) src);
 					yuv2 = _mm_lddqu_si128((__m128i const*) src2);
 					src += 16;
 					src2 += 16;
 
 					y1 = _mm_and_si128(ymask, yuv);
+					y1 = _mm_bsrli_si128(y1, 1);
 					y2 = _mm_and_si128(ymask, yuv2);
+					y2 = _mm_bsrli_si128(y2, 1);
 
 					uv = _mm_andnot_si128(ymask, yuv);
 					uv2 = _mm_andnot_si128(ymask, yuv2);
@@ -1066,12 +1070,14 @@ static void to_nv12(AVFrame *out_frame, unsigned char *in_data, int width, int h
 					src2 += 16;
 
 					y3 = _mm_and_si128(ymask, yuv);
+					y3 = _mm_bsrli_si128(y3, 1);
 					y4 = _mm_and_si128(ymask, yuv2);
+					y4 = _mm_bsrli_si128(y4, 1);
 
 					uv3 = _mm_andnot_si128(ymask, yuv);
 					uv4 = _mm_andnot_si128(ymask, yuv2);
 
-					uv3 = _mm_avg_epu8(uv, uv2);
+					uv3 = _mm_avg_epu8(uv3, uv4);
 
 					dsty = _mm_packus_epi16(y1, y3);
 					dsty2 = _mm_packus_epi16(y2, y4);
@@ -1085,8 +1091,8 @@ static void to_nv12(AVFrame *out_frame, unsigned char *in_data, int width, int h
 					x++;
 				}
 #endif
-#if 1
-                for(x = x * 4; x < width / 2; ++x) {
+#if 0
+                for(x = x * 8; x < width / 2; ++x) {
                         *dst_cbcr++ = (*src++ + *src2++) / 2;
                         *dst_y++ = *src++;
                         *dst_y2++ = *src2++;
