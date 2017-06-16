@@ -930,6 +930,15 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
         s->in_frame->height = s->codec_ctx->height;
 #endif
 
+<<<<<<< Updated upstream
+=======
+		AVPixelFormat fmt = s->codec_ctx->pix_fmt;
+
+		if(s->codec_ctx->pix_fmt == AV_PIX_FMT_VAAPI){
+			fmt = AV_PIX_FMT_NV12;
+		}
+
+>>>>>>> Stashed changes
         /* the image can be allocated by any means and av_image_alloc() is
          * just the most convenient way if av_malloc() is to be used */
         ret = av_image_alloc(s->in_frame->data, s->in_frame->linesize,
@@ -1048,7 +1057,7 @@ static void to_nv12(AVFrame *out_frame, unsigned char *in_data, int width, int h
 				__m128i dsty2;
 				__m128i dstuv;
 #if 1
-				while (x < (width / 16)){
+				for (; x < (width - 15); x += 16){
 					yuv = _mm_lddqu_si128((__m128i const*) src);
 					yuv2 = _mm_lddqu_si128((__m128i const*) src2);
 					src += 16;
@@ -1088,11 +1097,10 @@ static void to_nv12(AVFrame *out_frame, unsigned char *in_data, int width, int h
 					dst_y += 16;
 					dst_y2 += 16;
 					dst_cbcr += 16;
-					x++;
 				}
 #endif
-#if 0
-                for(x = x * 8; x < width / 2; ++x) {
+#if 1
+                for(; x < width - 1; x += 2) {
                         *dst_cbcr++ = (*src++ + *src2++) / 2;
                         *dst_y++ = *src++;
                         *dst_y2++ = *src2++;
