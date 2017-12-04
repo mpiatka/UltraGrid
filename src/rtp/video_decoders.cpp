@@ -129,6 +129,7 @@ static void wait_for_framebuffer_swap(struct state_video_decoder *decoder);
 static void *fec_thread(void *args);
 static void *decompress_thread(void *args);
 static void cleanup(struct state_video_decoder *decoder);
+static void decoder_process_message(struct module *);
 
 static int sum_map(map<int, int> const & m) {
         int ret = 0;
@@ -177,6 +178,7 @@ struct reported_statistics_cumul {
         unsigned long int displayed = 0, dropped = 0, corrupted = 0, missing = 0;
         unsigned long int fec_ok = 0, fec_nok = 0;
         unsigned long long int     nano_per_frame_decompress = 0;
+        unsigned long long int     nano_per_frame_error_correction = 0;
         unsigned long long int     nano_per_frame_expected = 0;
         unsigned long int     reported_frames = 0;
         void print() {
@@ -222,6 +224,7 @@ struct frame_msg {
                                 " isDisplayed " << (stats.displayed += (is_displayed ? 1 : 0)) <<
                                 " timestamp " << time_since_epoch_in_ms() <<
                                 " nanoPerFrameDecompress " << (stats.nano_per_frame_decompress += nanoPerFrameDecompress) <<
+                                " nanoPerFrameErrorCorrection " << (stats.nano_per_frame_error_correction += nanoPerFrameErrorCorrection) <<
                                 " nanoPerFrameExpected " << (stats.nano_per_frame_expected += nanoPerFrameExpected) <<
                                 " reportedFrames " << (stats.reported_frames += 1);
                         if ((stats.displayed + stats.dropped + stats.missing) % 600 == 599) {
@@ -242,6 +245,7 @@ struct frame_msg {
         unsigned long long int received_pkts_cum, expected_pkts_cum;
         struct reported_statistics_cumul &stats;
         unsigned long long int nanoPerFrameDecompress = 0;
+        unsigned long long int nanoPerFrameErrorCorrection = 0;
         unsigned long long int nanoPerFrameExpected = 0;
         bool is_displayed = false;
         bool is_corrupted = false;
@@ -262,6 +266,8 @@ struct state_video_decoder
         state_video_decoder(struct module *parent) {
                 module_init_default(&mod);
                 mod.cls = MODULE_CLASS_DECODER;
+                mod.priv_data = this;
+                mod.new_message = decoder_process_message;
                 module_register(&mod, parent);
                 control = (struct control_state *) get_module(get_root_module(parent), "control");
         }
@@ -359,6 +365,7 @@ static void *fec_thread(void *args) {
 
                 struct video_frame *frame = decoder->frame;
                 struct tile *tile = NULL;
+                auto t0 = std::chrono::high_resolution_clock::now();
 
                 if (data->recv_frame->fec_params.type != FEC_NONE) {
                         if(!fec_state || desc.k != data->recv_frame->fec_params.k ||
@@ -479,6 +486,9 @@ static void *fec_thread(void *args) {
                         }
                 }
 
+                data->nanoPerFrameErrorCorrection =
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - t0).count();
+
                 decoder->decompress_queue.push(move(data));
 cleanup:
                 ;
@@ -539,7 +549,6 @@ static void *decompress_thread(void *args) {
 
                 msg->nanoPerFrameDecompress =
                         std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - t0).count();
-                msg->nanoPerFrameExpected = 1000000000 / decoder->frame->fps;
 
                 if(decoder->change_il) {
                         for(unsigned int i = 0; i < decoder->frame->tile_count; ++i) {
@@ -1559,6 +1568,7 @@ next_packet:
                 fec_msg->pckt_list = std::move(pckt_list);
                 fec_msg->received_pkts_cum = stats->received_pkts_cum;
                 fec_msg->expected_pkts_cum = stats->expected_pkts_cum;
+                fec_msg->nanoPerFrameExpected = decoder->frame ? 1000000000 / decoder->frame->fps : 0;
 
                 auto t0 = std::chrono::high_resolution_clock::now();
                 decoder->fec_queue.push(move(fec_msg));
@@ -1593,5 +1603,26 @@ cleanup:
         decoder->last_buffer_number = buffer_number;
 
         return ret;
+}
+
+static void decoder_process_message(struct module *m)
+{
+        struct state_video_decoder *s = (struct state_video_decoder *) m->priv_data;
+
+        struct message *msg;
+        while ((msg = check_message(m))) {
+                struct response *r;
+                struct msg_universal *m_univ = (struct msg_universal *) msg;
+                if (strcmp(m_univ->text, "get_format") == 0) {
+                        s->lock.lock();
+                        string video_desc = s->received_vid_desc;
+                        s->lock.unlock();
+                        r = new_response(RESPONSE_OK, video_desc.c_str());
+                } else {
+                        r = new_response(RESPONSE_NOT_FOUND, NULL);
+                }
+                free_message(msg, r);
+
+        }
 }
 

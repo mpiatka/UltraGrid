@@ -113,8 +113,8 @@ static void *worker(void *args) {
                 .sample_rate = s->desc.sample_rate,
                 .ch_count = s->desc.ch_count };
 
-        size_t len = 256;
-        size_t len_100ms = f.bps * f.sample_rate * f.ch_count / 10;
+        size_t len = f.bps * f.ch_count * (f.sample_rate / 250); // 4 ms
+        size_t len_100ms = f.bps * f.ch_count * (f.sample_rate / 10);
         char *silence = alloca(len_100ms);
         memset(silence, 0, len_100ms);
 
@@ -323,6 +323,8 @@ static bool audio_play_alsa_ctl(void *state, int request, void *data, size_t *le
 ADD_TO_PARAM(alsa_playback_buffer, "alsa-playback-buffer", "* alsa-playback-buffer=[<min>-]<max>\n"
                                 "  Buffer length. Can be used to balance robustness and latency, in microseconds.\n");
 
+ADD_TO_PARAM(alsa_internal_buffer, "alsa-internal-buffer", "* alsa-internal-buffer=<ms>\n"
+                                "  ALSA internal buffer.\n");
 /**
  * @todo
  * Consider using snd_pcm_hw_params_set_buffer_time_first() by default, it works fine
@@ -475,7 +477,7 @@ static int audio_play_alsa_reconfigure(void *state, struct audio_desc desc)
                         log_msg(LOG_LEVEL_WARNING, MOD_NAME "Warning - unable to set buffer to its size: %s\n",
                                         snd_strerror(rc));
                 } else {
-                        log_msg(LOG_LEVEL_VERBOSE, MOD_NAME "Buffer size: %d-%d ns\n", minval, maxval);
+                        log_msg(LOG_LEVEL_VERBOSE, MOD_NAME "Buffer size: %d-%d us\n", minval, maxval);
                 }
         } else {
                 val = BUFFER_MIN * 1000;
@@ -510,7 +512,11 @@ static int audio_play_alsa_reconfigure(void *state, struct audio_desc desc)
 		jitter_buffer_reset(s->buf);
 #else
                 audio_buffer_destroy(s->buf);
-                s->buf = audio_buffer_init(s->desc.sample_rate, s->desc.bps, s->desc.ch_count, get_commandline_param("low-latency-audio") ? 20 : 5);
+                int len = get_commandline_param("low-latency-audio") ? 5 : 20;
+                if (get_commandline_param("alsa-internal-buffer")) {
+                        len = atoi(get_commandline_param("alsa-internal-buffer"));
+                }
+                s->buf = audio_buffer_init(s->desc.sample_rate, s->desc.bps, s->desc.ch_count, len);
 #endif
                 s->timestamp = 0;
                 pthread_create(&s->thread_id, NULL, worker, s);

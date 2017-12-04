@@ -886,28 +886,60 @@ AC_ARG_WITH(aja,
             [AJA_PATH=$withval
              ])
 
-if test -n "$AJA_PATH"
+# In lines below, there is a compatibility check for NTV2 12.x (Linux only).
+# For macOS, only NTV2 13 is checked/supported.
+if test $system = Linux
 then
-        AC_CHECK_FILES(${AJA_PATH}/lib/libaja.a ${AJA_PATH}/lib/libajastuff.a, FOUND_LIBAJA=yes, FOUND_LIBAJA=no)
-        fi
-
-        if test "$aja_req" != no -a "$FOUND_LIBAJA" = yes
+        if test -n "$AJA_PATH"
         then
-                aja=yes
-                AJA_CXXFLAGS="-DAJALinux -DAJA_LINUX"
+                # NTV2 SDK 12.x
+                AC_CHECK_FILES(${AJA_PATH}/lib/libaja.a ${AJA_PATH}/lib/libajastuff.a, FOUND_LIBAJA=yes, FOUND_LIBAJA=no)
+                # NTV2 SDK 13.x
+                if test "$FOUND_LIBAJA" = no; then
+                        AC_CHECK_FILES(${AJA_PATH}/lib/libajantv2.a, FOUND_LIBAJA=yes, FOUND_LIBAJA=no)
+                        NTV2_13=yes
+                fi
+        fi
+else # Mac
+        AC_CHECK_LIB(ajantv2, main, [FOUND_LIBAJA=yes], [FOUND_LIBAJA=no])
+        if test "$FOUND_LIBAJA" = yes; then
+                AC_CHECK_FILE(${AJA_PATH}/ajalibraries/ajantv2/includes/ajatypes.h, FOUND_LIBAJA=yes, FOUND_LIBAJA=no)
+        fi
+fi
+
+if test "$aja_req" != no -a "$FOUND_LIBAJA" = yes
+then
+        aja=yes
+        if test $system = Linux -a "$NTV2_13" != yes
+	then
                 AJA_INC="$AJA_INC -I${AJA_PATH}/ntv2projects/classes -I${AJA_PATH}/ajaapi -I${AJA_PATH}/ntv2projects/includes -I${AJA_PATH}/ntv2projects/democlasses"
                 AJA_LIB="${AJA_PATH}/lib/libaja.a ${AJA_PATH}/lib/libajastuff.a"
-                AJA_CAP_OBJ="src/video_capture/aja.o"
-                AC_DEFINE([HAVE_AJA], [1], [Build with AJA support])
-
-                ADD_MODULE("vidcap_aja", "$AJA_CAP_OBJ", "$AJA_LIB")
-		INC="$INC $AJA_INC"
-		CXXFLAGS="$CXXFLAGS $AJA_CXXFLAGS"
+        else # ntv2 13.x
+                AJA_INC="$AJA_INC -I${AJA_PATH}/ajalibraries/ajantv2/includes -I${AJA_PATH}/ajalibraries/ajantv2/src/mac -I${AJA_PATH}/ajaapps/crossplatform/demoapps -I${AJA_PATH}/ajalibraries -I${AJA_PATH}/ajaapps/crossplatform/demoapps/ntv2capture"
         fi
-
-        if test $aja_req = yes -a $aja = no; then
-                AC_MSG_ERROR([AJA not found]);
+        if test $system = Linux
+        then
+                AJA_CXXFLAGS="-DAJALinux -DAJA_LINUX"
+                if test "$NTV2_13" = yes
+                then
+                        AJA_INC="$AJA_INC -I${AJA_PATH}/ajalibraries/ajantv2/src/lin"
+                        AJA_LIB="${AJA_PATH}/lib/libajantv2.a"
+                fi
+        else # mac
+                AJA_CXXFLAGS="-DAJAMac -DAJA_MAC"
+                AJA_LIB="-lajantv2"
         fi
+        AJA_CAP_OBJ="src/video_capture/aja.o"
+        AC_DEFINE([HAVE_AJA], [1], [Build with AJA support])
+
+        ADD_MODULE("vidcap_aja", "$AJA_CAP_OBJ", "$AJA_LIB")
+        INC="$INC $AJA_INC"
+        CXXFLAGS="$CXXFLAGS $AJA_CXXFLAGS"
+fi
+
+if test $aja_req = yes -a $aja = no; then
+        AC_MSG_ERROR([AJA not found]);
+fi
 
 # -------------------------------------------------------------------------------------------------
 # DELTACAST stuff
@@ -1114,119 +1146,15 @@ AC_ARG_ENABLE(sdl,
     [sdl_req=$enableval],
     [sdl_req=auto]
     )
-#
-# version comparison function that works for "." delimited version numbers (no alpha please)
-# returns 0 for logically equal version numbers (2 == 2.0.0)
-# returns 1 if the first param is later then the second param
-# returns 2 if the second param is later than the first param
-#
-# note the idiotic double brackets; m4 which is under the hood of autoconf swallows one pair of brackets
-function cmpversion()
-{
-    # just in case we get whole numbers, we append a .0 to the end of everything
-    p1="${1}.0"
-    p2="${2}.0"
-    val1=`echo $p1 | sed 's/\([[0-9]]*\)\..*/\1/'`
-    val2=`echo $p2 | sed 's/\([[0-9]]*\)\..*/\1/'`
 
-    winner=0
-    index=1
-    while ( test -n "$val1" ||  test -n "$val2" ) && test "$winner" -eq "0" && test "$index" -lt "10"
-    do
-      # null is the same as 0 if we are still trying to match something
-      if test -z "$val1"
-        then
-              val1=0
-      fi
-      if test -z "$val2"
-        then
-              val2=0
-      fi
+PKG_CHECK_MODULES([SDL], [sdl], [found_sdl=yes], [found_sdl=no])
 
-      # the greater number is always the winner at any equal tuple
-      if test "$val1" -gt "$val2"
-      then
-        winner=1;
-      fi
-      if test "$val2" -gt "$val1"
-      then
-        winner=2;
-      fi
-
-      # make sure we end this thing on bad input
-      if (echo $p1 | grep -q '^[[0-9]]*\.')
-      then
-        p1=`echo $p1 | sed 's/[[0-9]]*\.\(.*\)/\1/'`
-      else
-        p1=""
-      fi
-      if (echo $p2 | grep -q '^[[0-9]]*\.')
-      then
-        p2=`echo $p2 | sed 's/[[0-9]]*\.\(.*\)/\1/'`
-      else
-        p2=""
-      fi
-
-      let "index = $index + 1"
-      val1=`echo $p1 | sed 's/\([[0-9]]*\)\..*/\1/'`
-      val2=`echo $p2 | sed 's/\([[0-9]]*\)\..*/\1/'`
-
-    done
-
-    echo $winner
-}
-
-case "$host_os" in
-        *darwin*)
-	# Mac workaround - redefining non-present macro to avoid errors
-	AC_DEFUN([AM_PATH_SDL], [$2])
-        AC_CHECK_HEADERS([SDL/SDL.h],
-                         [AC_CHECK_LIB(SDL, SDL_Init, FOUND_SDL_L=yes, echo "SDL library not found or not usable.", -L/opt/local/lib)],
-                         [echo "SDL.h not found."]
-                        )
-            if test $sdl_req != no -a "$FOUND_SDL_L" = yes
-            then
-                CFLAGS="$CFLAGS -D_GNU_SOURCE=1 -D_THREAD_SAFE -I/opt/local/include/SDL"
-                SDL_LIBS="-L/opt/local/lib -lSDLmain -lSDL -Wl,-framework,Cocoa"
-                SDL_OBJ="$SDL_OBJ src/video_display/sdl.o"
-                AC_DEFINE([HAVE_SDL], [1],  [Build with SDL support])
-                SDL_VERSION_REQUIRED=1.2.10
-                AC_CHECK_FILE(/opt/local/bin/sdl-config, FOUND_SDL_CONFIG=yes, echo "sdl-config not found.")
-                if test "$FOUND_SDL_CONFIG" = yes
-                then
-                    SDL_VERSION_FOUND=`/opt/local/bin/sdl-config --version`
-                    RESULT=`cmpversion $SDL_VERSION_FOUND $SDL_VERSION_REQUIRED`
-                    if test $RESULT = 1
-                    then
-                        echo "checking for SDL - version >= $SDL_VERSION_REQUIRED... yes ($SDL_VERSION_FOUND)";
-                        AC_DEFINE([HAVE_SDL_1210], [1], [We have SDL version >= 1.21])
-                    else
-                        echo "checking for SDL - version >= $SDL_VERSION_REQUIRED... no ($SDL_VERSION_FOUND)";
-                    fi
-                fi
-                sdl=yes
-            fi
-        ;;
-        *)
-        AC_CHECK_HEADERS([SDL/SDL.h],
-                         [AC_CHECK_LIB(SDL, SDL_Init, FOUND_SDL_L=yes, echo "SDL library not found or not usable.")],
-                         [echo "SDL.h not found."]
-                        )
-            if test $sdl_req != no -a "$FOUND_SDL_L" = yes
-            then
-                SDL_LIBS="-lSDL $X_LIBS"
-                SDL_OBJ="$SDL_OBJ src/video_display/sdl.o"
-                AC_DEFINE([HAVE_SDL], [1],  [Build with SDL support])
-                SDL_VERSION=1.2.10
-                AM_PATH_SDL($SDL_VERSION, AC_DEFINE([HAVE_SDL_1210], [1], [We have SDL version >= 1.21]), :)
-                sdl=yes
-            fi
-        ;;
-esac
-
-if test $sdl = yes
+if test $sdl_req != no -a $found_sdl = yes
 then
+        SDL_OBJ="$SDL_OBJ src/video_display/sdl.o"
+        AC_DEFINE([HAVE_SDL], [1],  [Build with SDL support])
         ADD_MODULE("display_sdl", "$SDL_OBJ", "$SDL_LIBS")
+        sdl=yes
 fi
 
 if test $sdl_req = yes -a $sdl = no; then
@@ -1815,9 +1743,9 @@ then
 fi
 
 # Mac
-if test "$system" = MacOSX
+if test $uyvy_req != no -a "$system" != Linux -a "$gl" = yes
 then
-        uyvy=no
+        uyvy=yes
 fi
 
 # common
@@ -1906,19 +1834,7 @@ if test "x${with_cuda_host_compiler}" != "x" ; then
 		AC_MSG_FAILURE([Binary ${with_cuda_host_compiler} given as cuda host compiler, yet not found!])
 	fi
 else
-        # workaround, to remove - NVCC doesn't support gcc 6 but clang 3.8
-        if test -z "$nvcc_major"; then
-                nvcc_major=0
-        fi
-        if test $system = Linux -a $nvcc_major -eq 8; then
-                AC_CHECK_PROG([CLANG38], [clang-3.8], [yes])
-                if test "$CLANG38" == yes; then
-                        with_cuda_host_compiler="clang-3.8"
-                        NVCCFLAGS="$NVCCFLAGS -ccbin $with_cuda_host_compiler"
-                fi
-        else
-                with_cuda_host_compiler="default"
-        fi
+	with_cuda_host_compiler="default"
 fi
 
 if test "x$NVCC" != "X" ; then
@@ -2654,7 +2570,7 @@ fi
 # -------------------------------------------------------------------------------------------------
 syphon=no
 AC_ARG_ENABLE(syphon,
-[  --disable-syphon        enables Syphon support (default is disabled)]
+[  --enable-syphon        enables Syphon support (default is disabled)]
 [                          Requires: Syphon],
     [syphon_req=$enableval],
     [syphon_req=no]
@@ -2664,9 +2580,28 @@ if test $syphon_req == yes
 then
         AC_DEFINE([HAVE_SYPHON], [1], [Build with Syphon support])
         LIBS="$LIBS -framework Syphon"
-        OBJS="$OBJS src/syphon_server.o"
+        OBJS="$OBJS src/syphon_server.o src/video_capture/syphon.o"
         syphon=yes
 fi
+
+# ------------------------------------------------------------------------------
+# Spout
+# ------------------------------------------------------------------------------
+spout=no
+AC_ARG_ENABLE(spout,
+[  --enable-spout        enables Spout support (default is disabled)]
+[                          Requires: Spout],
+    [spout_req=$enableval],
+    [spout_req=no]
+    )
+
+if test $spout_req == yes
+then
+        AC_DEFINE([HAVE_SPOUT], [1], [Build with Spout support])
+        LIBS="$LIBS -lspout_sender"
+        spout=yes
+fi
+
 
 # -------------------------------------------------------------------------------------------------
 # MCU-like video mixer
@@ -2767,6 +2702,7 @@ RESULT=\
   CUDA support ................ $FOUND_CUDA$HOST_CC_REPORT
   Library live555 ............. $livemedia
   Syphon ...................... $syphon
+  Spout ....................... $spout
 
   AJA ......................... $aja
   AV Foundation ............... $avfoundation

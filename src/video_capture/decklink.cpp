@@ -120,6 +120,7 @@ struct vidcap_decklink_state {
 
         bool                    detect_format;
         bool                    is_10b;
+        bool                    p_not_i;
 };
 
 static HRESULT set_display_mode_properties(struct vidcap_decklink_state *s, struct tile *tile, IDeckLinkDisplayMode* displayMode, /* out */ BMDPixelFormat *pf);
@@ -302,7 +303,7 @@ decklink_help()
 	HRESULT				result;
 
 	printf("\nDecklink options:\n");
-	printf("\t-t decklink[:<device_index(indices)>[:<mode>:<colorspace>[:3D][:sync_timecode][:connection=<input>][:audioConsumerLevels={true|false}][:detect-format][:conversion=<conv_mode>]]\n");
+	printf("\t-t decklink[:<device_index(indices)>[:<mode>:<colorspace>[:3D][:sync_timecode][:connection=<input>][:audio_level={line|mic}][:detect-format][:conversion=<conv_mode>]]\n");
         printf("\t\tor\n");
 	printf("\t-t decklink{:mode=<mode>|:device=<device_index>|:codec=<colorspace>...<key>=<val>}*\n");
 	printf("\t(Mode specification is mandatory if your card does not support format autodetection.)\n");
@@ -325,9 +326,9 @@ decklink_help()
         printf("\tTry to synchronize inputs based on timecode (for multiple inputs, eg. tiled 4K)\n");
 	printf("\n");
 
-        printf("audioConsumerLevels\n");
-        printf("\tIf set true the analog audio levels are set to maximum gain on audio input.\n");
-        printf("\tIf set false the selected analog input gain levels are used.\n");
+        printf("audio_level\n");
+        printf("\tline - the selected analog input gain levels are used\n");
+        printf("\tmic - analog audio levels are set to maximum gain on audio input.\n");
 	printf("\n");
 
         printf("conversion\n");
@@ -344,6 +345,8 @@ decklink_help()
         printf("detect-format\n");
         printf("\tTry to detect input video format even if the device doesn't support autodetect.\n");
         printf("\tSource interface still has to be given, eg. \"-t decklink:connection=HDMI:detect-format\".\n");
+        printf("p_not_i\n");
+        printf("\tIncoming signal should be treated as progressive even if detected as interlaced (PsF).\n");
 	printf("\n");
 
 
@@ -467,9 +470,9 @@ static bool parse_option(struct vidcap_decklink_state *s, const char *opt)
                         fprintf(stderr, "[DeckLink] Unrecognized connection %s.\n", connection);
                         return false;
                 }
-        } else if(strncasecmp(opt, "audioConsumerLevels=",
-                                strlen("audioConsumerLevels=")) == 0) {
-                const char *levels = opt + strlen("audioConsumerLevels=");
+        } else if(strncasecmp(opt, "audio_level=",
+                                strlen("audio_level=")) == 0) {
+                const char *levels = opt + strlen("audio_level=");
                 if (strcasecmp(levels, "false") == 0) {
                         s->audio_consumer_levels = 0;
                 } else {
@@ -502,6 +505,8 @@ static bool parse_option(struct vidcap_decklink_state *s, const char *opt)
                 }
         } else if (strcasecmp(opt, "detect-format") == 0) {
                 s->detect_format = true;
+        } else if (strcasecmp(opt, "p_not_i") == 0) {
+                s->p_not_i = true;
         } else {
                 log_msg(LOG_LEVEL_WARNING, "[DeckLink] Warning, unrecognized trailing options in init string: %s\n", opt);
                 return false;
@@ -706,6 +711,10 @@ static HRESULT set_display_mode_properties(struct vidcap_decklink_state *s, stru
 				LOG(LOG_LEVEL_WARNING) << "[DeckLink cap.] Unknown field dominance!\n";
                                 s->frame->interlacing = PROGRESSIVE;
                                 break;
+                }
+
+                if (s->p_not_i) {
+                        s->frame->interlacing = PROGRESSIVE;
                 }
 
                 displayModeCString = get_cstr_from_bmd_api_str(displayModeString);
@@ -926,8 +935,10 @@ vidcap_decklink_init(const struct vidcap_params *params, void **state)
                         // Print the model name of the DeckLink card
                         result = deckLink->GetDisplayName(&deviceNameString);
                         if (result == S_OK) {
-                                LOG(LOG_LEVEL_INFO) << "Using device " << deviceNameString << "\n";
+                                const char *deviceNameCString = get_cstr_from_bmd_api_str(deviceNameString);
+                                LOG(LOG_LEVEL_INFO) << "Using device " << deviceNameCString << "\n";
                                 release_bmd_api_str(deviceNameString);
+                                free((void *) deviceNameCString);
                         }
 
                         // Query the DeckLink for its configuration interface
@@ -1041,8 +1052,10 @@ vidcap_decklink_init(const struct vidcap_params *params, void **state)
                                 BMD_STR displayModeString = NULL;
                                 result = displayMode->GetName(&displayModeString);
                                 if (result == S_OK) {
-                                        LOG(LOG_LEVEL_INFO) << "The desired display mode is supported: " << displayModeString << "\n";
+                                        const char *displayModeCString = get_cstr_from_bmd_api_str(deviceNameString);
+                                        LOG(LOG_LEVEL_INFO) << "The desired display mode is supported: " << displayModeCString << "\n";
                                         release_bmd_api_str(displayModeString);
+                                        free((void *)displayModeCString);
                                 }
                         } else {
                                 if (mode_idx == MODE_SPEC_FOURCC) {

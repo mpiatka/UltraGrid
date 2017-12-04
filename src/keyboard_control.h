@@ -39,6 +39,7 @@
 #define keyboard_control_h_
 
 #include <thread>
+#include <ctime>
 
 #ifdef HAVE_TERMIOS_H
 #include "termios.h"
@@ -52,6 +53,7 @@ public:
         void start(struct module *root);
         void stop();
         void run();
+        void info();
         void usage();
 
 private:
@@ -64,6 +66,7 @@ private:
 #endif
         bool m_started;
         bool m_locked_against_changes;
+        std::time_t m_start_time;
 };
 
 #endif // keyboard_control_h_

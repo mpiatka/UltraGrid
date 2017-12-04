@@ -61,6 +61,7 @@
 #include "video_display.h"
 
 #include <chrono>
+#include <cstdint>
 #include <iomanip>
 #include <mutex>
 #include <queue>
@@ -168,8 +169,9 @@ class DeckLinkTimecode : public IDeckLinkTimecode{
 #ifdef HAVE_LINUX
                         uint8_t hours, minutes, seconds, frames;
                         GetComponents(&hours, &minutes, &seconds, &frames);
-                        char *out = (char *) malloc(12);
-                        sprintf(out, "%02d:%02d:%02d:%02d", hours, minutes, seconds, frames);
+                        char *out = (char *) malloc(14);
+                        assert(minutes <= 59 && seconds <= 59);
+                        sprintf(out, "%02" PRIu8 ":%02" PRIu8 ":%02" PRIu8 ":%02" PRIu8, hours, minutes, seconds, frames);
                         *timecode = out;
                         return S_OK;
 #else
@@ -310,7 +312,7 @@ static void show_help(bool full)
         HRESULT                         result;
 
         printf("Decklink (output) options:\n");
-        printf("\t-d decklink[:device=<device(s)>][:timecode][:single-link|:dual-link|:quad-link][:LevelA|:LevelB][:3D[:HDMI3DPacking=<packing>]][:audioConsumerLevels={true|false}][:conversion=<fourcc>][:Use1080pNotPsF={true|false}][:[no-]low-latency]\n");
+        printf("\t-d decklink[:device=<device(s)>][:timecode][:single-link|:dual-link|:quad-link][:LevelA|:LevelB][:3D[:HDMI3DPacking=<packing>]][:audio_level={line|mic}][:conversion=<fourcc>][:Use1080pNotPsF={true|false}][:[no-]low-latency]\n");
         printf("\t\t<device(s)> is coma-separated indices or names of output devices\n");
         printf("\t\tsingle-link/dual-link specifies if the video output will be in a single-link (HD/3G/6G/12G) or in dual-link HD-SDI mode\n");
         printf("\t\tLevelA/LevelB specifies 3G-SDI output level\n");
@@ -387,7 +389,7 @@ static void show_help(bool full)
         printf("\tRightOnly\n");
         printf("\n");
 
-        printf("audioConsumerLevels if set to true sets audio analog level to maximum attenuation on audio output.\n");
+        printf("If audio_level is mic audio analog level is set to maximum attenuation on audio output.\n");
         printf("\n");
         print_decklink_version();
         printf("\n");
@@ -899,11 +901,11 @@ static void *display_decklink_init(struct module *parent, const char *fmt, unsig
                         } else if(strcasecmp(ptr, "timecode") == 0) {
                                 s->emit_timecode = true;
                         } else if(strcasecmp(ptr, "single-link") == 0) {
-                                s->link = to_fourcc('l', 'c', 's', 'l');
+                                s->link = bmdLinkConfigurationSingleLink;
                         } else if(strcasecmp(ptr, "dual-link") == 0) {
-                                s->link = to_fourcc('l', 'c', 'd', 'l');
+                                s->link = bmdLinkConfigurationDualLink;
                         } else if(strcasecmp(ptr, "quad-link") == 0) {
-                                s->link = to_fourcc('l', 'c', 'q', 'l');
+                                s->link = bmdLinkConfigurationQuadLink;
                         } else if(strcasecmp(ptr, "LevelA") == 0) {
                                 s->level = 'A';
                         } else if(strcasecmp(ptr, "LevelB") == 0) {
@@ -927,8 +929,8 @@ static void *display_decklink_init(struct module *parent, const char *fmt, unsig
                                         delete s;
                                         return NULL;
                                 }
-                        } else if(strncasecmp(ptr, "audioConsumerLevels=", strlen("audioConsumerLevels=")) == 0) {
-                                if (strcasecmp(ptr + strlen("audioConsumerLevels="), "false") == 0) {
+                        } else if(strncasecmp(ptr, "audio_level=", strlen("audio_level=")) == 0) {
+                                if (strcasecmp(ptr + strlen("audio_level="), "false") == 0) {
                                         audio_consumer_levels = 0;
                                 } else {
                                         audio_consumer_levels = 1;
@@ -1117,15 +1119,9 @@ static void *display_decklink_init(struct module *parent, const char *fmt, unsig
                 }
 
                 if(s->link != 0) {
-#if BLACKMAGIC_DECKLINK_API_VERSION < ((10 << 24) | (5 << 16))
-                        log_msg(LOG_LEVEL_WARNING, MOD_NAME "Compiled with old SDK - dual-/quad-link setting might be incorrect.\n");
-                        HRESULT res = deckLinkConfiguration->SetFlag(bmdDeckLinkConfig3GBpsVideoOutput,
-                                        s->link == to_fourcc('l', 'c', 's', 'l') ? true : false);
-#else
                         HRESULT res = deckLinkConfiguration->SetInt(bmdDeckLinkConfigSDIOutputLinkConfiguration, s->link);
-#endif
                         if(res != S_OK) {
-                                log_msg(LOG_LEVEL_ERROR, MOD_NAME "Unable set output SDI standard.\n");
+                                LOG(LOG_LEVEL_ERROR) << MOD_NAME "Unable set output SDI standard: " << bmd_hresult_to_string(res) << ".\n";
                         }
                 }
 

@@ -101,6 +101,7 @@ keyboard_control::keyboard_control() :
         m_started(false),
         m_locked_against_changes(true)
 {
+        m_start_time = time(NULL);
 }
 
 ADD_TO_PARAM(disable_keyboard_control, "disable-keyboard-control", "* disable-keyboard-control\n"
@@ -211,6 +212,10 @@ void keyboard_control::run()
                         case 'h':
                                 usage();
                                 break;
+                        case 'i':
+                                cout << "\n";
+                                info();
+                                break;
                         case '\n':
                                 cout << endl;
                                 break;
@@ -251,6 +256,7 @@ void keyboard_control::run()
                         {
                                 char path[] = "exporter";
                                 auto m = (struct message *) new_message(sizeof(struct msg_universal));
+                                strcpy(((struct msg_universal *) m)->text, "toggle");
                                 auto resp = send_message(m_root, path, (struct message *) m);
                                 free_response(resp);
                                 break;
@@ -275,21 +281,9 @@ after_protected:
         }
 }
 
-
-void keyboard_control::usage()
+void keyboard_control::info()
 {
-        cout << "\nAvailable keybindings:\n" <<
-                "\t  * 0  - increase volume\n" <<
-                "\t  / 9  - decrease volume\n" <<
-                "\t   +   - increase audio delay by 10 ms\n" <<
-                "\t   -   - decrease audio delay by 10 ms\n" <<
-                "\t   m   - mute/unmute\n" <<
-                "\t   v   - increase verbosity level\n" <<
-                "\t   e   - record captured content (toggle)\n" <<
-                "\t   h   - show help\n" <<
-                "\tCtrl-x - unlock/lock against changes\n" <<
-                "\tCtrl-c - exit\n" <<
-                "\n";
+        cout << "Start time: " << asctime(localtime(&m_start_time));
         cout << "Verbosity level: " << log_level << (log_level == LOG_LEVEL_INFO ? " (default)" : "") << "\n";
         cout << "Locked against changes: " << (m_locked_against_changes ? "true" : "false") << "\n";
         cout << "Audio playback delay: " << get_audio_delay() << " ms\n";
@@ -313,18 +307,71 @@ void keyboard_control::usage()
 
 	{
 		struct video_desc desc{};
-                        struct msg_sender *m = (struct msg_sender *) new_message(sizeof(struct msg_sender));
-                        m->type = SENDER_MSG_QUERY_VIDEO_MODE;
-                        struct response *r = send_message_sync(m_root, "sender", (struct message *) m, 100,  SEND_MESSAGE_FLAG_QUIET | SEND_MESSAGE_FLAG_NO_STORE);
-                        if (response_get_status(r) == RESPONSE_OK) {
-                                const char *text = response_get_text(r);
-                                istringstream iss(text);
-                                iss >> desc;
-                                cout << "Captured video format: " <<  desc << "\n";
-                        }
-                        free_response(r);
+                struct msg_sender *m = (struct msg_sender *) new_message(sizeof(struct msg_sender));
+                m->type = SENDER_MSG_QUERY_VIDEO_MODE;
+                struct response *r = send_message_sync(m_root, "sender", (struct message *) m, 100,  SEND_MESSAGE_FLAG_QUIET | SEND_MESSAGE_FLAG_NO_STORE);
+                if (response_get_status(r) == RESPONSE_OK) {
+                        const char *text = response_get_text(r);
+                        istringstream iss(text);
+                        iss >> desc;
+                        cout << "Captured video format: " <<  desc << "\n";
+                }
+                free_response(r);
+	}
+
+	{
+		struct video_desc desc{};
+                struct msg_universal *m = (struct msg_universal *) new_message(sizeof(struct msg_universal));
+                strcpy(m->text, "get_format");
+                struct response *r = send_message_sync(m_root, "receiver.decoder", (struct message *) m, 100,  SEND_MESSAGE_FLAG_QUIET | SEND_MESSAGE_FLAG_NO_STORE);
+                if (response_get_status(r) == RESPONSE_OK) {
+                        const char *text = response_get_text(r);
+                        istringstream iss(text);
+                        iss >> desc;
+                        cout << "Received video format: " <<  desc << "\n";
+                }
+                free_response(r);
+	}
+
+	{
+                struct msg_universal *m = (struct msg_universal *) new_message(sizeof(struct msg_universal));
+                strcpy(m->text, "get_port");
+                struct response *r = send_message_sync(m_root, "control", (struct message *) m, 100,  SEND_MESSAGE_FLAG_QUIET | SEND_MESSAGE_FLAG_NO_STORE);
+                if (response_get_status(r) == RESPONSE_OK) {
+                        cout << "Control port: " <<  response_get_text(r) << "\n";
+                }
+                free_response(r);
+	}
+
+	{
+                struct msg_universal *m = (struct msg_universal *) new_message(sizeof(struct msg_universal));
+                strcpy(m->text, "status");
+                struct response *r = send_message_sync(m_root, "exporter", (struct message *) m, 100,  SEND_MESSAGE_FLAG_QUIET | SEND_MESSAGE_FLAG_NO_STORE);
+                if (response_get_status(r) == RESPONSE_OK) {
+                        cout << "Exporting: " <<  response_get_text(r) << "\n";
+                }
+                free_response(r);
 	}
 
         cout << "\n";
+}
+
+void keyboard_control::usage()
+{
+        cout << "\nAvailable keybindings:\n" <<
+                "\t  * 0  - increase volume\n" <<
+                "\t  / 9  - decrease volume\n" <<
+                "\t   +   - increase audio delay by 10 ms\n" <<
+                "\t   -   - decrease audio delay by 10 ms\n" <<
+                "\t   m   - mute/unmute\n" <<
+                "\t   v   - increase verbosity level\n" <<
+                "\t   e   - record captured content (toggle)\n" <<
+                "\t   h   - show help\n" <<
+                "\t   i   - show various information\n" <<
+                "\tCtrl-x - unlock/lock against changes\n" <<
+                "\tCtrl-c - exit\n" <<
+                "\n";
+
+        info();
 }
 

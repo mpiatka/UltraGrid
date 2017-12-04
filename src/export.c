@@ -62,6 +62,11 @@ struct exporter {
 static bool create_dir(struct exporter *s);
 static bool enable_export(struct exporter *s);
 static void disable_export(struct exporter *s);
+static void process_messages(struct exporter *s);
+
+static void new_msg(struct module *mod) {
+        process_messages(mod->priv_data);
+}
 
 struct exporter *export_init(struct module *parent, const char *path, bool should_export)
 {
@@ -82,6 +87,8 @@ struct exporter *export_init(struct module *parent, const char *path, bool shoul
 
         module_init_default(&s->mod);
         s->mod.cls = MODULE_CLASS_EXPORTER;
+        s->mod.new_message = new_msg;
+        s->mod.priv_data = s;
         module_register(&s->mod, parent);
 
         return s;
@@ -126,8 +133,15 @@ static bool create_dir(struct exporter *s)
 {
         if (!s->dir) {
                 for (int i = 1; i <= 9999; i++) {
-                        char name[16];
-                        snprintf(name, 16, "export.%04d", i);
+                        char name[21];
+                        time_t t = time(NULL);
+                        struct tm *tmp = localtime(&t);
+                        strftime(name, sizeof name, "export.%Y%m%d", tmp);
+                        if (i > 1) {
+                                char num[6];
+                                snprintf(num, sizeof num, "-%d", i);
+                                strncat(name, num, sizeof name - strlen(name) - 1);
+                        }
                         int ret = platform_mkdir(name);
                         if(ret == -1) {
                                 if(errno == EEXIST) {
@@ -187,20 +201,33 @@ void export_destroy(struct exporter *s) {
 static void process_messages(struct exporter *s) {
         struct message *m;
         while ((m = check_message(&s->mod))) {
+                struct response *r;
                 pthread_mutex_lock(&s->lock);
-                if (s->exporting) {
-                        disable_export(s);
+                struct msg_universal *msg = (struct msg_universal *) m;
+                if (strcmp(msg->text, "toggle") == 0) {
+                        if (s->exporting) {
+                                disable_export(s);
+                        } else {
+                                enable_export(s);
+                        }
+                        log_msg(LOG_LEVEL_NOTICE, "Exporing: %s\n", s->exporting ? "ON" : "OFF");
+                        r = new_response(RESPONSE_OK, NULL);
+                } else if (strcmp(msg->text, "status") == 0) {
+                        r = new_response(RESPONSE_OK, s->exporting ? "true" : "false");
                 } else {
-                        enable_export(s);
+                        r = new_response(RESPONSE_NOT_FOUND, NULL);
                 }
-                log_msg(LOG_LEVEL_NOTICE, "Exporing: %s\n", s->exporting ? "ON" : "OFF");
                 pthread_mutex_unlock(&s->lock);
-                free_message(m, new_response(RESPONSE_OK, NULL));
+                free_message(m, r);
         }
 }
 
 void export_audio(struct exporter *s, struct audio_frame *frame)
 {
+        if(!s){
+                return;
+        }
+
         process_messages(s);
 
         pthread_mutex_lock(&s->lock);
@@ -212,6 +239,10 @@ void export_audio(struct exporter *s, struct audio_frame *frame)
 
 void export_video(struct exporter *s, struct video_frame *frame)
 {
+        if(!s){
+                return;
+        }
+
         process_messages(s);
 
         pthread_mutex_lock(&s->lock);

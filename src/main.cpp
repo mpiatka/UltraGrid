@@ -99,6 +99,7 @@
 #define DEFAULT_AUDIO_FEC       "none"
 static constexpr const char *DEFAULT_VIDEO_COMPRESSION = "none";
 static constexpr const char *DEFAULT_AUDIO_CODEC = "PCM";
+#define AUDIO_PROTOCOLS "ultragrid_rtp, JACK or rtsp" // available audio protocols
 
 #define OPT_AUDIO_CHANNEL_MAP (('a' << 8) | 'm')
 #define OPT_AUDIO_CAPTURE_CHANNELS (('a' << 8) | 'c')
@@ -268,7 +269,7 @@ static void usage(const char *exec_path)
         printf("\t                         \tfor list. Use --video-protocol rtsp for RTSP server\n");
         printf("\t                         \t(see --video-protocol rtsp:help for usage)\n");
         printf("\n");
-        printf("\t--audio-protocol <proto>[:<settings>]\t<proto> can be ultragrid_rtp, JACK or rtsp\n");
+        printf("\t--audio-protocol <proto>[:<settings>]\t<proto> can be " AUDIO_PROTOCOLS "\n");
         printf("\n");
 #ifdef HAVE_IPv6
         printf("\t-6                       \tUse IPv6\n");
@@ -390,6 +391,7 @@ bool parse_audio_capture_format(const char *optarg)
         if (strcmp(optarg, "help") == 0) {
                 printf("Usage:\n");
                 printf("\t--audio-capture-format {channels=<num>|bps=<bits_per_sample>|sample_rate=<rate>}*\n");
+                printf("\t\tmultiple options can be separated by a colon\n");
                 return false;
         }
 
@@ -412,8 +414,8 @@ bool parse_audio_capture_format(const char *optarg)
 
                         }
                         audio_capture_bps = bps / 8;
-                } else if (strncmp(item, "rate=", strlen("bps=")) == 0) {
-                        long long val = unit_evaluate(item + strlen("rate="));
+                } else if (strncmp(item, "sample_rate=", strlen("sample_rate=")) == 0) {
+                        long long val = unit_evaluate(item + strlen("sample_rate="));
                         assert(val > 0 && val <= numeric_limits<decltype(audio_capture_sample_rate)>::max());
                         audio_capture_sample_rate = val;
                 } else {
@@ -478,7 +480,7 @@ int main(int argc, char *argv[])
         bool should_export = false;
         char *export_opts = NULL;
 
-        int control_port = -1;
+        int control_port = 0;
         int connection_type = 0;
         struct control_state *control = NULL;
 
@@ -661,6 +663,10 @@ int main(int argc, char *argv[])
                                 *delim = '\0';
                                 audio_protocol_opts = delim + 1;
                         }
+                        if (strcmp(audio_protocol, "help") == 0) {
+                                printf("Audio protocol can be one of: " AUDIO_PROTOCOLS "\n");
+                                return EXIT_SUCCESS;
+                        }
                         break;
                 case OPT_VIDEO_PROTOCOL:
                         video_protocol = optarg;
@@ -747,7 +753,7 @@ int main(int argc, char *argv[])
                         break;
                 case OPT_AUDIO_CAPTURE_CHANNELS:
                         log_msg(LOG_LEVEL_WARNING, "Parameter --audio-capture-channels is deprecated. "
-                                        "Use \"--audio-capure-format channels=<count>\" instead.\n");
+                                        "Use \"--audio-capture-format channels=<count>\" instead.\n");
                         audio_capture_channels = atoi(optarg);
                         break;
                 case OPT_AUDIO_CAPTURE_FORMAT:
@@ -1001,11 +1007,9 @@ int main(int argc, char *argv[])
                 return EXIT_FAILURE;
         }
 
-        if (control_port != -1) {
-                if (control_init(control_port, connection_type, &control, &uv.root_module) != 0) {
-                        fprintf(stderr, "Error: Unable to initialize remote control!\n");
-                        return EXIT_FAIL_CONTROL_SOCK;
-                }
+        if (control_init(control_port, connection_type, &control, &uv.root_module) != 0) {
+                fprintf(stderr, "Error: Unable to initialize remote control!\n");
+                return EXIT_FAIL_CONTROL_SOCK;
         }
 
         uv.audio = audio_cfg_init (&uv.root_module, audio_host, audio_rx_port,
@@ -1205,9 +1209,18 @@ int main(int argc, char *argv[])
                         goto cleanup;
                 }
 
-                if (strcmp("none", requested_display) != 0)
-                        display_run(uv.display_device);
+                if (strcmp("none", requested_display) != 0) {
+                        if (!mainloop) {
+                                display_run(uv.display_device);
+                        } else {
+                                throw string("Cannot run display when "
+                                                "another mainloop registered!\n");
+                        }
+                }
 
+                if (mainloop) {
+                        mainloop(mainloop_udata);
+                }
         } catch (ug_runtime_error const &e) {
                 cerr << e.what() << endl;
                 exit_uv(e.get_code());
