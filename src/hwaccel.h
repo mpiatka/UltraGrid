@@ -15,9 +15,22 @@ struct hw_vdpau_ctx{
         VdpGetProcAddress *get_proc_address;
 };
 
-struct hw_vdpau_frame_data{
-        VdpVideoSurface *surface;
+struct hw_vdpau_frame{
+        hw_vdpau_ctx hwctx;
+        AVBufferRef *buf[AV_NUM_DATA_POINTERS];
+
+        //Theese are just pointers to the buffer
+        uint8_t *data[AV_NUM_DATA_POINTERS];
+        VdpVideoSurface *surface; // Same as data[3]
 };
+
+void hw_vdpau_ctx_init(hw_vdpau_ctx *ctx);
+void hw_vdpau_ctx_unref(hw_vdpau_ctx *ctx);
+hw_vdpau_ctx hw_vdpau_ctx_copy(hw_vdpau_ctx *ctx);
+
+void hw_vdpau_frame_init(hw_vdpau_frame *frame);
+void hw_vdpau_frame_unref(hw_vdpau_frame *frame);
+hw_vdpau_frame hw_vdpau_frame_copy(const hw_vdpau_frame *frame);
 
 
 #endif
