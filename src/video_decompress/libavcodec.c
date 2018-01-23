@@ -1246,7 +1246,7 @@ static int vdpau_init(struct AVCodecContext *s){
         s->hw_frames_ctx = hw_frames_ctx;
 
         state->hwaccel.type = HWACCEL_VDPAU;
-        state->hwaccel.copy = true;
+        state->hwaccel.copy = false;
         state->hwaccel.tmp_frame = av_frame_alloc();
         if(!state->hwaccel.tmp_frame){
                 ret = -1;

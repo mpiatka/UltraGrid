@@ -73,7 +73,8 @@ hw_vdpau_frame *hw_vdpau_frame_from_avframe(hw_vdpau_frame *dst, const AVFrame *
         dst->hwctx.get_proc_address = vdpau_ctx->get_proc_address;
 
         for(int i = 0; i < AV_NUM_DATA_POINTERS; i++){
-                dst->buf[i] = av_buffer_ref(src->buf[i]);
+                if(src->buf[i])
+                        dst->buf[i] = av_buffer_ref(src->buf[i]);
                 dst->data[i] = src->data[i];
         }
 
