@@ -92,6 +92,11 @@
 #define SYSTEM_VSYNC 0xFE
 #define SINGLE_BUF 0xFF // use single buffering instead of double
 
+#ifdef USE_HWACC
+#include "hwaccel.h"
+typedef GLintptr vdpauSurfaceNV;
+#endif
+
 using namespace std;
 
 static const char * yuv422_to_rgb_fp = STRINGIFY(
@@ -209,6 +214,40 @@ struct state_gl {
 
         bool fixed_size, first_run;
         int fixed_w, fixed_h;
+
+        void (*VDPAUInitNV)(const void * /*vdpDevice*/,
+                        const void * /*getProcAddress*/);
+
+        void (*VDPAUFiniNV)();
+
+        vdpauSurfaceNV (*VDPAURegisterVideoSurfaceNV)(const void * /*vdpSurface*/,
+                        enum /*target*/,
+                        sizei /*numTextureNames*/,
+                        const uint * /*textureNames*/);
+
+        vdpauSurfaceNV (*VDPAURegisterOutputSurfaceNV)(const void * /*vdpSurface*/,
+                        enum /*target*/,
+                        sizei /*numTextureNames*/,
+                        const uint * /*textureNames*/);
+
+        boolean (*VDPAUIsSurfaceNV)(vdpauSurfaceNV /*surface*/);
+        void (*VDPAUUnregisterSurfaceNV)(vdpauSurfaceNV /*surface*/);
+
+        void (*VDPAUGetSurfaceivNV)(vdpauSurfaceNV /*surface*/,
+                        enum /*pname*/,
+                        sizei /*bufSize*/,
+                        sizei * /*length*/,
+                        int * /*values*/);
+
+        void (*VDPAUSurfaceAccessNV)(vdpauSurfaceNV /*surface*/,
+                        enum /*access*/);
+
+        void (*VDPAUMapSurfacesNV)(vdpauSurfaceNV /*numSurfaces*/,
+                        const vdpauSurfaceNV * /*surfaces*/);
+
+        void (*VDPAUUnmapSurfacesNV)(vdpauSurfaceNV /*numSurfaces*/,
+                        const vdpauSurfaceNV * /*surfaces*/);
+
 
         state_gl(struct module *parent) : PHandle_uyvy(0), PHandle_dxt(0), PHandle_dxt5(0),
                 fbo_id(0), texture_display(0), texture_uyvy(0),
@@ -981,6 +1020,19 @@ static bool display_gl_init_opengl(struct state_gl *s)
 
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // set row alignment to 1 byte instead of default
                                                // 4 bytes which won't work on row-unaligned RGB
+
+        //TODO move this to a more suited place
+        if (strstr((const char *) glGetString(GL_EXTENSIONS),
+                                "GL_NV_vdpau_interop")) {
+                printf("VDPAU interop is supported!\n");
+#if 0
+                glXSwapIntervalSGIProc = (int (*)(int))
+                        glXGetProcAddressARB( (const GLubyte *) "glXSwapIntervalSGI");
+#endif
+        } else {
+                printf("VDPAU interop NOT supported!\n");
+                printf("%s\n", glGetString(GL_EXTENSIONS));
+        }
 
         return true;
 }
