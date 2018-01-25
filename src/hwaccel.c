@@ -31,7 +31,7 @@ void hw_vdpau_frame_init(hw_vdpau_frame *frame){
                 frame->data[i] = NULL;
         }
 
-        frame->surface = NULL;
+        frame->surface = 0;
 }
 
 void hw_vdpau_frame_unref(hw_vdpau_frame *frame){
@@ -78,7 +78,7 @@ hw_vdpau_frame *hw_vdpau_frame_from_avframe(hw_vdpau_frame *dst, const AVFrame *
                 dst->data[i] = src->data[i];
         }
 
-        dst->surface = (VdpVideoSurface *) dst->data[3];
+        dst->surface = (VdpVideoSurface) dst->data[3];
 
         return dst;
 }

@@ -293,6 +293,8 @@ static void glut_resize_window(bool fs, int height, double aspect, double window
 static void display_gl_set_sync_on_vblank(int value);
 static void screenshot(struct video_frame *frame);
 
+static void gl_render_vdpau(struct state_gl *s, char *data);
+
 #ifdef HAVE_MACOSX
 extern "C" void NSApplicationLoad(void);
 #endif
@@ -754,6 +756,9 @@ static void gl_render(struct state_gl *s, char *data)
                                         (s->current_display_desc.width + 3) / 4 * 4 * s->dxt_height,
                                         data);
                         break;
+                case HW_VDPAU:
+                        gl_render_vdpau(s, data);
+                        break;
                 default:
                         fprintf(stderr, "[GL] Fatal error - received unsupported codec.\n");
                         exit_uv(EXIT_FAILURE);
@@ -1192,6 +1197,18 @@ static void gl_render_uyvy(struct state_gl *s, char *data)
         glActiveTexture(GL_TEXTURE0 + 0);
         glBindTexture(GL_TEXTURE_2D, s->texture_display);
 }    
+
+static void gl_render_vdpau(struct state_gl *s, char *data)
+{
+        hw_vdpau_frame * frame = (hw_vdpau_frame *) data;
+
+        s->VDPAUInitNV((void *) frame->hwctx.device, (void *) frame->hwctx.get_proc_address);
+
+        printf("%d\n", s->VDPAUIsSurfaceNV(frame->surface));
+
+
+        s->VDPAUFiniNV();
+}
 
 static void gl_draw(double ratio, double bottom_offset, bool double_buf)
 {

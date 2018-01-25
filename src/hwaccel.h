@@ -21,7 +21,7 @@ typedef struct hw_vdpau_frame{
 
         //Theese are just pointers to the buffer
         uint8_t *data[AV_NUM_DATA_POINTERS];
-        VdpVideoSurface *surface; // Same as data[3]
+        VdpVideoSurface surface; // Same as data[3]
 } hw_vdpau_frame;
 
 void hw_vdpau_ctx_init(hw_vdpau_ctx *ctx);
