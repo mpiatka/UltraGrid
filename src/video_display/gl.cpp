@@ -218,34 +218,34 @@ struct state_gl {
         void (*VDPAUInitNV)(const void * /*vdpDevice*/,
                         const void * /*getProcAddress*/);
 
-        void (*VDPAUFiniNV)();
+        void (*VDPAUFiniNV)(void);
 
         vdpauSurfaceNV (*VDPAURegisterVideoSurfaceNV)(const void * /*vdpSurface*/,
-                        enum /*target*/,
-                        sizei /*numTextureNames*/,
+                        GLenum /*target*/,
+                        GLsizei /*numTextureNames*/,
                         const uint * /*textureNames*/);
 
         vdpauSurfaceNV (*VDPAURegisterOutputSurfaceNV)(const void * /*vdpSurface*/,
-                        enum /*target*/,
-                        sizei /*numTextureNames*/,
+                        GLenum /*target*/,
+                        GLsizei /*numTextureNames*/,
                         const uint * /*textureNames*/);
 
-        boolean (*VDPAUIsSurfaceNV)(vdpauSurfaceNV /*surface*/);
+        bool (*VDPAUIsSurfaceNV)(vdpauSurfaceNV /*surface*/);
         void (*VDPAUUnregisterSurfaceNV)(vdpauSurfaceNV /*surface*/);
 
         void (*VDPAUGetSurfaceivNV)(vdpauSurfaceNV /*surface*/,
-                        enum /*pname*/,
-                        sizei /*bufSize*/,
-                        sizei * /*length*/,
+                        GLenum /*pname*/,
+                        GLsizei /*bufSize*/,
+                        GLsizei * /*length*/,
                         int * /*values*/);
 
         void (*VDPAUSurfaceAccessNV)(vdpauSurfaceNV /*surface*/,
-                        enum /*access*/);
+                        GLenum /*access*/);
 
-        void (*VDPAUMapSurfacesNV)(vdpauSurfaceNV /*numSurfaces*/,
+        void (*VDPAUMapSurfacesNV)(GLsizei /*numSurfaces*/,
                         const vdpauSurfaceNV * /*surfaces*/);
 
-        void (*VDPAUUnmapSurfacesNV)(vdpauSurfaceNV /*numSurfaces*/,
+        void (*VDPAUUnmapSurfacesNV)(GLsizei /*numSurfaces*/,
                         const vdpauSurfaceNV * /*surfaces*/);
 
 
@@ -1025,10 +1025,47 @@ static bool display_gl_init_opengl(struct state_gl *s)
         if (strstr((const char *) glGetString(GL_EXTENSIONS),
                                 "GL_NV_vdpau_interop")) {
                 printf("VDPAU interop is supported!\n");
-#if 0
-                glXSwapIntervalSGIProc = (int (*)(int))
-                        glXGetProcAddressARB( (const GLubyte *) "glXSwapIntervalSGI");
-#endif
+
+                s->VDPAUInitNV = (void (*)(const void *, const void *))
+                        glXGetProcAddressARB( (const GLubyte *) "glVDPAUInitNV");
+
+                s->VDPAUFiniNV = (void (*)(void))
+                        glXGetProcAddressARB( (const GLubyte *) "glVDPAUFiniNV");
+
+                s->VDPAURegisterVideoSurfaceNV = (vdpauSurfaceNV (*)(const void *,
+                                        GLenum,
+                                        GLsizei,
+                                        const uint *))
+                        glXGetProcAddressARB( (const GLubyte *) "glVDPAURegisterVideoSurfaceNV");
+
+                s->VDPAURegisterOutputSurfaceNV = (vdpauSurfaceNV (*)(const void *,
+                                        GLenum,
+                                        GLsizei,
+                                        const uint *))
+                        glXGetProcAddressARB( (const GLubyte *) "glVDPAURegisterOutputSurfaceNV");
+
+                s->VDPAUIsSurfaceNV = (bool (*)(vdpauSurfaceNV))
+                        glXGetProcAddressARB( (const GLubyte *) "glVDPAUIsSurfaceNV");
+
+                s->VDPAUUnregisterSurfaceNV = (void (*)(vdpauSurfaceNV))
+                        glXGetProcAddressARB( (const GLubyte *) "glVDPAUUnregisterSurfaceNV");
+
+                s->VDPAUGetSurfaceivNV = (void (*)(vdpauSurfaceNV,
+                                        GLenum,
+                                        GLsizei,
+                                        GLsizei *,
+                                        int *))
+                        glXGetProcAddressARB( (const GLubyte *) "glVDPAUGetSurfaceivNV");
+
+                s->VDPAUSurfaceAccessNV = (void (*)(vdpauSurfaceNV, GLenum))
+                        glXGetProcAddressARB( (const GLubyte *) "glVDPAUSurfaceAccessNV");
+
+                s->VDPAUMapSurfacesNV = (void (*)(GLsizei, const vdpauSurfaceNV *))
+                        glXGetProcAddressARB( (const GLubyte *) "glVDPAUMapSurfacesNV");
+
+                s->VDPAUUnmapSurfacesNV = (void (*)(GLsizei, const vdpauSurfaceNV *))
+                        glXGetProcAddressARB( (const GLubyte *) "glVDPAUUnmapSurfacesNV");
+
         } else {
                 printf("VDPAU interop NOT supported!\n");
                 printf("%s\n", glGetString(GL_EXTENSIONS));
