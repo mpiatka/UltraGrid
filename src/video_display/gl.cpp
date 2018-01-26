@@ -230,7 +230,7 @@ struct state_gl {
                         GLsizei /*numTextureNames*/,
                         const uint * /*textureNames*/);
 
-        bool (*VDPAUIsSurfaceNV)(vdpauSurfaceNV /*surface*/);
+        GLboolean (*VDPAUIsSurfaceNV)(vdpauSurfaceNV /*surface*/);
         void (*VDPAUUnregisterSurfaceNV)(vdpauSurfaceNV /*surface*/);
 
         void (*VDPAUGetSurfaceivNV)(vdpauSurfaceNV /*surface*/,
@@ -1049,7 +1049,7 @@ static bool display_gl_init_opengl(struct state_gl *s)
                                         const uint *))
                         glXGetProcAddressARB( (const GLubyte *) "glVDPAURegisterOutputSurfaceNV");
 
-                s->VDPAUIsSurfaceNV = (bool (*)(vdpauSurfaceNV))
+                s->VDPAUIsSurfaceNV = (GLboolean (*)(vdpauSurfaceNV))
                         glXGetProcAddressARB( (const GLubyte *) "glVDPAUIsSurfaceNV");
 
                 s->VDPAUUnregisterSurfaceNV = (void (*)(vdpauSurfaceNV))
