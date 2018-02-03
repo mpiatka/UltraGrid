@@ -163,6 +163,50 @@ void main()
 } // main end
 );
 
+struct state_vdpau {
+        bool initialized = false;
+        GLuint textures[4] = {0};
+        hw_vdpau_frame last_frame;
+
+        void (*VDPAUInitNV)(const void * /*vdpDevice*/,
+                        const void * /*getProcAddress*/);
+
+        void (*VDPAUFiniNV)(void);
+
+        vdpauSurfaceNV (*VDPAURegisterVideoSurfaceNV)(const void * /*vdpSurface*/,
+                        GLenum /*target*/,
+                        GLsizei /*numTextureNames*/,
+                        const uint * /*textureNames*/);
+
+        vdpauSurfaceNV (*VDPAURegisterOutputSurfaceNV)(const void * /*vdpSurface*/,
+                        GLenum /*target*/,
+                        GLsizei /*numTextureNames*/,
+                        const uint * /*textureNames*/);
+
+        GLboolean (*VDPAUIsSurfaceNV)(vdpauSurfaceNV /*surface*/);
+        void (*VDPAUUnregisterSurfaceNV)(vdpauSurfaceNV /*surface*/);
+
+        void (*VDPAUGetSurfaceivNV)(vdpauSurfaceNV /*surface*/,
+                        GLenum /*pname*/,
+                        GLsizei /*bufSize*/,
+                        GLsizei * /*length*/,
+                        int * /*values*/);
+
+        void (*VDPAUSurfaceAccessNV)(vdpauSurfaceNV /*surface*/,
+                        GLenum /*access*/);
+
+        void (*VDPAUMapSurfacesNV)(GLsizei /*numSurfaces*/,
+                        const vdpauSurfaceNV * /*surfaces*/);
+
+        void (*VDPAUUnmapSurfacesNV)(GLsizei /*numSurfaces*/,
+                        const vdpauSurfaceNV * /*surfaces*/);
+
+        bool loadVdpGlFuncs();
+        bool init();
+        void uninit();
+
+};
+
 struct state_gl {
         GLuint          PHandle_uyvy, PHandle_dxt, PHandle_dxt5;
 
@@ -215,38 +259,7 @@ struct state_gl {
         bool fixed_size, first_run;
         int fixed_w, fixed_h;
 
-        void (*VDPAUInitNV)(const void * /*vdpDevice*/,
-                        const void * /*getProcAddress*/);
-
-        void (*VDPAUFiniNV)(void);
-
-        vdpauSurfaceNV (*VDPAURegisterVideoSurfaceNV)(const void * /*vdpSurface*/,
-                        GLenum /*target*/,
-                        GLsizei /*numTextureNames*/,
-                        const uint * /*textureNames*/);
-
-        vdpauSurfaceNV (*VDPAURegisterOutputSurfaceNV)(const void * /*vdpSurface*/,
-                        GLenum /*target*/,
-                        GLsizei /*numTextureNames*/,
-                        const uint * /*textureNames*/);
-
-        GLboolean (*VDPAUIsSurfaceNV)(vdpauSurfaceNV /*surface*/);
-        void (*VDPAUUnregisterSurfaceNV)(vdpauSurfaceNV /*surface*/);
-
-        void (*VDPAUGetSurfaceivNV)(vdpauSurfaceNV /*surface*/,
-                        GLenum /*pname*/,
-                        GLsizei /*bufSize*/,
-                        GLsizei * /*length*/,
-                        int * /*values*/);
-
-        void (*VDPAUSurfaceAccessNV)(vdpauSurfaceNV /*surface*/,
-                        GLenum /*access*/);
-
-        void (*VDPAUMapSurfacesNV)(GLsizei /*numSurfaces*/,
-                        const vdpauSurfaceNV * /*surfaces*/);
-
-        void (*VDPAUUnmapSurfacesNV)(GLsizei /*numSurfaces*/,
-                        const vdpauSurfaceNV * /*surfaces*/);
+        struct state_vdpau vdp;
 
 
         state_gl(struct module *parent) : PHandle_uyvy(0), PHandle_dxt(0), PHandle_dxt5(0),
@@ -674,6 +687,8 @@ static void gl_reconfigure_screen(struct state_gl *s, struct video_desc desc)
                                 (desc.width + 3) / 4 * 4, s->dxt_height, 0,
                                 (desc.width + 3) / 4 * 4 * s->dxt_height,
                                 NULL);
+        } else if (desc.color_spec == HW_VDPAU) {
+                s->vdp.init();
         }
 
         gl_check_error();
@@ -1026,56 +1041,6 @@ static bool display_gl_init_opengl(struct state_gl *s)
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // set row alignment to 1 byte instead of default
                                                // 4 bytes which won't work on row-unaligned RGB
 
-        //TODO move this to a more suited place
-        if (strstr((const char *) glGetString(GL_EXTENSIONS),
-                                "GL_NV_vdpau_interop")) {
-                printf("VDPAU interop is supported!\n");
-
-                s->VDPAUInitNV = (void (*)(const void *, const void *))
-                        glXGetProcAddressARB( (const GLubyte *) "glVDPAUInitNV");
-
-                s->VDPAUFiniNV = (void (*)(void))
-                        glXGetProcAddressARB( (const GLubyte *) "glVDPAUFiniNV");
-
-                s->VDPAURegisterVideoSurfaceNV = (vdpauSurfaceNV (*)(const void *,
-                                        GLenum,
-                                        GLsizei,
-                                        const uint *))
-                        glXGetProcAddressARB( (const GLubyte *) "glVDPAURegisterVideoSurfaceNV");
-
-                s->VDPAURegisterOutputSurfaceNV = (vdpauSurfaceNV (*)(const void *,
-                                        GLenum,
-                                        GLsizei,
-                                        const uint *))
-                        glXGetProcAddressARB( (const GLubyte *) "glVDPAURegisterOutputSurfaceNV");
-
-                s->VDPAUIsSurfaceNV = (GLboolean (*)(vdpauSurfaceNV))
-                        glXGetProcAddressARB( (const GLubyte *) "glVDPAUIsSurfaceNV");
-
-                s->VDPAUUnregisterSurfaceNV = (void (*)(vdpauSurfaceNV))
-                        glXGetProcAddressARB( (const GLubyte *) "glVDPAUUnregisterSurfaceNV");
-
-                s->VDPAUGetSurfaceivNV = (void (*)(vdpauSurfaceNV,
-                                        GLenum,
-                                        GLsizei,
-                                        GLsizei *,
-                                        int *))
-                        glXGetProcAddressARB( (const GLubyte *) "glVDPAUGetSurfaceivNV");
-
-                s->VDPAUSurfaceAccessNV = (void (*)(vdpauSurfaceNV, GLenum))
-                        glXGetProcAddressARB( (const GLubyte *) "glVDPAUSurfaceAccessNV");
-
-                s->VDPAUMapSurfacesNV = (void (*)(GLsizei, const vdpauSurfaceNV *))
-                        glXGetProcAddressARB( (const GLubyte *) "glVDPAUMapSurfacesNV");
-
-                s->VDPAUUnmapSurfacesNV = (void (*)(GLsizei, const vdpauSurfaceNV *))
-                        glXGetProcAddressARB( (const GLubyte *) "glVDPAUUnmapSurfacesNV");
-
-        } else {
-                printf("VDPAU interop NOT supported!\n");
-                printf("%s\n", glGetString(GL_EXTENSIONS));
-        }
-
         return true;
 }
 
@@ -1200,14 +1165,85 @@ static void gl_render_uyvy(struct state_gl *s, char *data)
 
 static void gl_render_vdpau(struct state_gl *s, char *data)
 {
+        assert(s->vdp.initialized);
         hw_vdpau_frame * frame = (hw_vdpau_frame *) data;
 
-        s->VDPAUInitNV((void *) frame->hwctx.device, (void *) frame->hwctx.get_proc_address);
+        s->vdp.VDPAUInitNV((void *) frame->hwctx.device, (void *) frame->hwctx.get_proc_address);
 
-        printf("%d\n", s->VDPAUIsSurfaceNV(frame->surface));
+        printf("%d\n", s->vdp.VDPAUIsSurfaceNV(frame->surface));
 
 
-        s->VDPAUFiniNV();
+        s->vdp.VDPAUFiniNV();
+}
+
+bool state_vdpau::init(){
+        loadVdpGlFuncs();
+        initialized = true;
+        glGenTextures(4, textures);
+        hw_vdpau_frame_init(&last_frame);
+
+        return true;
+}
+
+void state_vdpau::uninit(){
+        glDeleteTextures(4, textures);
+        for(int i = 0; i < 4; i++){
+                textures[i] = 0;
+        }
+}
+
+bool state_vdpau::loadVdpGlFuncs(){
+        if (!strstr((const char *) glGetString(GL_EXTENSIONS),
+                                "GL_NV_vdpau_interop"))
+        {
+                printf("VDPAU interop NOT supported!\n");
+                printf("Available extensions:%s\n", glGetString(GL_EXTENSIONS));
+                return false;
+        }
+
+        printf("VDPAU interop is supported!\n");
+
+        VDPAUInitNV = (void (*)(const void *, const void *))
+                glXGetProcAddressARB( (const GLubyte *) "glVDPAUInitNV");
+
+        VDPAUFiniNV = (void (*)(void))
+                glXGetProcAddressARB( (const GLubyte *) "glVDPAUFiniNV");
+
+        VDPAURegisterVideoSurfaceNV = (vdpauSurfaceNV (*)(const void *,
+                                GLenum,
+                                GLsizei,
+                                const uint *))
+                glXGetProcAddressARB( (const GLubyte *) "glVDPAURegisterVideoSurfaceNV");
+
+        VDPAURegisterOutputSurfaceNV = (vdpauSurfaceNV (*)(const void *,
+                                GLenum,
+                                GLsizei,
+                                const uint *))
+                glXGetProcAddressARB( (const GLubyte *) "glVDPAURegisterOutputSurfaceNV");
+
+        VDPAUIsSurfaceNV = (GLboolean (*)(vdpauSurfaceNV))
+                glXGetProcAddressARB( (const GLubyte *) "glVDPAUIsSurfaceNV");
+
+        VDPAUUnregisterSurfaceNV = (void (*)(vdpauSurfaceNV))
+                glXGetProcAddressARB( (const GLubyte *) "glVDPAUUnregisterSurfaceNV");
+
+        VDPAUGetSurfaceivNV = (void (*)(vdpauSurfaceNV,
+                                GLenum,
+                                GLsizei,
+                                GLsizei *,
+                                int *))
+                glXGetProcAddressARB( (const GLubyte *) "glVDPAUGetSurfaceivNV");
+
+        VDPAUSurfaceAccessNV = (void (*)(vdpauSurfaceNV, GLenum))
+                glXGetProcAddressARB( (const GLubyte *) "glVDPAUSurfaceAccessNV");
+
+        VDPAUMapSurfacesNV = (void (*)(GLsizei, const vdpauSurfaceNV *))
+                glXGetProcAddressARB( (const GLubyte *) "glVDPAUMapSurfacesNV");
+
+        VDPAUUnmapSurfacesNV = (void (*)(GLsizei, const vdpauSurfaceNV *))
+                glXGetProcAddressARB( (const GLubyte *) "glVDPAUUnmapSurfacesNV");
+
+        return true;
 }
 
 static void gl_draw(double ratio, double bottom_offset, bool double_buf)
