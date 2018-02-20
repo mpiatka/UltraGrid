@@ -128,14 +128,6 @@ void ComboBoxOption::setItem(const QVariant &data){
 		box->setCurrentIndex(idx);
 }
 
-void ComboBoxOption::setItem(const QString &text){
-	int idx = box->findText(text);
-
-	if(idx != -1)
-		box->setCurrentIndex(idx);
-}
-
-
 SourceOption::SourceOption(Ui::UltragridWindow *ui,
 		const QString& ultragridExecutable) :
 	ComboBoxOption(ui->videoSourceComboBox, ultragridExecutable, QString("-t")),

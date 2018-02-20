@@ -57,7 +57,6 @@ protected:
 	virtual QString getExtraParams() { return ""; }
 
 	void setItem(const QVariant &data);
-	void setItem(const QString &data);
 
 	QString ultragridExecutable;
 	QComboBox *box;
