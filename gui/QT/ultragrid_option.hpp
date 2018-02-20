@@ -15,19 +15,19 @@ class UltragridOption : public QObject{
 	Q_OBJECT
 public:
 	virtual QString getLaunchParam() = 0;
+	virtual void queryAvailOpts() = 0;
 	virtual void setAdvanced(bool advanced);
 
-public signals:
+signals:
 	void changed();
 
 public slots:
-	virtual void update() = 0;
+	virtual void update();
 
 protected:
 	UltragridOption() :
 		advanced(false) {  }
 
-private:
 	bool advanced;
 };
 
@@ -38,9 +38,9 @@ public:
 			QString opt);
 
 	virtual QString getLaunchParam() override;
-	virtual void queryAvailOpts();
+	virtual void queryAvailOpts() override;
 
-	QString getCurrentValue();
+	QString getCurrentValue() const;
 
 protected:
 	QStringList getAvailOpts();
@@ -48,10 +48,10 @@ protected:
 	void resetComboBox(QComboBox *box);
 
 	// Used to filter options with whitelists, blacklists, etc.
-	virtual bool filter(QString &item) { return true; }
+	virtual bool filter(const QString & /*item*/) { return true; }
 
 	// Used to query options not returned from the help command, e.g. v4l2 devices
-	virtual void queryExtraOpts() {  }
+	virtual void queryExtraOpts(const QStringList & /*opts*/) {  }
 
 	// Returns extra launch params like video mode, bitrate, etc.
 	virtual QString getExtraParams() { return ""; }
@@ -59,10 +59,8 @@ protected:
 	void setItem(const QVariant &data);
 	void setItem(const QString &data);
 
-private:
-	QComboBox *box;
-
 	QString ultragridExecutable;
+	QComboBox *box;
 	QString opt;
 };
 
@@ -74,9 +72,10 @@ public:
 			const QString& ultragridExecutable);
 
 protected:
-	virtual bool filter(QString &item) override;
+	virtual bool filter(const QString &item) override;
 	virtual void queryExtraOpts(const QStringList &opts) override;
 	virtual QString getExtraParams() override;
+
 private:
 	Ui::UltragridWindow *ui;
 
@@ -84,13 +83,13 @@ private slots:
 	void srcChanged();
 };
 
-class DisplayOption : public UltragridOption{
+class DisplayOption : public ComboBoxOption{
 	Q_OBJECT
 public:
 	DisplayOption(Ui::UltragridWindow *ui,
 			const QString& ultragridExecutable);
 
-	virtual bool filter(QString &item) override;
+	virtual bool filter(const QString &item) override;
 	virtual QString getLaunchParam() override;
 
 private:
@@ -101,14 +100,17 @@ private slots:
 	void enablePreview(bool);
 };
 
-class VideoCompressOption : public UltragridOption{
+class VideoCompressOption : public ComboBoxOption{
 	Q_OBJECT
 public:
 	VideoCompressOption(Ui::UltragridWindow *ui,
 			const QString& ultragridExecutable);
 
-	QString getLaunchParam() override;
-	void queryAvailOpts() override;
+protected:
+	virtual QString getExtraParams() override;
+	virtual bool filter(const QString &item) override;
+	virtual void queryExtraOpts(const QStringList &opts) override;
+
 private:
 	Ui::UltragridWindow *ui;
 
@@ -116,65 +118,51 @@ private slots:
 	void compChanged();
 };
 
-class AudioSourceOption : public UltragridOption{
+class AudioSourceOption : public ComboBoxOption{
 	Q_OBJECT
 public:
 	AudioSourceOption(Ui::UltragridWindow *ui,
 			const SourceOption *videoSrc,
 			const QString& ultragridExecutable);
 
-	QString getLaunchParam() override;
-	void queryAvailOpts() override;
 private:
 	Ui::UltragridWindow *ui;
 	const SourceOption *videoSource;
-
-private slots:
-	void update();
+	
+protected:
+	virtual QString getExtraParams() override;
+	virtual bool filter(const QString &item) override;
 };
 
-class AudioPlaybackOption : public UltragridOption{
+class AudioPlaybackOption : public ComboBoxOption{
 	Q_OBJECT
 public:
 	AudioPlaybackOption(Ui::UltragridWindow *ui,
 			const DisplayOption *videoDisplay,
 			const QString& ultragridExecutable);
 
-	QString getLaunchParam() override;
-	void queryAvailOpts() override;
+protected:
+	virtual bool filter(const QString &item) override;
+
 private:
 	Ui::UltragridWindow *ui;
 	const DisplayOption *videoDisplay;
-
-private slots:
-	void update();
 };
 
-class AudioCompressOption : public UltragridOption{
+class AudioCompressOption : public ComboBoxOption{
 	Q_OBJECT
 public:
 	AudioCompressOption(Ui::UltragridWindow *ui,
 			const QString& ultragridExecutable);
+	
+protected:
+	virtual QString getExtraParams() override;
 
-	QString getLaunchParam() override;
-	void queryAvailOpts() override;
 private:
 	Ui::UltragridWindow *ui;
 
 private slots:
 	void compChanged();
-};
-
-class GenericOption : public UltragridOption{
-public:
-	GenericOption(QComboBox *box,
-			const QString& ultragridExecutable,
-			QString opt);
-
-	QString getLaunchParam() override;
-	void queryAvailOpts() override;
-private:
-	QComboBox *box;
 };
 
 class FecOption : public UltragridOption{
@@ -185,16 +173,12 @@ public:
 	QString getLaunchParam() override;
 	void queryAvailOpts() override {  }
 
-	void setAdvanced(bool advanced) override {
-		this->advanced = advanced;
-		update();
-	}
-
 private:
+	QString opt;
 	Ui::UltragridWindow *ui;
 
-private slots:
-	void update();
+public slots:
+	void update() override;
 };
 
 #endif
