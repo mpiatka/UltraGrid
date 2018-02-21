@@ -166,7 +166,12 @@ void main()
 struct state_vdpau {
         bool initialized = false;
         GLuint textures[4] = {0};
-        hw_vdpau_frame last_frame;
+        hw_vdpau_frame lastFrame;
+
+        bool interopInitialized = false;
+        VdpDevice device = 0;
+        VdpGetProcAddress *get_proc_address = nullptr;
+        vdpauSurfaceNV surf = 0;
 
         void (*VDPAUInitNV)(const void * /*vdpDevice*/,
                         const void * /*getProcAddress*/);
@@ -203,6 +208,9 @@ struct state_vdpau {
 
         bool loadVdpGlFuncs();
         bool init();
+        void checkInterop(VdpDevice device, VdpGetProcAddress *get_proc_address);
+        void initInterop(VdpDevice device, VdpGetProcAddress *get_proc_address);
+        void uninitInterop();
         void uninit();
 
 };
@@ -1168,19 +1176,51 @@ static void gl_render_vdpau(struct state_gl *s, char *data)
         assert(s->vdp.initialized);
         hw_vdpau_frame * frame = (hw_vdpau_frame *) data;
 
-        s->vdp.VDPAUInitNV((void *) frame->hwctx.device, (void *) frame->hwctx.get_proc_address);
+        s->vdp.checkInterop(frame->hwctx.device, frame->hwctx.get_proc_address);
 
-        printf("%d\n", s->vdp.VDPAUIsSurfaceNV(frame->surface));
+        s->vdp.VDPAUUnregisterSurfaceNV(s->vdp.surf);
 
+        s->vdp.surf = s->vdp.VDPAURegisterVideoSurfaceNV((void *) frame->surface,
+                        GL_TEXTURE_2D,
+                        4,
+                        s->vdp.textures);
+        s->vdp.VDPAUMapSurfacesNV(1, &s->vdp.surf);
 
-        s->vdp.VDPAUFiniNV();
+        glBindTexture(GL_TEXTURE_2D, s->vdp.textures[0]);
+}
+
+void state_vdpau::checkInterop(VdpDevice device, VdpGetProcAddress *get_proc_address){
+        if(this->device != device || this->get_proc_address != get_proc_address){
+                uninitInterop();
+                initInterop(device, get_proc_address);
+        }
+}
+
+void state_vdpau::initInterop(VdpDevice device, VdpGetProcAddress *get_proc_address){
+        if(interopInitialized)
+                uninitInterop();
+
+        VDPAUInitNV((void *) device, (void *) get_proc_address);
+        this->device = device;
+        this->get_proc_address = get_proc_address;
+        interopInitialized = true;
+}
+
+void state_vdpau::uninitInterop(){
+        if(!interopInitialized)
+                return;
+
+        VDPAUFiniNV();
+        device = 0;
+        get_proc_address = nullptr;
+        interopInitialized = false;
 }
 
 bool state_vdpau::init(){
         loadVdpGlFuncs();
         initialized = true;
         glGenTextures(4, textures);
-        hw_vdpau_frame_init(&last_frame);
+        hw_vdpau_frame_init(&lastFrame);
 
         return true;
 }
