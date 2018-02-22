@@ -128,7 +128,7 @@ void ComboBoxOption::setItem(const QVariant &data){
 		box->setCurrentIndex(idx);
 }
 
-SourceOption::SourceOption(Ui::UltragridWindow *ui,
+VideoSourceOption::VideoSourceOption(Ui::UltragridWindow *ui,
 		const QString& ultragridExecutable) :
 	ComboBoxOption(ui->videoSourceComboBox, ultragridExecutable, QString("-t")),
 	ui(ui)
@@ -137,18 +137,18 @@ SourceOption::SourceOption(Ui::UltragridWindow *ui,
 	connect(ui->videoModeComboBox, SIGNAL(currentIndexChanged(int)), this, SIGNAL(changed()));
 }
 
-QString SourceOption::getExtraParams(){
+QString VideoSourceOption::getExtraParams(){
 	return ui->videoModeComboBox->currentData().toString();
 }
 
-bool SourceOption::filter(const QString &item){
+bool VideoSourceOption::filter(const QString &item){
 	const QStringList whiteList = {"testcard", "screen", "decklink", "aja", "dvs"};
 	return whiteList.contains(item)
 					&& testCaptureDisplay(ultragridExecutable,
 							QString("-t ") + item + QString(":help"));
 }
 
-void SourceOption::queryExtraOpts(const QStringList &opts){
+void VideoSourceOption::queryExtraOpts(const QStringList &opts){
 	if(opts.contains(QString("v4l2"))){
 		std::vector<Camera> cams = getCameras();
 		for(const auto& cam : cams){
@@ -159,7 +159,7 @@ void SourceOption::queryExtraOpts(const QStringList &opts){
 	}
 }
 
-void SourceOption::srcChanged(){
+void VideoSourceOption::srcChanged(){
 	QComboBox *src = ui->videoSourceComboBox;
 	QComboBox *mode = ui->videoModeComboBox;
 
@@ -219,7 +219,7 @@ void SourceOption::srcChanged(){
 	emit changed();
 }
 
-DisplayOption::DisplayOption(Ui::UltragridWindow *ui,
+VideoDisplayOption::VideoDisplayOption(Ui::UltragridWindow *ui,
 		const QString& ultragridExecutable):
 	ComboBoxOption(ui->videoDisplayComboBox, ultragridExecutable, QString("-d")),
 	ui(ui)
@@ -228,7 +228,7 @@ DisplayOption::DisplayOption(Ui::UltragridWindow *ui,
 	preview = ui->previewCheckBox->isChecked();
 }
 
-QString DisplayOption::getLaunchParam(){
+QString VideoDisplayOption::getLaunchParam(){
 	QComboBox *disp = ui->videoDisplayComboBox;
 	QString param;
 
@@ -249,7 +249,7 @@ QString DisplayOption::getLaunchParam(){
 	return param;
 }
 
-bool DisplayOption::filter(const QString &item){
+bool VideoDisplayOption::filter(const QString &item){
 	const QStringList whiteList = {"gl", "sdl", "decklink", "aja", "dvs"};
 
 	return whiteList.contains(item)
@@ -257,7 +257,7 @@ bool DisplayOption::filter(const QString &item){
 							QString("-d ") + item + QString(":help"));
 }
 
-void DisplayOption::enablePreview(bool enable){
+void VideoDisplayOption::enablePreview(bool enable){
 	preview = enable;
 	emit changed();
 }
@@ -309,7 +309,7 @@ void VideoCompressOption::compChanged(){
 }
 
 AudioSourceOption::AudioSourceOption(Ui::UltragridWindow *ui,
-		const SourceOption *videoSource,
+		const VideoSourceOption *videoSource,
 		const QString& ultragridExecutable) :
 	ComboBoxOption(ui->audioSourceComboBox, ultragridExecutable, QString("-s")),
 	ui(ui),
@@ -338,7 +338,7 @@ bool AudioSourceOption::filter(const QString &item){
 }
 
 AudioPlaybackOption::AudioPlaybackOption(Ui::UltragridWindow *ui,
-		const DisplayOption *videoDisplay,
+		const VideoDisplayOption *videoDisplay,
 		const QString& ultragridExecutable) :
 	ComboBoxOption(ui->audioPlaybackComboBox, ultragridExecutable, QString("-r")),
 	ui(ui),

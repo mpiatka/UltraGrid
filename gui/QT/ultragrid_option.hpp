@@ -63,11 +63,11 @@ protected:
 	QString opt;
 };
 
-class SourceOption : public ComboBoxOption{
+class VideoSourceOption : public ComboBoxOption{
 	Q_OBJECT
 public:
 
-	SourceOption(Ui::UltragridWindow *ui,
+	VideoSourceOption(Ui::UltragridWindow *ui,
 			const QString& ultragridExecutable);
 
 protected:
@@ -82,10 +82,10 @@ private slots:
 	void srcChanged();
 };
 
-class DisplayOption : public ComboBoxOption{
+class VideoDisplayOption : public ComboBoxOption{
 	Q_OBJECT
 public:
-	DisplayOption(Ui::UltragridWindow *ui,
+	VideoDisplayOption(Ui::UltragridWindow *ui,
 			const QString& ultragridExecutable);
 
 	virtual bool filter(const QString &item) override;
@@ -121,12 +121,12 @@ class AudioSourceOption : public ComboBoxOption{
 	Q_OBJECT
 public:
 	AudioSourceOption(Ui::UltragridWindow *ui,
-			const SourceOption *videoSrc,
+			const VideoSourceOption *videoSrc,
 			const QString& ultragridExecutable);
 
 private:
 	Ui::UltragridWindow *ui;
-	const SourceOption *videoSource;
+	const VideoSourceOption *videoSource;
 	
 protected:
 	virtual QString getExtraParams() override;
@@ -137,7 +137,7 @@ class AudioPlaybackOption : public ComboBoxOption{
 	Q_OBJECT
 public:
 	AudioPlaybackOption(Ui::UltragridWindow *ui,
-			const DisplayOption *videoDisplay,
+			const VideoDisplayOption *videoDisplay,
 			const QString& ultragridExecutable);
 
 protected:
@@ -145,7 +145,7 @@ protected:
 
 private:
 	Ui::UltragridWindow *ui;
-	const DisplayOption *videoDisplay;
+	const VideoDisplayOption *videoDisplay;
 };
 
 class AudioCompressOption : public ComboBoxOption{
