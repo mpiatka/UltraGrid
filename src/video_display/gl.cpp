@@ -1176,6 +1176,8 @@ static void gl_render_vdpau(struct state_gl *s, char *data)
         assert(s->vdp.initialized);
         hw_vdpau_frame * frame = (hw_vdpau_frame *) data;
 
+        printf("Surface:%d frame:%p\n", frame->surface, frame);
+
         s->vdp.checkInterop(frame->hwctx.device, frame->hwctx.get_proc_address);
 
         s->vdp.VDPAUUnregisterSurfaceNV(s->vdp.surf);
@@ -1187,6 +1189,9 @@ static void gl_render_vdpau(struct state_gl *s, char *data)
         s->vdp.VDPAUMapSurfacesNV(1, &s->vdp.surf);
 
         glBindTexture(GL_TEXTURE_2D, s->vdp.textures[0]);
+
+        hw_vdpau_frame_unref(&s->vdp.lastFrame);
+        s->vdp.lastFrame = hw_vdpau_frame_copy(frame);
 }
 
 void state_vdpau::checkInterop(VdpDevice device, VdpGetProcAddress *get_proc_address){

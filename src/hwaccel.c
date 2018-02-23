@@ -51,7 +51,8 @@ hw_vdpau_frame hw_vdpau_frame_copy(const hw_vdpau_frame *frame){
         new_frame.hwctx = hw_vdpau_ctx_copy(&frame->hwctx);
 
         for(int i = 0; i < AV_NUM_DATA_POINTERS; i++){
-                new_frame.buf[i] = av_buffer_ref(frame->buf[i]);
+                if(frame->buf[i])
+                        new_frame.buf[i] = av_buffer_ref(frame->buf[i]);
                 new_frame.data[i] = frame->data[i];
         }
 
