@@ -136,6 +136,9 @@ void vf_data_deleter(struct video_frame *buf)
                 return;
 
         for(unsigned int i = 0u; i < buf->tile_count; ++i) {
+                if(buf->free_extra_data)
+                        buf->free_extra_data(buf->tiles[i].data);
+
                 free(buf->tiles[i].data);
         }
 }
