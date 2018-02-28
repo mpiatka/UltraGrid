@@ -1226,6 +1226,7 @@ void state_vdpau::uninitInterop(){
         get_proc_address = nullptr;
         interopInitialized = false;
 
+        //VDPAUFiniNV() unmaps and unregisters all surfaces automatically
         surf = 0;
 }
 
