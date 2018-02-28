@@ -1222,6 +1222,8 @@ void state_vdpau::uninitInterop(){
         device = 0;
         get_proc_address = nullptr;
         interopInitialized = false;
+
+        surf = 0;
 }
 
 bool state_vdpau::init(){
