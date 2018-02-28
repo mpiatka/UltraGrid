@@ -1189,6 +1189,9 @@ static void gl_render_vdpau(struct state_gl *s, char *data)
                         GL_TEXTURE_2D,
                         4,
                         s->vdp.textures);
+
+        s->vdp.VDPAUSurfaceAccessNV(s->vdp.surf, GL_WRITE_DISCARD_NV);
+
         s->vdp.VDPAUMapSurfacesNV(1, &s->vdp.surf);
 
         glBindTexture(GL_TEXTURE_2D, s->vdp.textures[0]);
