@@ -1179,6 +1179,7 @@ static void gl_render_vdpau(struct state_gl *s, char *data)
         hw_vdpau_frame * frame = (hw_vdpau_frame *) data;
 
         printf("Surface:%d frame:%p\n", frame->surface, frame);
+        glBindTexture(GL_TEXTURE_2D, 0);
 
         s->vdp.checkInterop(frame->hwctx.device, frame->hwctx.get_proc_address);
 
