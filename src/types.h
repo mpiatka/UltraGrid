@@ -207,9 +207,10 @@ struct video_frame {
 
         /**
          * This function is currently used to free references to hw surfaces.
-         * If defined it is also called by data_deleter before destructing video data
+         *
+         * If defined it is called by also by data_deleter before destructing video data
          */
-        void               (*free_extra_data)(void *data);
+        void               (*free_extra_data_fcn)(void *data);
 
         // metadata follow
         struct fec_desc fec_params;

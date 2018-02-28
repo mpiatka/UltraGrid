@@ -115,6 +115,7 @@ struct video_frame * vf_alloc_desc_data(struct video_desc desc)
         }
 
         buf->data_deleter = vf_data_deleter;
+        buf->free_extra_data_fcn = get_free_extra_data_fcn(desc.color_spec);
 
         return buf;
 }
@@ -130,15 +131,23 @@ void vf_free(struct video_frame *buf)
         free(buf);
 }
 
+void vf_free_extra_data(struct video_frame *buf)
+{
+        for(unsigned int i = 0u; i < buf->tile_count; ++i) {
+                if(buf->free_extra_data_fcn)
+                        buf->free_extra_data_fcn(buf->tiles[i].data);
+        }
+
+}
+
 void vf_data_deleter(struct video_frame *buf)
 {
         if(!buf)
                 return;
 
-        for(unsigned int i = 0u; i < buf->tile_count; ++i) {
-                if(buf->free_extra_data)
-                        buf->free_extra_data(buf->tiles[i].data);
+        vf_free_extra_data(buf);
 
+        for(unsigned int i = 0u; i < buf->tile_count; ++i) {
                 free(buf->tiles[i].data);
         }
 }

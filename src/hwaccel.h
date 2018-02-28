@@ -34,6 +34,7 @@ hw_vdpau_ctx hw_vdpau_ctx_copy(const hw_vdpau_ctx *ctx);
 
 void hw_vdpau_frame_init(hw_vdpau_frame *frame);
 void hw_vdpau_frame_unref(hw_vdpau_frame *frame);
+void hw_vdpau_free_extra_data(void *frame);
 hw_vdpau_frame hw_vdpau_frame_copy(const hw_vdpau_frame *frame);
 
 hw_vdpau_frame *hw_vdpau_frame_from_avframe(hw_vdpau_frame *dst, const AVFrame *src);

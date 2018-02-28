@@ -44,6 +44,10 @@ void hw_vdpau_frame_unref(hw_vdpau_frame *frame){
         hw_vdpau_frame_init(frame);
 }
 
+void hw_vdpau_free_extra_data(void *frame){
+        hw_vdpau_frame_unref((hw_vdpau_frame *) frame);
+}
+
 hw_vdpau_frame hw_vdpau_frame_copy(const hw_vdpau_frame *frame){
         hw_vdpau_frame new_frame;
         hw_vdpau_frame_init(&new_frame);
