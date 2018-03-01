@@ -92,7 +92,11 @@ struct video_frame * vf_alloc_desc(struct video_desc desc)
                 memset(&buf->tiles[i], 0, sizeof(buf->tiles[i]));
                 buf->tiles[i].width = desc.width;
                 buf->tiles[i].height = desc.height;
-                buf->tiles[i].data_len = vc_get_linesize(desc.width, desc.color_spec) * desc.height;
+                if(codec_is_const_size(desc.color_spec)){
+                        buf->tiles[i].data_len = get_pf_block_size(desc.color_spec);
+                } else {
+                        buf->tiles[i].data_len = vc_get_linesize(desc.width, desc.color_spec) * desc.height;
+                }
         }
 
         return buf;
@@ -106,9 +110,13 @@ struct video_frame * vf_alloc_desc_data(struct video_desc desc)
 
         if(buf) {
                 for(unsigned int i = 0; i < desc.tile_count; ++i) {
-                        buf->tiles[i].data_len = vc_get_linesize(desc.width,
-                                        desc.color_spec) *
-                                desc.height;
+                        if(codec_is_const_size(desc.color_spec)){
+                                buf->tiles[i].data_len = get_pf_block_size(desc.color_spec);
+                        } else {
+                                buf->tiles[i].data_len = vc_get_linesize(desc.width,
+                                                desc.color_spec) *
+                                        desc.height;
+                        }
                         buf->tiles[i].data = (char *) malloc(buf->tiles[i].data_len);
                         assert(buf->tiles[i].data != NULL);
                 }
