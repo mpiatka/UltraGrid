@@ -83,6 +83,7 @@ const char      *get_codec_file_extension(codec_t codec) __attribute__((pure));
 decoder_t        get_decoder_from_to(codec_t in, codec_t out, bool slow) __attribute__((pure));
 
 void (*get_free_extra_data_fcn(codec_t))(void *) __attribute__((pure));
+void *(*get_copy_data_fcn(codec_t))(void *, const void *, size_t) __attribute__((pure));
 
 int get_aligned_length(int width, codec_t codec) __attribute__((pure));
 int get_pf_block_size(codec_t codec) __attribute__((pure));

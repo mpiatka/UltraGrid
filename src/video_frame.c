@@ -373,9 +373,14 @@ struct video_frame *vf_get_copy(struct video_frame *original) {
         frame_copy->tiles = (struct tile *) malloc(sizeof(struct tile) * frame_copy->tile_count);
         memcpy(frame_copy->tiles, original->tiles, sizeof(struct tile) * frame_copy->tile_count);
 
+        void *(*copy_fcn)(void *, const void *, size_t) = memcpy;
+        if(get_copy_data_fcn(original->color_spec)){
+                copy_fcn = get_copy_data_fcn(original->color_spec);
+        }
+
         for(int i = 0; i < (int) frame_copy->tile_count; ++i) {
                 frame_copy->tiles[i].data = (char *) malloc(frame_copy->tiles[i].data_len);
-                memcpy(frame_copy->tiles[i].data, original->tiles[i].data,
+                copy_fcn(frame_copy->tiles[i].data, original->tiles[i].data,
                                 frame_copy->tiles[i].data_len);
         }
 
