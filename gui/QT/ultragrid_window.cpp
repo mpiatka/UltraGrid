@@ -166,7 +166,7 @@ void UltragridWindow::startPreview(){
 	command += " ";
 	command += sourceOption->getLaunchParam();
 	command += "-d preview ";
-	if(sourceOption->getCurrentValue() != ""){
+	if(sourceOption->getCurrentValue() != "none"){
 		//We prevent video from network overriding local sources
 		//by listening on port 0
 		command += "-P 0 ";

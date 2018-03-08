@@ -45,7 +45,7 @@ public:
 protected:
 	QStringList getAvailOpts();
 
-	void resetComboBox(QComboBox *box);
+	virtual void resetComboBox(QComboBox *box);
 
 	// Used to filter options with whitelists, blacklists, etc.
 	virtual bool filter(const QString & /*item*/) { return true; }
@@ -75,6 +75,8 @@ protected:
 	virtual void queryExtraOpts(const QStringList &opts) override;
 	virtual QString getExtraParams() override;
 
+	virtual void resetComboBox(QComboBox *box) override;
+
 private:
 	Ui::UltragridWindow *ui;
 
@@ -90,6 +92,9 @@ public:
 
 	virtual bool filter(const QString &item) override;
 	virtual QString getLaunchParam() override;
+
+protected:
+	virtual void resetComboBox(QComboBox *box) override;
 
 private:
 	Ui::UltragridWindow *ui;
