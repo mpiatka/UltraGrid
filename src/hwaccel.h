@@ -43,6 +43,9 @@ hw_vdpau_frame *hw_vdpau_frame_from_avframe(hw_vdpau_frame *dst, const AVFrame *
 
 typedef struct vdp_funcs{
         VdpVideoSurfaceGetParameters *videoSurfaceGetParameters;
+        VdpVideoMixerCreate *videoMixerCreate;
+        VdpVideoMixerDestroy *videoMixerDestroy;
+        VdpVideoMixerRender *videoMixerRender;;
 } vdp_funcs;
 
 void vdp_funcs_init(vdp_funcs *);
