@@ -98,3 +98,11 @@ hw_vdpau_frame *hw_vdpau_frame_from_avframe(hw_vdpau_frame *dst, const AVFrame *
 
         return dst;
 }
+
+void vdp_funcs_init(vdp_funcs *f){
+        f->videoSurfaceGetParameters = NULL;
+}
+
+void vdp_funcs_load(vdp_funcs *f, VdpDevice device, VdpGetProcAddress *get_proc_address){
+        get_proc_address(device, VDP_FUNC_ID_VIDEO_SURFACE_GET_PARAMETERS, &f->videoSurfaceGetParameters);
+}
