@@ -169,9 +169,16 @@ struct state_vdpau {
         hw_vdpau_frame lastFrame;
 
         bool interopInitialized = false;
-        VdpDevice device = 0;
+        VdpDevice device = VDP_INVALID_HANDLE;
         VdpGetProcAddress *get_proc_address = nullptr;
         vdpauSurfaceNV surf = 0;
+
+        VdpOutputSurface out_surf = VDP_INVALID_HANDLE;
+        VdpVideoMixer mixer = VDP_INVALID_HANDLE;
+
+        uint32_t surf_width = 0;
+        uint32_t surf_height = 0;
+        VdpChromaType surf_ct = 0;
 
         void (*VDPAUInitNV)(const void * /*vdpDevice*/,
                         const void * /*getProcAddress*/);
@@ -1175,6 +1182,54 @@ static void gl_render_uyvy(struct state_gl *s, char *data)
         glBindTexture(GL_TEXTURE_2D, s->texture_display);
 }    
 
+static void check_mixer(struct state_gl *s, hw_vdpau_frame *frame){
+        uint32_t frame_w;
+        uint32_t frame_h;
+        VdpChromaType ct;
+
+        VdpStatus st = s->vdp.funcs.videoSurfaceGetParameters(frame->surface,
+                        &ct,
+                        &frame_w,
+                        &frame_h);
+
+        if(s->vdp.surf_width != frame_w ||
+                        s->vdp.surf_height != frame_h ||
+                        s->vdp.surf_ct != ct){
+                st = s->vdp.funcs.outputSurfaceDestroy(s->vdp.out_surf);
+                st = s->vdp.funcs.videoMixerDestroy(s->vdp.mixer);
+
+                s->vdp.surf_ct = ct;
+                s->vdp.surf_width = frame_w;
+                s->vdp.surf_height = frame_h;
+
+                st = s->vdp.funcs.outputSurfaceCreate(s->vdp.device,
+                                VDP_RGBA_FORMAT_B8G8R8A8,
+                                s->vdp.surf_width,
+                                s->vdp.surf_height,
+                                &s->vdp.out_surf);
+
+                VdpVideoMixerParameter params[] = {
+                        VDP_VIDEO_MIXER_PARAMETER_CHROMA_TYPE,
+                        VDP_VIDEO_MIXER_PARAMETER_VIDEO_SURFACE_WIDTH,
+                        VDP_VIDEO_MIXER_PARAMETER_VIDEO_SURFACE_HEIGHT
+                };
+
+                void *param_vals[] = {
+                        &s->vdp.surf_ct,
+                        &s->vdp.surf_width,
+                        &s->vdp.surf_height
+                };
+
+                st = s->vdp.funcs.videoMixerCreate(s->vdp.device,
+                                0,
+                                NULL,
+                                3,
+                                params,
+                                param_vals,
+                                &s->vdp.mixer);
+        }
+}
+
 static void gl_render_vdpau(struct state_gl *s, char *data)
 {
         assert(s->vdp.initialized);
@@ -1184,6 +1239,7 @@ static void gl_render_vdpau(struct state_gl *s, char *data)
         glBindTexture(GL_TEXTURE_2D, 0);
 
         s->vdp.checkInterop(frame->hwctx.device, frame->hwctx.get_proc_address);
+        check_mixer(s, frame);
 
         uint32_t width, height;
         VdpChromaType ct;

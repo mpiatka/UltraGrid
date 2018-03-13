@@ -108,4 +108,8 @@ void vdp_funcs_load(vdp_funcs *f, VdpDevice device, VdpGetProcAddress *get_proc_
         get_proc_address(device, VDP_FUNC_ID_VIDEO_MIXER_CREATE, &f->videoMixerCreate);
         get_proc_address(device, VDP_FUNC_ID_VIDEO_MIXER_DESTROY, &f->videoMixerDestroy);
         get_proc_address(device, VDP_FUNC_ID_VIDEO_MIXER_RENDER, &f->videoMixerRender);
+
+        get_proc_address(device, VDP_FUNC_ID_OUTPUT_SURFACE_CREATE, &f->outputSurfaceCreate);
+        get_proc_address(device, VDP_FUNC_ID_OUTPUT_SURFACE_DESTROY, &f->outputSurfaceDestroy);
+        get_proc_address(device, VDP_FUNC_ID_OUTPUT_SURFACE_GET_PARAMETERS, &f->outputSurfaceGetParameters);
 }
