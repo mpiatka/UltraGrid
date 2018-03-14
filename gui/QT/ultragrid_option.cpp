@@ -229,11 +229,6 @@ void VideoSourceOption::resetComboBox(QComboBox *box){
 	box->addItem(QString("none / network"), QString("none"));
 }
 
-void VideoDisplayOption::resetComboBox(QComboBox *box){
-	box->clear();
-	box->addItem(QString("none / network"), QString("none"));
-}
-
 VideoDisplayOption::VideoDisplayOption(Ui::UltragridWindow *ui,
 		const QString& ultragridExecutable):
 	ComboBoxOption(ui->videoDisplayComboBox, ultragridExecutable, QString("-d")),

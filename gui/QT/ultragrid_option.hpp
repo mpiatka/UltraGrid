@@ -93,9 +93,6 @@ public:
 	virtual bool filter(const QString &item) override;
 	virtual QString getLaunchParam() override;
 
-protected:
-	virtual void resetComboBox(QComboBox *box) override;
-
 private:
 	Ui::UltragridWindow *ui;
 	bool preview;
