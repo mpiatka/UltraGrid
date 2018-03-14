@@ -50,6 +50,8 @@ typedef struct vdp_funcs{
         VdpOutputSurfaceCreate *outputSurfaceCreate;
         VdpOutputSurfaceDestroy *outputSurfaceDestroy;
         VdpOutputSurfaceGetParameters *outputSurfaceGetParameters;
+
+        VdpGetErrorString *getErrorString;
 } vdp_funcs;
 
 void vdp_funcs_init(vdp_funcs *);

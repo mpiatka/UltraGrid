@@ -112,4 +112,6 @@ void vdp_funcs_load(vdp_funcs *f, VdpDevice device, VdpGetProcAddress *get_proc_
         get_proc_address(device, VDP_FUNC_ID_OUTPUT_SURFACE_CREATE, &f->outputSurfaceCreate);
         get_proc_address(device, VDP_FUNC_ID_OUTPUT_SURFACE_DESTROY, &f->outputSurfaceDestroy);
         get_proc_address(device, VDP_FUNC_ID_OUTPUT_SURFACE_GET_PARAMETERS, &f->outputSurfaceGetParameters);
+
+        get_proc_address(device, VDP_FUNC_ID_GET_ERROR_STRING, &f->getErrorString);
 }
