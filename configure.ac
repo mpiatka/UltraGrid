@@ -2699,6 +2699,8 @@ then
         CFLAGS="$CFLAGS -DUSE_HWACC ${LAVC_HWACC_CFLAGS}"
         CXXFLAGS="$CXXFLAGS -DUSE_HWACC ${LAVC_HWACC_CFLAGS}"
 		LIBS="$LIBS ${LAVC_HWACC_LIBS}"
+        HW_ACC_OBJ="src/hwaccel.o"
+        ADD_MODULE("hw_accel", "$HW_ACC_OBJ", "$HW_ACC_LIBS")
         lavc_hwacc=yes
 fi
 
