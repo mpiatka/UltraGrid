@@ -1775,7 +1775,6 @@ static const struct decode_from_to *libavcodec_decompress_get_decoders() {
                 { J2K, RGB, 500 },
                 { VP8, UYVY, 500 },
                 { VP9, UYVY, 500 },
-                { H264, HW_VDPAU, 200 },
         };
 
         static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
@@ -1790,6 +1789,10 @@ static const struct decode_from_to *libavcodec_decompress_get_decoders() {
                                 (struct decode_from_to) {H264, v210, 400};
                         ret[sizeof dec_static / sizeof dec_static[0] + 1] =
                                 (struct decode_from_to) {H265, v210, 400};
+                }
+                if (get_commandline_param("use-hw-accel")) {
+                        ret[sizeof dec_static / sizeof dec_static[0]] =
+                                (struct decode_from_to) {H264, HW_VDPAU, 200};
                 }
         }
         pthread_mutex_unlock(&lock); // prevent concurent initialization
