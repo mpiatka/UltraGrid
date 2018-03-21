@@ -1105,17 +1105,6 @@ static void yuv444p10le_to_rgb24(char *dst_buffer, AVFrame *in_frame,
         free(tmp);
 }
 
-static void not_implemented_conv(char *dst_buffer, AVFrame *in_frame,
-                int width, int height, int pitch)
-{
-        UNUSED(dst_buffer);
-        UNUSED(in_frame);
-        UNUSED(width);
-        UNUSED(height);
-        UNUSED(pitch);
-        log_msg(LOG_LEVEL_ERROR, "Selected conversion is not implemented!\n");
-}
-
 #ifdef USE_HWACC
 static void av_vdpau_to_ug_vdpau(char *dst_buffer, AVFrame *in_frame,
                 int width, int height, int pitch)
@@ -1130,7 +1119,27 @@ static void av_vdpau_to_ug_vdpau(char *dst_buffer, AVFrame *in_frame,
 
         hw_vdpau_frame_from_avframe(out, in_frame);
 }
+
+static void yuv422p_to_vdpau(char *dst_buffer, AVFrame *in_frame,
+                int width, int height, int pitch)
+{
+        UNUSED(pitch);
+        hw_vdpau_frame *dst = (hw_vdpau_frame *) dst_buffer;
+        struct state_libavcodec_decompress *s = (struct state_libavcodec_decompress *) in_frame->opaque;
+
+}
 #endif
+
+static void not_implemented_conv(char *dst_buffer, AVFrame *in_frame,
+                int width, int height, int pitch)
+{
+        UNUSED(dst_buffer);
+        UNUSED(in_frame);
+        UNUSED(width);
+        UNUSED(height);
+        UNUSED(pitch);
+        log_msg(LOG_LEVEL_ERROR, "Selected conversion is not implemented!\n");
+}
 
 static const struct {
         int av_codec;
@@ -1178,6 +1187,7 @@ static const struct {
 #ifdef USE_HWACC
         // HW acceleration
         {AV_PIX_FMT_VDPAU, HW_VDPAU, av_vdpau_to_ug_vdpau},
+        //{AV_PIX_FMT_YUV422P, HW_VDPAU, yuv422p_to_vdpau},
 #endif
 };
 
@@ -1698,6 +1708,7 @@ static int libavcodec_decompress(void *state, unsigned char *dst, unsigned char 
                                         s->last_frame_seq = frame_seq;
                                 }
                         }
+                        s->frame->opaque = s;
                 }
 
                 if (len <= 0) {
