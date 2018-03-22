@@ -1522,29 +1522,30 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribu
         }
 
 
+        bool hwaccel = get_commandline_param("use-hw-accel") != NULL;
 #ifdef USE_HWACC
         struct state_libavcodec_decompress *state = (struct state_libavcodec_decompress *) s->opaque;
         hwaccel_state_reset(&state->hwaccel);
-        const char *param = get_commandline_param("use-hw-accel");
-        bool hwaccel = param != NULL;
+
+        static const struct{
+                enum AVPixelFormat pix_fmt;
+                int (*init_func)(AVCodecContext *);
+        } accels[] = {
+                {AV_PIX_FMT_VDPAU, vdpau_init},
+                {AV_PIX_FMT_VAAPI, vaapi_init}
+        };
 
         if(hwaccel){
                 for(const enum AVPixelFormat *it = fmt; *it != AV_PIX_FMT_NONE; it++){
-                        if (*it == AV_PIX_FMT_VDPAU){
-                                int ret = vdpau_init(s);
-                                if(ret < 0){
-                                        hwaccel_state_reset(&state->hwaccel);
-                                        continue;
+                        for(unsigned i = 0; i < sizeof(accels) / sizeof(accels[0]); i++){
+                                if(*it == accels[i].pix_fmt){
+                                        int ret = accels[i].init_func(s);
+                                        if(ret < 0){
+                                                hwaccel_state_reset(&state->hwaccel);
+                                                break;
+                                        }
+                                        return accels[i].pix_fmt;
                                 }
-                                return AV_PIX_FMT_VDPAU;
-                        }
-                        if (*it == AV_PIX_FMT_VAAPI){
-                                int ret = vaapi_init(s);
-                                if(ret < 0){
-                                        hwaccel_state_reset(&state->hwaccel);
-                                        continue;
-                                }
-                                return AV_PIX_FMT_VAAPI;
                         }
                 }
 
@@ -1553,13 +1554,19 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribu
 
 #endif
 
-        while (*fmt != AV_PIX_FMT_NONE) {
+        for (; *fmt != AV_PIX_FMT_NONE; fmt++) {
+                //If hwaccel is not enabled skip hw accel pixfmts even if there
+                //are convert functions
+                const AVPixFmtDescriptor *fmt_desc = av_pix_fmt_desc_get(*fmt);
+                if(!hwaccel && fmt_desc && (fmt_desc->flags & AV_PIX_FMT_FLAG_HWACCEL)){
+                        continue;
+                }
+
                 for (unsigned int i = 0; i < sizeof convert_funcs / sizeof convert_funcs[0]; ++i) {
                         if (convert_funcs[i].av_codec == *fmt) {
                                 return *fmt;
                         }
                 }
-                fmt++;
         }
 
         return AV_PIX_FMT_NONE;
