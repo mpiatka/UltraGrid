@@ -1219,7 +1219,7 @@ static int reconfigure_if_needed(struct state_video_decoder *decoder,
         }
 
         if(force){
-                printf("forced reconf\n");
+                log_msg(LOG_LEVEL_VERBOSE, "forced reconf\n");
         }
 
 #ifdef RECONFIGURE_IN_FUTURE_THREAD

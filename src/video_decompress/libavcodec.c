@@ -1712,8 +1712,6 @@ static decompress_status libavcodec_decompress(void *state, unsigned char *dst, 
                                         transfer_frame(&s->hwaccel, s->frame);
                                 }
 #endif
-                                printf("interlaced: %d", s->frame->interlaced_frame);
-                                printf("Display num: %d, coded num: %d, top_first: %d\n", s->frame->display_picture_number, s->frame->coded_picture_number, s->frame->top_field_first);
                                 bool ret = change_pixfmt(s->frame, dst, s->frame->format,
                                                 s->out_codec, s->width, s->height, s->pitch);
                                 if(ret == TRUE) {
