@@ -505,17 +505,19 @@ cleanup:
         return NULL;
 }
 
-static void blacklist_current_out_codec(struct state_video_decoder *decoder){
+static bool blacklist_current_out_codec(struct state_video_decoder *decoder){
         if(decoder->out_codec == VIDEO_CODEC_NONE)
-                return;
+                return false;
 
         for(size_t i = 0; i < decoder->native_count; i++){
                 if(decoder->native_codecs[i] == decoder->out_codec){
+                        log_msg(LOG_LEVEL_DEBUG, "Blacklisting codec %s\n", get_codec_name(decoder->out_codec));
                         decoder->native_codecs[i] = VIDEO_CODEC_NONE;
                         decoder->out_codec = VIDEO_CODEC_NONE;
-                        log_msg(LOG_LEVEL_WARNING, "Blacklisting codec\n");
                 }
         }
+
+        return true;
 }
 
 static void *decompress_thread(void *args) {
@@ -555,9 +557,8 @@ static void *decompress_thread(void *args) {
                                                         msg->buffer_num[pos]);
                                         if (ret != DECODER_GOT_FRAME) {
                                                 if(ret == DECODER_CANT_DECODE){
-                                                        blacklist_current_out_codec(decoder);
-                                                        printf("push\n");
-                                                        decoder->msg_queue.push(new main_msg_reconfigure(decoder->received_vid_desc, nullptr, true));
+                                                        if(blacklist_current_out_codec(decoder))
+                                                                decoder->msg_queue.push(new main_msg_reconfigure(decoder->received_vid_desc, nullptr, true));
                                                 }
                                                 goto skip_frame;
                                         }
