@@ -19,7 +19,7 @@ UltragridWindow::UltragridWindow(QWidget *parent): QMainWindow(parent){
 	connect(ui.startButton, SIGNAL(clicked()), this, SLOT(start()));
 	connect(&process, SIGNAL(readyReadStandardOutput()), this, SLOT(outputAvailable()));
 	connect(&process, SIGNAL(readyReadStandardError()), this, SLOT(outputAvailable()));
-	connect(&process, SIGNAL(stateChanged(QProcess::ProcessState)), this, SLOT(setStartBtnText(QProcess::ProcessState)));
+	connect(&process, SIGNAL(stateChanged(QProcess::ProcessState)), this, SLOT(processStateChanged(QProcess::ProcessState)));
 
 	connect(ui.networkDestinationEdit, SIGNAL(textEdited(const QString &)), this, SLOT(setArgs()));
 
@@ -28,33 +28,83 @@ UltragridWindow::UltragridWindow(QWidget *parent): QMainWindow(parent){
 	connect(ui.actionRefresh, SIGNAL(triggered()), this, SLOT(queryOpts()));
 	connect(ui.actionAdvanced, SIGNAL(toggled(bool)), this, SLOT(setAdvanced(bool)));
 	connect(ui.actionShow_Terminal, SIGNAL(triggered()), this, SLOT(showLog()));
+	connect(ui.previewCheckBox, SIGNAL(toggled(bool)), this, SLOT(enablePreview(bool)));
 
-	opts.emplace_back(new SourceOption(&ui,
-				ultragridExecutable));
+	sourceOption = new VideoSourceOption(&ui, ultragridExecutable);
+	opts.emplace_back(sourceOption);
 
-	opts.emplace_back(new DisplayOption(&ui,
-				ultragridExecutable));
+	displayOption = new VideoDisplayOption(&ui, ultragridExecutable);
+	opts.emplace_back(displayOption);
 
 	opts.emplace_back(new VideoCompressOption(&ui,
 				ultragridExecutable));
 
 	opts.emplace_back(new AudioSourceOption(&ui,
+				sourceOption,
 				ultragridExecutable));
 
-	opts.emplace_back(new GenericOption(ui.audioPlaybackComboBox,
-				ultragridExecutable,
-				QString("-r")));
+	opts.emplace_back(new AudioPlaybackOption(&ui,
+				displayOption,
+				ultragridExecutable));
 
 	opts.emplace_back(new AudioCompressOption(&ui,
 				ultragridExecutable));
 
 	opts.emplace_back(new FecOption(&ui));
+	opts.emplace_back(new ParamOption(&ui));
 
 	for(auto &opt : opts){
 		connect(opt.get(), SIGNAL(changed()), this, SLOT(setArgs()));
 	}
 
+	connect(sourceOption, SIGNAL(changed()), this, SLOT(startPreview()));
+
 	queryOpts();
+
+	checkPreview();
+
+	startPreview();
+}
+
+void UltragridWindow::checkPreview(){
+	QStringList out;
+
+	QProcess process;
+
+	QString command = ultragridExecutable;
+
+	command += " -d help";
+
+	process.start(command);
+
+	process.waitForFinished();
+	QByteArray output = process.readAllStandardOutput();
+	QList<QByteArray> lines = output.split('\n');
+
+	foreach ( const QByteArray &line, lines ) {
+		if(line.size() > 0 && QChar(line[0]).isSpace()) {
+			QString opt = QString(line).trimmed();
+			if(opt != "none"
+					&& !opt.startsWith("--")
+					&& !opt.contains("unavailable"))
+				out.append(QString(line).trimmed());
+		}
+	}
+
+	if(!out.contains("multiplier") || !out.contains("preview")){
+		ui.previewCheckBox->setChecked(false);
+		ui.previewCheckBox->setEnabled(false);
+
+		QMessageBox warningBox(this);
+		warningBox.setWindowTitle("Preview disabled");
+		warningBox.setText("Preview is disabled, because UltraGrid was compiled" 
+				" without preview and multiplier displays."
+				" Please build UltraGrid configured with the --enable-qt flag"
+				" to enable preview.");
+		warningBox.setStandardButtons(QMessageBox::Ok);
+		warningBox.setIcon(QMessageBox::Warning);
+		warningBox.exec();
+	}
 }
 
 void UltragridWindow::about(){
@@ -85,8 +135,12 @@ void UltragridWindow::outputAvailable(){
 void UltragridWindow::start(){
 	if(process.pid() > 0){
 		process.terminate();
+		if(!process.waitForFinished(1000))
+			process.kill();
 		return;
 	}
+
+	stopPreview();
 
 	QString command(ultragridExecutable);
 
@@ -95,6 +149,39 @@ void UltragridWindow::start(){
 	process.setProcessChannelMode(QProcess::MergedChannels);
 	log.write("Command: " + command + "\n\n");
 	process.start(command);
+}
+
+void UltragridWindow::startPreview(){
+	if(!ui.previewCheckBox->isEnabled()
+			|| process.state() != QProcess::NotRunning
+			|| !ui.previewCheckBox->isChecked()
+			){
+		return;
+	}
+
+	if(previewProcess.state() != QProcess::NotRunning)
+		stopPreview();
+
+	QString command(ultragridExecutable);
+	command += " ";
+	command += sourceOption->getLaunchParam();
+	command += "-d preview ";
+	if(sourceOption->getCurrentValue() != "none"){
+		//We prevent video from network overriding local sources
+		//by listening on port 0
+		command += "-P 0 ";
+	}
+
+	previewProcess.start(command);
+}
+
+void UltragridWindow::stopPreview(){
+	previewProcess.terminate();
+	/* The shared preview memory must be released before a new one
+	 * can be created. Here we wait 0.5s to allow the preview process
+	 * exit gracefully. If it is still running after that we kill it */
+	if(!previewProcess.waitForFinished(500))
+		previewProcess.kill();
 }
 
 void UltragridWindow::editArgs(const QString &text){
@@ -142,5 +229,20 @@ void UltragridWindow::setStartBtnText(QProcess::ProcessState s){
 		ui.startButton->setText("Stop");
 	} else {
 		ui.startButton->setText("Start");
+	}
+}
+
+void UltragridWindow::enablePreview(bool enable){
+	if(enable)
+		startPreview();
+	else
+		stopPreview();
+}
+
+void UltragridWindow::processStateChanged(QProcess::ProcessState s){
+	setStartBtnText(s);
+
+	if(s == QProcess::NotRunning){
+		startPreview();
 	}
 }

@@ -131,11 +131,10 @@ AC_MSG_RESULT($os_version_minor);
 
 if test $system = MacOSX
 then
-        COMMON_OSX_FLAGS="-I/opt/local/include -mmacosx-version-min=10.7 -stdlib=libc++"
+        COMMON_OSX_FLAGS="-mmacosx-version-min=10.7 -stdlib=libc++"
 	CFLAGS="$CFLAGS $COMMON_OSX_FLAGS"
 	CPPFLAGS="$CPPFLAGS $COMMON_OSX_FLAGS"
 	CXXFLAGS="$CXXFLAGS $COMMON_OSX_FLAGS"
-        CUDA_FLAGS="$CUDA_FLAGS -I/opt/local/include"
         if test $WORD_LEN = 32; then
                 CUDA_FLAGS="$CUDA_FLAGS -Xcompiler -Wno-error=unused-command-line-argument-hard-error-in-future"
         fi
@@ -370,7 +369,8 @@ fi
 # GCC-specific warning flags
 if test "$GCC" = yes
 then
-    CFLAGS="$CFLAGS -pipe -W -Wall -Wcast-qual -Wcast-align -Wbad-function-cast -Wmissing-prototypes -Wmissing-declarations"
+    CFLAGS="$CFLAGS -pipe -W -Wcast-qual -Wcast-align -Wbad-function-cast -Wmissing-prototypes -Wmissing-declarations"
+    CXXFLAGS="$CXXFLAGS -pipe -W -Wcast-qual -Wcast-align -Wmissing-declarations"
 fi
 
 # -------------------------------------------------------------------------------------------------
@@ -461,7 +461,7 @@ then
         if test "$system" = "Linux"
         then
                 LIBS="$LIBS -ldl"
-                LDFLAGS="$LDFLAGS -rdynamic -ldl"
+                LDFLAGS="$LDFLAGS -rdynamic"
         else
                 AC_MSG_WARN([*** Building libraries is not supported with other system than Linux])
                 build_libraries=no
@@ -525,18 +525,15 @@ case "$host_os" in
                                 X_CFLAGS=$SAVED_X_CFLAGS
                         fi
                 fi
-                X_LIBS="$X_LIBS -lX11"
                 X_OBJ="src/x11_common.o"
+                LIBS="$LIBS -ldl"
                 CFLAGS="$CFLAGS"
                 AC_DEFINE([HAVE_X], [1], [Build with X11 support])
         fi
         ;;
 esac
 
-LIBS="$LIBS $X_LIBS"
-
 AC_SUBST(X_CFLAGS)
-AC_SUBST(X_LIBS)
 AC_SUBST(X_EXTRA_LIBS)
 AC_SUBST(X_PRE_LIBS)
 AC_SUBST(X_OBJ)
@@ -708,9 +705,9 @@ if test $decklink_req != no -a $FOUND_DECKLINK = yes
 then
     DECKLINK_PATH=${DECKLINK_INC}
     DECKLINK_INC=-I${DECKLINK_INC}
-    DECKLINK_CAP_OBJ="src/video_capture/decklink.o"
-    DECKLINK_DISP_OBJ="src/video_display/decklink.o"
-    DECKLINK_SOUND_PLAY_OBJ="src/audio/playback/decklink.o"
+    DECKLINK_CAP_OBJ="src/blackmagic_common.o src/video_capture/decklink.o"
+    DECKLINK_DISP_OBJ="src/blackmagic_common.o src/video_display/decklink.o"
+    DECKLINK_SOUND_PLAY_OBJ="src/blackmagic_common.o src/audio/playback/decklink.o"
     if test $system = "Windows"; then
         OBJS="$OBJS src/video_capture/DeckLinkAPI_i.o"
     else
@@ -900,13 +897,23 @@ then
                         NTV2_13=yes
                 fi
         fi
-else # Mac
+else
+if test $system = Windows
+then
+        if test "$aja_req" = yes
+        then
+                ADD_MODULE("vidcap_aja", "src/video_capture/aja_win32_stub.o", "-laja")
+                aja=yes
+        fi
+else # MacOSX
         AC_CHECK_LIB(ajantv2, main, [FOUND_LIBAJA=yes], [FOUND_LIBAJA=no])
         if test "$FOUND_LIBAJA" = yes; then
                 AC_CHECK_FILE(${AJA_PATH}/ajalibraries/ajantv2/includes/ajatypes.h, FOUND_LIBAJA=yes, FOUND_LIBAJA=no)
         fi
 fi
+fi
 
+# this is used only for Mac and Linux
 if test "$aja_req" != no -a "$FOUND_LIBAJA" = yes
 then
         aja=yes
@@ -1436,7 +1443,6 @@ case "$system" in
 					)
 			if test "$FOUND_GLUT" = yes
 			then
-				GL_INC="$GL_INC -I/opt/local/include"
 				GL_OBJ="$GL_OBJ src/video_display/gl.o"
 				AC_DEFINE([HAVE_GL], [1], [Build with OpenGL output])
                                 gl=yes
@@ -1738,7 +1744,7 @@ SAVED_LIBS=$LIBS
 if test $uyvy_req != no -a "$ac_cv_lib_X11_XCreateWindow" = yes -a $FOUND_GLEW = yes -a "$FOUND_GLX_L" = yes -a "$FOUND_GLX_H" = yes \
         -a "$FOUND_GL_H" = yes -a "$system" = Linux
 then
-        UYVY_LIB=" -lGLEW -lGL -lX11 $X_LIBS"
+        UYVY_LIB=" -lGLEW -lGL -lX11"
         uyvy=yes
 fi
 
@@ -1932,15 +1938,6 @@ then
         AC_DEFINE([HAVE_JPEG], [1], [Build with JPEG support])
         ADD_MODULE("vcompress_jpeg", "$JPEG_COMPRESS_OBJ", "$JPEG_LIB")
         ADD_MODULE("vdecompress_jpeg", "$JPEG_DECOMPRESS_OBJ", "$JPEG_LIB")
-
-        # check if GPUJPEG is new enough
-        SAVED_LIBS=$LIBS
-        SAVED_CFLAGS=$CFLAGS
-        LIBS="$LIBS $JPEG_LIB"
-        CFLAGS="$CFLAGS $JPEG_INC"
-        AC_CHECK_LIB([gpujpeg], [gpujpeg_encoder_input_copy_image], [], AC_MSG_ERROR([[Please update your GPUJPEG (git submodule update --init; cd gpujpeg; ./autogen.sh && make install)]]))
-        LIBS=$SAVED_LIBS
-        CFLAGS=$SAVED_CFLAGS
 
 	INC="$INC $JPEG_INC"
         CUDA_MESSAGE
@@ -2424,12 +2421,44 @@ AC_ARG_ENABLE(dshow,
 if test $system = Windows -a $dshow_req != no; then
         AC_DEFINE([HAVE_DSHOW], [1], [Build with DirectShow support])
         ADD_MODULE("", "src/video_capture/DirectShowGrabber.o",
-                   "-lstrmiids -luuid -loleaut32") #-lstrmbase -ldxguid -ldmoguids
+                   "-lstrmiids -luuid -lole32 -loleaut32") #-lstrmbase -ldxguid -ldmoguids
         dshow=yes
 fi
 
 if test $dshow_req = yes -a $dshow = no; then
         AC_MSG_ERROR([DirectShow not found]);
+fi
+
+# -------------------------------------------------------------------------------------------------
+# libavcodec hw-accelerated encoding/decoding
+# -------------------------------------------------------------------------------------------------
+lavc_hwacc=no
+
+define(lavc_hwacc_dep, libavutil >= 55.22.1 libva vdpau)
+
+AC_ARG_ENABLE(lavc-hw-accel,
+[  --disable-lavc-hw-accel   disable lavc-hw-accel (default is auto)]
+[                          Requires: lavc_hwacc_dep],
+    [lavc_hwacc_req=$enableval],
+    [lavc_hwacc_req=auto]
+    )
+
+PKG_CHECK_MODULES([LAVC_HWACC], [lavc_hwacc_dep], [FOUND_HWACC_DEP=yes], [FOUND_HWACC_DEP=no])
+
+if test $lavc_hwacc_req != no -a $FOUND_HWACC_DEP = yes
+then
+        LAVC_HWACC_FLAGS="-DUSE_HWACC ${LAVC_HWACC_CFLAGS}"
+        LAVC_HWACC_LIBS="${LAVC_HWACC_LIBS}"
+        HW_ACC_OBJ="src/hwaccel.o"
+        ADD_MODULE("hw_accel", "$HW_ACC_OBJ", "$HW_ACC_LIBS")
+        lavc_hwacc=yes
+else
+        LAVC_HWACC_FLAGS=
+        LAVC_HWACC_LIBS=
+fi
+
+if test $lavc_hwacc_req = yes -a $lavc_hwacc = no; then
+	AC_MSG_ERROR([Could not find hwacc dependencies!]);
 fi
 
 # -------------------------------------------------------------------------------------------------
@@ -2477,9 +2506,9 @@ then
 
         LIBAVCODEC_COMPRESS_OBJ=src/video_compress/libavcodec.o
         LIBAVCODEC_DECOMPRESS_OBJ=src/video_decompress/libavcodec.o
-        COMMON_FLAGS="$COMMON_FLAGS $LIBAVCODEC_CFLAGS $LIBAVUTIL_CFLAGS"
+        COMMON_FLAGS="$COMMON_FLAGS $LIBAVCODEC_CFLAGS $LIBAVUTIL_CFLAGS $LAVC_HWACC_FLAGS"
         libavcodec=yes
-        LIBAVCODEC_LIBS="$LIBAVCODEC_LIBS $LIBAVUTIL_LIBS" # append libavutil
+        LIBAVCODEC_LIBS="$LIBAVCODEC_LIBS $LIBAVUTIL_LIBS $LAVC_HWACC_LIBS" # added libavutil explicitly
         ADD_MODULE("vcompress_libavcodec", "$LIBAVCODEC_COMPRESS_OBJ", "$LIBAVCODEC_LIBS")
         ADD_MODULE("vdecompress_libavcodec", "$LIBAVCODEC_DECOMPRESS_OBJ", "$LIBAVCODEC_LIBS")
         ADD_MODULE("acompress_libavcodec", "$LIBAVCODEC_AUDIO_CODEC_OBJ", "$LIBAVCODEC_LIBS")
@@ -2678,36 +2707,23 @@ if test $video_mix_req = yes -a $video_mix = no; then
         AC_MSG_ERROR([Could not found OpenCV needed for video mixer!]);
 fi
 
+# ------------------------------------------------------------------------------------------------
+# BitFlow
 # -------------------------------------------------------------------------------------------------
-# libavcodec hw-accelerated encoding/decoding
-# -------------------------------------------------------------------------------------------------
-lavc_hwacc=no
-
-define(lavc_hwacc_dep, libavutil >= 55.22.1 libva vdpau)
-
-AC_ARG_ENABLE(lavc-hw-accel,
-[  --disable-lavc-hw-accel   disable lavc-hw-accel (default is auto)]
-[                          Requires: lavc_hwacc_dep],
-    [lavc_hwacc_req=$enableval],
-    [lavc_hwacc_req=auto]
+AC_ARG_ENABLE(bitflow,
+      AS_HELP_STRING([--enable-bitflow], [Compile BitFlow grabber support]),
+    [bitflow_req=$enableval],
+    [bitflow_req=no]
     )
 
-PKG_CHECK_MODULES([LAVC_HWACC], [lavc_hwacc_dep], [FOUND_HWACC_DEP=yes], [FOUND_HWACC_DEP=no])
+bitflow=no
 
-if test $lavc_hwacc_req != no -a $FOUND_HWACC_DEP = yes
+if test $bitflow_req = yes
 then
-        CFLAGS="$CFLAGS -DUSE_HWACC ${LAVC_HWACC_CFLAGS}"
-        CXXFLAGS="$CXXFLAGS -DUSE_HWACC ${LAVC_HWACC_CFLAGS}"
-		LIBS="$LIBS ${LAVC_HWACC_LIBS}"
-        HW_ACC_OBJ="src/hwaccel.o"
-        ADD_MODULE("hw_accel", "$HW_ACC_OBJ", "$HW_ACC_LIBS")
-        lavc_hwacc=yes
+        LIBS="$LIBS -lBFSOciLib -lBFciLib -lBFML"
+        OBJS="$OBJS src/video_capture/bitflow.o"
+        bitflow=yes
 fi
-
-if test $lavc_hwacc_req = yes -a $lavc_hwacc = no; then
-	AC_MSG_ERROR([Could not find hwacc dependencies!]);
-fi
-
 
 # -------------------------------------------------------------------------------------------------
 # We need to add libraries then
@@ -2755,6 +2771,7 @@ RESULT=\
   AJA ......................... $aja
   AV Foundation ............... $avfoundation
   Bluefish444 ................. $bluefish444 (audio: $blue_audio)
+  BitFlow ..................... $bitflow
   DeckLink .................... $decklink
   DirectShow .................. $dshow
   DELTACAST ................... $deltacast

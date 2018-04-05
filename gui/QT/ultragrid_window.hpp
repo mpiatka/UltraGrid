@@ -19,16 +19,21 @@ protected:
 	void closeEvent(QCloseEvent *);
 
 private:
+	void checkPreview();
+
 	Ui::UltragridWindow ui;
 
 	QString ultragridExecutable;
 	QProcess process;
+	QProcess previewProcess;
 
 	QString launchArgs;
 	QStringList getOptionsForParam(QString param);
 	LogWindow log;
 
 	std::vector<std::unique_ptr<UltragridOption>> opts;
+	VideoSourceOption *sourceOption;
+	VideoDisplayOption *displayOption;
 
 
 public slots:
@@ -41,10 +46,15 @@ public slots:
 
 	void showLog();
 
+	void startPreview();
+	void stopPreview();
+
 private slots:
 	void queryOpts();
 	void setAdvanced(bool);
 	void setStartBtnText(QProcess::ProcessState);
+	void processStateChanged(QProcess::ProcessState);
+	void enablePreview(bool);
 };
 
 

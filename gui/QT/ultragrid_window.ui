@@ -147,7 +147,7 @@
              <bool>false</bool>
             </property>
             <property name="title">
-             <string>Video Capture</string>
+             <string>Video Source</string>
             </property>
             <property name="flat">
              <bool>false</bool>
@@ -681,6 +681,7 @@
     </property>
     <addaction name="actionShow_Terminal"/>
     <addaction name="actionAdvanced"/>
+    <addaction name="actionUse_hw_acceleration"/>
     <addaction name="separator"/>
     <addaction name="actionRefresh"/>
    </widget>
@@ -727,6 +728,14 @@
    </property>
    <property name="text">
     <string>Advanced</string>
+   </property>
+  </action>
+  <action name="actionUse_hw_acceleration">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Use hw. acceleration</string>
    </property>
   </action>
  </widget>

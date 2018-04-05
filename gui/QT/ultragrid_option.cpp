@@ -27,17 +27,76 @@ bool testCaptureDisplay(const QString &executable, const QString &cmd){
 	return exitCode != EXIT_FAIL_DISPLAY && exitCode != EXIT_FAIL_CAPTURE;
 }
 
-QStringList UltragridOption::getAvailOpts(const QString &executable,
-			const QString &helpCommand)
+void UltragridOption::setAdvanced(bool advanced){
+	this->advanced = advanced;
+	update();
+}
+
+void UltragridOption::update(){
+	queryAvailOpts();
+	emit changed();
+}
+
+ComboBoxOption::ComboBoxOption(QComboBox *box,
+		const QString& ultragridExecutable,
+		QString opt):
+	ultragridExecutable(ultragridExecutable),
+	box(box),
+	opt(opt)
 {
+	connect(box, SIGNAL(currentIndexChanged(int)), this, SIGNAL(changed()));
+}
+
+QString ComboBoxOption::getLaunchParam(){
+	QString param;
+
+	if(getCurrentValue() != "none"){
+		param += opt;
+		param += " ";
+		param += box->currentData().toString();
+		param += getExtraParams();
+		param += " ";
+	}
+
+	return param;
+}
+
+void ComboBoxOption::queryAvailOpts(){
+	QVariant prevData = box->currentData();
+	resetComboBox(box);
+	QStringList opts = getAvailOpts();
+	for(const auto& i : opts){
+		if(advanced || filter(i)){
+			box->addItem(i, QVariant(i));
+		}
+	}
+
+	queryExtraOpts(opts);
+
+	setItem(prevData);
+}
+
+QString ComboBoxOption::getCurrentValue() const {
+	return box->currentData().toString();
+}
+
+
+void ComboBoxOption::resetComboBox(QComboBox *box){
+	box->clear();
+	box->addItem(QString("none"), QString("none"));
+}
+
+
+QStringList ComboBoxOption::getAvailOpts() {
 	QStringList out;
 
 	QProcess process;
 
-	QString command = executable;
+	QString command = ultragridExecutable;
 
 	command += " ";
-	command += helpCommand;
+	command += opt;
+	command += " help";
 
 	process.start(command);
 
@@ -48,10 +107,9 @@ QStringList UltragridOption::getAvailOpts(const QString &executable,
 	foreach ( const QByteArray &line, lines ) {
 		if(line.size() > 0 && QChar(line[0]).isSpace()) {
 			QString opt = QString(line).trimmed();
-			bool append = opt != "none";
-			if(opt.startsWith("--")) append = false;
-			if(opt.contains("unavailable")) append = false;
-			if(append)
+			if(opt != "none"
+					&& !opt.startsWith("--")
+					&& !opt.contains("unavailable"))
 				out.append(QString(line).trimmed());
 		}
 	}
@@ -60,7 +118,7 @@ QStringList UltragridOption::getAvailOpts(const QString &executable,
 }
 
 
-void UltragridOption::setItem(QComboBox *box, const QVariant &data){
+void ComboBoxOption::setItem(const QVariant &data){
 	if(!data.isValid())
 		return;
 
@@ -70,68 +128,38 @@ void UltragridOption::setItem(QComboBox *box, const QVariant &data){
 		box->setCurrentIndex(idx);
 }
 
-void UltragridOption::setItem(QComboBox *box, const QString &text){
-	int idx = box->findText(text);
-
-	if(idx != -1)
-		box->setCurrentIndex(idx);
-}
-
-const QStringList SourceOption::whiteList = {"testcard", "screen", "decklink", "aja", "dvs"};
-
-SourceOption::SourceOption(Ui::UltragridWindow *ui,
+VideoSourceOption::VideoSourceOption(Ui::UltragridWindow *ui,
 		const QString& ultragridExecutable) :
-	UltragridOption(ultragridExecutable, QString("-t")),
+	ComboBoxOption(ui->videoSourceComboBox, ultragridExecutable, QString("-t")),
 	ui(ui)
 {
 	connect(ui->videoSourceComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(srcChanged()));
 	connect(ui->videoModeComboBox, SIGNAL(currentIndexChanged(int)), this, SIGNAL(changed()));
 }
 
-QString SourceOption::getLaunchParam(){
-	QComboBox *src = ui->videoSourceComboBox;
-	QString param;
-
-	if(src->currentText() != "none"){
-		param += "-t ";
-		param += ui->videoSourceComboBox->currentData().toString();
-		param += ui->videoModeComboBox->currentData().toString();
-		param += " ";
-	}
-
-	return param;
+QString VideoSourceOption::getExtraParams(){
+	return ui->videoModeComboBox->currentData().toString();
 }
 
-void SourceOption::queryAvailOpts(){
-	QComboBox *src = ui->videoSourceComboBox;
-
-	QVariant prevData = src->currentData();
-
-	resetComboBox(src);
-	QStringList opts = getAvailOpts(ultragridExecutable, QString("-t help"));
-
-	for(const auto& i : opts){
-		if((whiteList.contains(i)
+bool VideoSourceOption::filter(const QString &item){
+	const QStringList whiteList = {"testcard", "screen", "decklink", "aja", "dvs"};
+	return whiteList.contains(item)
 					&& testCaptureDisplay(ultragridExecutable,
-						QString("-t ") + i + QString(":help")))
-					|| advanced){
-			src->addItem(i, QVariant(i));
-		}
-	}
+							QString("-t ") + item + QString(":help"));
+}
 
+void VideoSourceOption::queryExtraOpts(const QStringList &opts){
 	if(opts.contains(QString("v4l2"))){
 		std::vector<Camera> cams = getCameras();
 		for(const auto& cam : cams){
 			QString name = QString::fromStdString(cam.name);
 			QString opt = QString::fromStdString("v4l2:device=" + cam.path);
-			src->addItem(name, QVariant(opt));
+			box->addItem(name, QVariant(opt));
 		}
 	}
-
-	setItem(src, prevData);
 }
 
-void SourceOption::srcChanged(){
+void VideoSourceOption::srcChanged(){
 	QComboBox *src = ui->videoSourceComboBox;
 	QComboBox *mode = ui->videoModeComboBox;
 
@@ -141,12 +169,17 @@ void SourceOption::srcChanged(){
 	if(src->currentText() == "testcard"){
 		mode->addItem(QString("1280x720, 30 fps"), QVariant(QString(":1280:720:30:UYVY")));
 		mode->addItem(QString("1280x720, 24 fps"), QVariant(QString(":1280:720:24:UYVY")));
+		mode->addItem(QString("1280x720, 24i fps"), QVariant(QString(":1280:720:24i:UYVY")));
 		mode->addItem(QString("1280x720, 60 fps"), QVariant(QString(":1280:720:60:UYVY")));
 		mode->addItem(QString("1920x1080, 30 fps"), QVariant(QString(":1920:1080:30:UYVY")));
+		mode->addItem(QString("1920x1080, 30i fps"), QVariant(QString(":1920:1080:30i:UYVY")));
 		mode->addItem(QString("1920x1080, 24 fps"), QVariant(QString(":1920:1080:24:UYVY")));
+		mode->addItem(QString("1920x1080, 24i fps"), QVariant(QString(":1920:1080:24i:UYVY")));
 		mode->addItem(QString("1920x1080, 60 fps"), QVariant(QString(":1920:1080:60:UYVY")));
+		mode->addItem(QString("1920x1080, 60i fps"), QVariant(QString(":1920:1080:60i:UYVY")));
 		mode->addItem(QString("3840x2160, 30 fps"), QVariant(QString(":3840:2160:30:UYVY")));
 		mode->addItem(QString("3840x2160, 24 fps"), QVariant(QString(":3840:2160:24:UYVY")));
+		mode->addItem(QString("3840x2160, 24i fps"), QVariant(QString(":3840:2160:24i:UYVY")));
 		mode->addItem(QString("3840x2160, 60 fps"), QVariant(QString(":3840:2160:60:UYVY")));
 	} else if(src->currentText() == "screen"){
 		mode->addItem(QString("60 fps"), QVariant(QString(":fps=60")));
@@ -191,28 +224,30 @@ void SourceOption::srcChanged(){
 	emit changed();
 }
 
-const QStringList DisplayOption::whiteList = {"gl", "sdl", "decklink", "aja", "dvs"};
+void VideoSourceOption::resetComboBox(QComboBox *box){
+	box->clear();
+	box->addItem(QString("none / network"), QString("none"));
+}
 
-DisplayOption::DisplayOption(Ui::UltragridWindow *ui,
+VideoDisplayOption::VideoDisplayOption(Ui::UltragridWindow *ui,
 		const QString& ultragridExecutable):
-	UltragridOption(ultragridExecutable, QString("-d")),
+	ComboBoxOption(ui->videoDisplayComboBox, ultragridExecutable, QString("-d")),
 	ui(ui)
 {
-	connect(ui->videoDisplayComboBox, SIGNAL(currentIndexChanged(int)), this, SIGNAL(changed()));
 	connect(ui->previewCheckBox, SIGNAL(toggled(bool)), this, SLOT(enablePreview(bool)));
 	preview = ui->previewCheckBox->isChecked();
 }
 
-QString DisplayOption::getLaunchParam(){
+QString VideoDisplayOption::getLaunchParam(){
 	QComboBox *disp = ui->videoDisplayComboBox;
 	QString param;
 
-	if(disp->currentText() != "none"){
+	if(getCurrentValue() != "none"){
 		param += "-d ";
 		if(preview){
 			param += "multiplier:";
 		}
-		param += disp->currentText();
+		param += disp->currentData().toString();
 		if(preview){
 			param += "#preview";
 		}
@@ -224,83 +259,59 @@ QString DisplayOption::getLaunchParam(){
 	return param;
 }
 
-void DisplayOption::queryAvailOpts(){
-	QComboBox *disp = ui->videoDisplayComboBox;
+bool VideoDisplayOption::filter(const QString &item){
+	const QStringList whiteList = {"gl", "sdl", "decklink", "aja", "dvs"};
 
-	QString prevText = disp->currentText();
-
-	resetComboBox(disp);
-	QStringList opts = getAvailOpts(ultragridExecutable, QString("-d help"));
-
-	for(const auto& i : opts){
-		if((whiteList.contains(i)
+	return whiteList.contains(item)
 					&& testCaptureDisplay(ultragridExecutable,
-						QString("-d ") + i + QString(":help")))
-					|| advanced){
-			disp->addItem(i);
-		}
-	}
-
-	setItem(disp, prevText);
+							QString("-d ") + item + QString(":help"));
 }
 
-void DisplayOption::enablePreview(bool enable){
+void VideoDisplayOption::enablePreview(bool enable){
 	preview = enable;
 	emit changed();
 }
 
 VideoCompressOption::VideoCompressOption(Ui::UltragridWindow *ui,
 		const QString& ultragridExecutable) :
-	UltragridOption(ultragridExecutable, QString("-c")),
+	ComboBoxOption(ui->videoCompressionComboBox, ultragridExecutable, QString("-c")),
 	ui(ui)
 {
 	connect(ui->videoCompressionComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(compChanged()));
 	connect(ui->videoBitrateEdit, SIGNAL(textChanged(const QString&)), this, SIGNAL(changed()));
-	connect(ui->videoCompressionComboBox, SIGNAL(currentIndexChanged(int)), this, SIGNAL(changed()));
 }
 
-QString VideoCompressOption::getLaunchParam(){
-	QComboBox *comp = ui->videoCompressionComboBox;
-	QLineEdit *bitrate = ui->videoBitrateEdit;
+QString VideoCompressOption::getExtraParams(){
 	QString param;
+	QLineEdit *bitrate = ui->videoBitrateEdit;
 
-	if(comp->currentText() != "none"){
-		param += "-c ";
-		param += comp->currentData().toString();
-		if(!bitrate->text().isEmpty()){
-			if(comp->currentText() == "JPEG"){
-				param += ":" + bitrate->text();
-			} else {
-				param += ":bitrate=" + bitrate->text();
-			}
+	if(!bitrate->text().isEmpty()){
+		if(box->currentText() == "JPEG"){
+			param += ":" + bitrate->text();
+		} else {
+			param += ":bitrate=" + bitrate->text();
 		}
-		param += " ";
 	}
 
 	return param;
 }
 
-void VideoCompressOption::queryAvailOpts(){
-	QComboBox *comp = ui->videoCompressionComboBox;
-	
-	QVariant prevData = comp->currentData();
+bool VideoCompressOption::filter(const QString & /*item*/){
+	return false;
+}
 
-	resetComboBox(comp);
-
-	comp->addItem(QString("H.264"), QVariant(QString("libavcodec:codec=H.264")));
-	comp->addItem(QString("H.265"), QVariant(QString("libavcodec:codec=H.265")));
-	comp->addItem(QString("MJPEG"), QVariant(QString("libavcodec:codec=MJPEG")));
-	comp->addItem(QString("VP8"), QVariant(QString("libavcodec:codec=VP8")));
-	comp->addItem(QString("JPEG"), QVariant(QString("jpeg")));
-
-	setItem(comp, prevData);
+void VideoCompressOption::queryExtraOpts(const QStringList & /*opts*/){
+	box->addItem(QString("H.264"), QVariant(QString("libavcodec:codec=H.264")));
+	box->addItem(QString("H.265"), QVariant(QString("libavcodec:codec=H.265")));
+	box->addItem(QString("MJPEG"), QVariant(QString("libavcodec:codec=MJPEG")));
+	box->addItem(QString("VP8"), QVariant(QString("libavcodec:codec=VP8")));
+	box->addItem(QString("JPEG"), QVariant(QString("jpeg")));
 }
 
 void VideoCompressOption::compChanged(){
-	QComboBox *comp = ui->audioCompressionComboBox;
-	QLabel *label = ui->audioBitrateLabel;
+	QLabel *label = ui->videoBitrateLabel;
 
-	if(comp->currentText() == "JPEG"){
+	if(box->currentText() == "JPEG"){
 		label->setText(QString("Jpeg quality"));
 	} else {
 		label->setText(QString("Bitrate"));
@@ -308,125 +319,83 @@ void VideoCompressOption::compChanged(){
 }
 
 AudioSourceOption::AudioSourceOption(Ui::UltragridWindow *ui,
+		const VideoSourceOption *videoSource,
 		const QString& ultragridExecutable) :
-	UltragridOption(ultragridExecutable, QString("-s")),
-	ui(ui)
+	ComboBoxOption(ui->audioSourceComboBox, ultragridExecutable, QString("-s")),
+	ui(ui),
+	videoSource(videoSource)
 {
-	connect(ui->audioSourceComboBox, SIGNAL(currentIndexChanged(int)), this, SIGNAL(changed()));
 	connect(ui->audioChannelsSpinBox, SIGNAL(valueChanged(const QString&)), this, SIGNAL(changed()));
+	connect(videoSource, SIGNAL(changed()), this, SLOT(update()));
 }
 
-QString AudioSourceOption::getLaunchParam(){
-	QComboBox *src = ui->audioSourceComboBox;
-	QSpinBox *channels = ui->audioChannelsSpinBox;
+QString AudioSourceOption::getExtraParams(){
 	QString param;
-
-	if(src->currentText() != "none"){
-		param += opt + " ";
-		param += src->currentText();
-		if(channels->value() != 1){
-			param += " --audio-capture-format channels=" + QString::number(channels->value());
-		}
-		param += " ";
+	QSpinBox *channels = ui->audioChannelsSpinBox;
+	if(channels->value() != 1){
+		param += " --audio-capture-format channels=" + QString::number(channels->value());
 	}
 
 	return param;
 }
 
-void AudioSourceOption::queryAvailOpts(){
-	QComboBox *box = ui->audioSourceComboBox;
+bool AudioSourceOption::filter(const QString &item){
+	const QStringList sdiAudioCards = {"decklink", "aja", "dvs", "deltacast"};
+	const QStringList sdiAudio = {"analog", "AESEBU", "embedded"};
 
-	QString prevText = box->currentText();
-	resetComboBox(box);
-	QString helpCommand = opt + " help";
-	QStringList opts = getAvailOpts(ultragridExecutable, helpCommand);
-	box->addItems(opts);
+	return !sdiAudio.contains(item)
+		|| sdiAudioCards.contains(videoSource->getCurrentValue());
+}
 
-	setItem(box, prevText);
+AudioPlaybackOption::AudioPlaybackOption(Ui::UltragridWindow *ui,
+		const VideoDisplayOption *videoDisplay,
+		const QString& ultragridExecutable) :
+	ComboBoxOption(ui->audioPlaybackComboBox, ultragridExecutable, QString("-r")),
+	ui(ui),
+	videoDisplay(videoDisplay)
+{
+	connect(videoDisplay, SIGNAL(changed()), this, SLOT(update()));
+}
+
+bool AudioPlaybackOption::filter(const QString &item){
+	const QStringList sdiAudioCards = {"decklink", "aja", "dvs", "deltacast"};
+	const QStringList sdiAudio = {"analog", "AESEBU", "embedded"};
+
+	return !sdiAudio.contains(item)
+		|| sdiAudioCards.contains(videoDisplay->getCurrentValue());
+
 }
 
 AudioCompressOption::AudioCompressOption(Ui::UltragridWindow *ui,
 		const QString& ultragridExecutable) :
-	UltragridOption(ultragridExecutable, QString("--audio-codec")),
+	ComboBoxOption(ui->audioCompressionComboBox, ultragridExecutable, QString("--audio-codec")),
 	ui(ui)
 {
 	connect(ui->audioCompressionComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(compChanged()));
 	connect(ui->audioBitrateEdit, SIGNAL(textChanged(const QString&)), this, SIGNAL(changed()));
-	connect(ui->audioCompressionComboBox, SIGNAL(currentIndexChanged(int)), this, SIGNAL(changed()));
 }
 
-QString AudioCompressOption::getLaunchParam(){
-	QComboBox *comp = ui->audioCompressionComboBox;
+QString AudioCompressOption::getExtraParams(){
 	QLineEdit *bitrate = ui->audioBitrateEdit;
+
 	QString param;
-
-	if(comp->currentText() != "none"){
-		param += opt + " ";
-		param += comp->currentText();
-		if(!bitrate->text().isEmpty()){
-			param += ":bitrate=" + bitrate->text();
-		}
-		param += " ";
+	if(!bitrate->text().isEmpty() && bitrate->isEnabled()){
+		param += ":bitrate=" + bitrate->text();
 	}
-
 	return param;
-}
-
-void AudioCompressOption::queryAvailOpts(){
-	QComboBox *box = ui->audioCompressionComboBox;
-
-	QString prevText = box->currentText();
-	resetComboBox(box);
-	QString helpCommand = opt + " help";
-	QStringList opts = getAvailOpts(ultragridExecutable, helpCommand);
-	box->addItems(opts);
-
-	setItem(box, prevText);
 }
 
 void AudioCompressOption::compChanged(){
+	const QStringList losslessCodecs = {"FLAC", "u-law", "A-law", "PCM"};
 
-}
+	ui->audioBitrateEdit->setEnabled(!losslessCodecs.contains(getCurrentValue()));
+	ui->audioBitrateLabel->setEnabled(!losslessCodecs.contains(getCurrentValue()));
 
-GenericOption::GenericOption(QComboBox *box,
-		const QString& ultragridExecutable,
-		QString opt):
-	UltragridOption(ultragridExecutable, opt),
-	box(box)
-{
-	connect(box, SIGNAL(currentIndexChanged(int)), this, SIGNAL(changed()));
-}
-
-QString GenericOption::getLaunchParam(){
-	QString param;
-
-	if(box->currentText() != "none"){
-		param += opt;
-		param += " ";
-		param += box->currentText();
-		param += " ";
-	}
-
-	return param;
-}
-
-void GenericOption::queryAvailOpts(){
-	QString prevText = box->currentText();
-	resetComboBox(box);
-	QString helpCommand = opt + " help";
-	QStringList opts = getAvailOpts(ultragridExecutable, helpCommand);
-	box->addItems(opts);
-
-	setItem(box, prevText);
-}
-
-void UltragridOption::resetComboBox(QComboBox *box){
-	box->clear();
-	box->addItem(QString("none"));
+	emit changed();
 }
 
 FecOption::FecOption(Ui::UltragridWindow *ui) : 
-	UltragridOption("", "-f"),
+	opt("-f"),
 	ui(ui)
 {
 	connect(ui->fecNoneRadio, SIGNAL(toggled(bool)), this, SLOT(update()));
@@ -497,4 +466,16 @@ void FecOption::update(){
 	}
 
 	emit changed();
+}
+
+ParamOption::ParamOption(Ui::UltragridWindow *ui): ui(ui){
+	connect(ui->actionUse_hw_acceleration, SIGNAL(toggled(bool)), this, SIGNAL(changed()));
+}
+
+QString ParamOption::getLaunchParam(){
+	QString param = "";
+	if(ui->actionUse_hw_acceleration->isChecked())
+		param += "--param use-hw-accel ";
+
+	return param;
 }

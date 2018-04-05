@@ -51,6 +51,7 @@
 #include "config_win32.h"
 #endif
 
+#include <chrono>
 #include <pthread.h>
 #include <stdlib.h>
 
@@ -64,28 +65,41 @@ struct state_df {
         struct video_frame *in;
         char *buffers[2];
         int buffer_current;
+        bool deinterlace;
+
+        std::chrono::steady_clock::time_point frame_received;
 };
 
 static void usage()
 {
-        printf("-p double_framerate\n");
+        printf("Usage:\n");
+        printf("\t-p double_framerate[:d]\n");
+        printf("\t\td - deinterlace\n");
 }
 
 static void * df_init(const char *config) {
         struct state_df *s;
+        bool deinterlace = false;
 
-        if(config && strcmp(config, "help") == 0) {
-                usage();
-                return NULL;
+        if (config) {
+                if (strcmp(config, "help") == 0) {
+                        usage();
+                        return NULL;
+                } else if (strcmp(config, "d") == 0) {
+                        deinterlace = true;
+                } else {
+                        log_msg(LOG_LEVEL_ERROR, "Unknown config: %s\n", config);
+                        return NULL;
+                }
         }
 
-        s = (struct state_df *) 
-                        malloc(sizeof(struct state_df));
+        s = new state_df{};
 
         assert(s != NULL);
         s->in = vf_alloc(1);
         s->buffers[0] = s->buffers[1] = NULL;
         s->buffer_current = 0;
+        s->deinterlace = deinterlace;
         
         return s;
 }
@@ -112,7 +126,7 @@ static int df_postprocess_reconfigure(void *state, struct video_desc desc)
         s->in->fps = desc.fps;
         s->in->interlacing = desc.interlacing;
         if(desc.interlacing != INTERLACED_MERGED) {
-                fprintf(stderr, "[Double Framerate] Warning: %s video detected. This filter is intended "
+                log_msg(LOG_LEVEL_ERROR, "[Double Framerate] Warning: %s video detected. This filter is intended "
                                "mainly for interlaced merged video. The result might be incorrect.\n",
                                get_interlacing_description(desc.interlacing)); 
         }
@@ -123,8 +137,8 @@ static int df_postprocess_reconfigure(void *state, struct video_desc desc)
         in_tile->data_len = vc_get_linesize(desc.width, desc.color_spec) *
                 desc.height;
 
-        s->buffers[0] = malloc(in_tile->data_len);
-        s->buffers[1] = malloc(in_tile->data_len);
+        s->buffers[0] = (char *) malloc(in_tile->data_len);
+        s->buffers[1] = (char *) malloc(in_tile->data_len);
         in_tile->data = s->buffers[s->buffer_current];
         
         return TRUE;
@@ -170,6 +184,21 @@ static bool df_postprocess(void *state, struct video_frame *in, struct video_fra
                 }
         }
 
+        if (s->deinterlace) {
+                vc_deinterlace((unsigned char *) out->tiles[0].data, vc_get_linesize(out->tiles[0].width, out->color_spec), out->tiles[0].height);
+        }
+
+        // In following code we fix timing in order not to pass both frames
+        // in bulk but rather we busy-wait half of the frame time.
+        if (in) {
+                s->frame_received = std::chrono::steady_clock::now();
+        } else {
+                decltype(s->frame_received) t;
+                do {
+                        t = std::chrono::steady_clock::now();
+                } while (std::chrono::duration_cast<std::chrono::duration<double>>(t - s->frame_received).count() <= 0.5 / out->fps);
+        }
+
         return true;
 }
 
@@ -180,7 +209,7 @@ static void df_done(void *state)
         free(s->buffers[0]);
         free(s->buffers[1]);
         vf_free(s->in);
-        free(state);
+        delete s;
 }
 
 static void df_get_out_desc(void *state, struct video_desc *out, int *in_display_mode, int *out_frames)
