@@ -83,6 +83,8 @@ using std::min;
 #endif
 #endif
 
+#include <time.h>
+
 struct state_libavcodec_decompress {
         pthread_mutex_t *global_lavcd_lock;
         AVCodecContext  *codec_ctx;
@@ -1258,6 +1260,23 @@ static void error_callback(void *ptr, int level, const char *fmt, va_list vl) {
         av_log_default_callback(ptr, level, fmt, vl);
 }
 
+void timespec_diff(struct timespec *start, struct timespec *stop,
+		                   struct timespec *result)
+{
+	if ((stop->tv_nsec - start->tv_nsec) < 0) {
+		result->tv_sec = stop->tv_sec - start->tv_sec - 1;
+		result->tv_nsec = stop->tv_nsec - start->tv_nsec + 1000000000;
+
+	} else {
+		result->tv_sec = stop->tv_sec - start->tv_sec;
+		result->tv_nsec = stop->tv_nsec - start->tv_nsec;
+
+	}
+
+	return;
+
+}
+
 static decompress_status libavcodec_decompress(void *state, unsigned char *dst, unsigned char *src,
                 unsigned int src_len, int frame_seq)
 {
@@ -1271,6 +1290,8 @@ static decompress_status libavcodec_decompress(void *state, unsigned char *dst, 
         while (s->pkt.size > 0) {
                 struct timeval t0, t1;
                 gettimeofday(&t0, NULL);
+				struct timespec t_0, t_1;
+				clock_gettime(CLOCK_MONOTONIC_RAW, &t_0);
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(57, 37, 100)
                 len = avcodec_decode_video2(s->codec_ctx, s->frame, &got_frame, &s->pkt);
 #else
@@ -1329,6 +1350,11 @@ static decompress_status libavcodec_decompress(void *state, unsigned char *dst, 
                                 if(s->hwaccel.copy){
                                         transfer_frame(&s->hwaccel, s->frame);
                                 }
+
+								clock_gettime(CLOCK_MONOTONIC_RAW, &t_1);
+								struct timespec t_res;
+								timespec_diff(&t_0, &t_1, &t_res);
+								printf("[lavd] Decompressing %c frame took %f miliseconds.\n", av_get_picture_type_char(s->frame->pict_type), t_res.tv_nsec / 1000000.0);
 #endif
                                 bool ret = change_pixfmt(s->frame, dst, s->frame->format,
                                                 s->out_codec, s->width, s->height, s->pitch);
