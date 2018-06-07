@@ -2473,41 +2473,38 @@ LAVC_HWACC_FLAGS=
 LAVC_HWACC_LIBS=
 HW_ACC_OBJ=
 
-if test $lavc_hwacc_vdpau_req != no -o $lavc_hwacc_vaapi_req != no
+if test $lavc_hwacc_vdpau_req != no -a $FOUND_HWACC_VDPAU_DEP = yes
 then
-        if test $FOUND_HWACC_VDPAU_DEP = yes
-        then
-                lavc_hwacc_vdpau=yes
-                lavc_hwacc_common=yes
-        fi
-        if test $FOUND_HWACC_VAAPI_DEP = yes
-        then
-                lavc_hwacc_vaapi=yes
-                lavc_hwacc_common=yes
-        fi
+	lavc_hwacc_vdpau=yes
+	lavc_hwacc_common=yes
+fi
+if test $lavc_hwacc_vaapi_req != no -a $FOUND_HWACC_VAAPI_DEP = yes
+then
+	lavc_hwacc_vaapi=yes
+	lavc_hwacc_common=yes
 fi
 
 if test $lavc_hwacc_common = yes
 then
         LAVC_HWACC_FLAGS="${LAVC_HWACC_FLAGS} -DHWACC_COMMON"
-        HW_ACC_OBJ="${HW_ACC_OBJ} src/hwaccel_libav_common.o"
+        OBJS="$OBJS src/hwaccel_libav_common.o"
 fi
 
 if test $lavc_hwacc_vdpau = yes
 then
         LAVC_HWACC_FLAGS="${LAVC_HWACC_FLAGS} -DHWACC_VDPAU ${LAVC_HWACC_VDPAU_CFLAGS}"
-        LAVC_HWACC_LIBS="${LAVC_HWACC_LIBS} ${LAVC_HWACC_VDPAU_LIBS}"
-        HW_ACC_OBJ="${HW_ACC_OBJ} src/hwaccel_vdpau.o"
+        LIBS="$LIBS ${LAVC_HWACC_VDPAU_LIBS}"
+        OBJS="$OBJS src/hwaccel_vdpau.o"
 fi
 
 if test $lavc_hwacc_vaapi = yes
 then
         LAVC_HWACC_FLAGS="${LAVC_HWACC_FLAGS} -DHWACC_VAAPI ${LAVC_HWACC_VAAPI_CFLAGS}"
-        LAVC_HWACC_LIBS="${LAVC_HWACC_LIBS} ${LAVC_HWACC_VAAPI_LIBS}"
-        HW_ACC_OBJ="${HW_ACC_OBJ} src/hwaccel_vaapi.o"
+        LIBS="$LIBS ${LAVC_HWACC_VAAPI_LIBS}"
+        OBJS="$OBJS src/hwaccel_vaapi.o"
 fi
 
-ADD_MODULE("hw_accel", "$HW_ACC_OBJ", "$HW_ACC_LIBS")
+#ADD_MODULE("hw_accel", "$HW_ACC_OBJ", "$HW_ACC_LIBS")
 
 if test $lavc_hwacc_vdpau_req = yes -a $lavc_hwacc_vdpau = no; then
 	AC_MSG_ERROR([Could not find hwacc vdpau dependencies!]);
