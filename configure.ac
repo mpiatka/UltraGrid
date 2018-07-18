@@ -2472,16 +2472,6 @@ AC_ARG_ENABLE(lavc-hw-accel-vaapi,
     [lavc_hwacc_vaapi_req=auto]
     )
 
-if test "$build_libraries" = yes
-then
-        if test $lavc_hwacc_vdpau_req = yes -o $lavc_hwacc_vaapi_req = yes; then
-                AC_MSG_ERROR([Hwacc is incompatible with modular build!]);
-        fi
-
-        lavc_hwacc_vdpau_req=no
-        lavc_hwacc_vaapi_req=no
-fi
-
 PKG_CHECK_MODULES([LAVC_HWACC_COMMON], [lavc_hwacc_common_dep], [FOUND_HWACC_COMMON_DEP=yes], [FOUND_HWACC_COMMON_DEP=no])
 PKG_CHECK_MODULES([LAVC_HWACC_VDPAU], [lavc_hwacc_vdpau_dep], [FOUND_HWACC_VDPAU_DEP=yes], [FOUND_HWACC_VDPAU_DEP=no])
 PKG_CHECK_MODULES([LAVC_HWACC_VAAPI], [lavc_hwacc_vaapi_dep], [FOUND_HWACC_VAAPI_DEP=yes], [FOUND_HWACC_VAAPI_DEP=no])
@@ -2490,18 +2480,15 @@ LAVC_HWACC_FLAGS=
 LAVC_HWACC_LIBS=
 HW_ACC_OBJ=
 
-if test $lavc_hwacc_vdpau_req != no -o $lavc_hwacc_vaapi_req != no
+if test $lavc_hwacc_vdpau_req != no -a $FOUND_HWACC_VDPAU_DEP = yes
 then
-        if test $FOUND_HWACC_VDPAU_DEP = yes
-        then
-                lavc_hwacc_vdpau=yes
-                lavc_hwacc_common=yes
-        fi
-        if test $FOUND_HWACC_VAAPI_DEP = yes
-        then
-                lavc_hwacc_vaapi=yes
-                lavc_hwacc_common=yes
-        fi
+        lavc_hwacc_vdpau=yes
+        lavc_hwacc_common=yes
+fi
+if test $lavc_hwacc_vaapi_req != no -a $FOUND_HWACC_VAAPI_DEP = yes
+then
+        lavc_hwacc_vaapi=yes
+        lavc_hwacc_common=yes
 fi
 
 if test $lavc_hwacc_common = yes
@@ -2523,6 +2510,8 @@ then
         LAVC_HWACC_LIBS="${LAVC_HWACC_LIBS} ${LAVC_HWACC_VAAPI_LIBS}"
         HW_ACC_OBJ="${HW_ACC_OBJ} src/hwaccel_vaapi.o"
 fi
+
+COMMON_FLAGS="$COMMON_FLAGS $LAVC_HWACC_FLAGS"
 
 ADD_MODULE("hw_accel", "$HW_ACC_OBJ", "$LAVC_HWACC_LIBS")
 
@@ -2579,9 +2568,9 @@ then
 
         LIBAVCODEC_COMPRESS_OBJ=src/video_compress/libavcodec.o
         LIBAVCODEC_DECOMPRESS_OBJ=src/video_decompress/libavcodec.o
-        COMMON_FLAGS="$COMMON_FLAGS $LIBAVCODEC_CFLAGS $LIBAVUTIL_CFLAGS $LAVC_HWACC_FLAGS"
+        COMMON_FLAGS="$COMMON_FLAGS $LIBAVCODEC_CFLAGS $LIBAVUTIL_CFLAGS"
         libavcodec=yes
-        LIBAVCODEC_LIBS="$LIBAVCODEC_LIBS $LIBAVUTIL_LIBS $LAVC_HWACC_LIBS" # added libavutil explicitly
+        LIBAVCODEC_LIBS="$LIBAVCODEC_LIBS $LIBAVUTIL_LIBS" # added libavutil explicitly
         ADD_MODULE("vcompress_libavcodec", "$LIBAVCODEC_COMPRESS_OBJ", "$LIBAVCODEC_LIBS")
         ADD_MODULE("vdecompress_libavcodec", "$LIBAVCODEC_DECOMPRESS_OBJ", "$LIBAVCODEC_LIBS")
         ADD_MODULE("acompress_libavcodec", "$LIBAVCODEC_AUDIO_CODEC_OBJ", "$LIBAVCODEC_LIBS")
