@@ -2544,6 +2544,8 @@ then
         HW_ACC_OBJ="${HW_ACC_OBJ} src/hwaccel_vaapi.o"
 fi
 
+COMMON_FLAGS="$COMMON_FLAGS $LAVC_HWACC_FLAGS"
+
 if test -n "$HW_ACC_OBJ"
 then
         ADD_MODULE("hw_accel", "$HW_ACC_OBJ", "$LAVC_HWACC_LIBS")
@@ -2602,9 +2604,9 @@ then
 
         LIBAVCODEC_COMPRESS_OBJ=src/video_compress/libavcodec.o
         LIBAVCODEC_DECOMPRESS_OBJ=src/video_decompress/libavcodec.o
-        COMMON_FLAGS="$COMMON_FLAGS $LIBAVCODEC_CFLAGS $LIBAVUTIL_CFLAGS $LAVC_HWACC_FLAGS"
+        COMMON_FLAGS="$COMMON_FLAGS $LIBAVCODEC_CFLAGS $LIBAVUTIL_CFLAGS"
         libavcodec=yes
-        LIBAVCODEC_LIBS="$LIBAVCODEC_LIBS $LIBAVUTIL_LIBS $LAVC_HWACC_LIBS" # added libavutil explicitly
+        LIBAVCODEC_LIBS="$LIBAVCODEC_LIBS $LIBAVUTIL_LIBS" # added libavutil explicitly
         ADD_MODULE("vcompress_libavcodec", "$LIBAVCODEC_COMPRESS_OBJ", "$LIBAVCODEC_LIBS")
         ADD_MODULE("vdecompress_libavcodec", "$LIBAVCODEC_DECOMPRESS_OBJ", "$LIBAVCODEC_LIBS")
         ADD_MODULE("acompress_libavcodec", "$LIBAVCODEC_AUDIO_CODEC_OBJ", "$LIBAVCODEC_LIBS")
