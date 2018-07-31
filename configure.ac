@@ -2492,15 +2492,15 @@ AC_ARG_ENABLE(lavc-hw-accel-vaapi,
     [lavc_hwacc_vaapi_req=auto]
     )
 
-if test "$build_libraries" = yes
-then
-        if test $lavc_hwacc_vdpau_req = yes -o $lavc_hwacc_vaapi_req = yes; then
-                AC_MSG_ERROR([Hwacc is incompatible with modular build!]);
-        fi
-
-        lavc_hwacc_vdpau_req=no
-        lavc_hwacc_vaapi_req=no
-fi
+#if test "$build_libraries" = yes
+#then
+#        if test $lavc_hwacc_vdpau_req = yes -o $lavc_hwacc_vaapi_req = yes; then
+#                AC_MSG_ERROR([Hwacc is incompatible with modular build!]);
+#        fi
+#
+#        lavc_hwacc_vdpau_req=no
+#        lavc_hwacc_vaapi_req=no
+#fi
 
 PKG_CHECK_MODULES([LAVC_HWACC_COMMON], [lavc_hwacc_common_dep], [FOUND_HWACC_COMMON_DEP=yes], [FOUND_HWACC_COMMON_DEP=no])
 PKG_CHECK_MODULES([LAVC_HWACC_VDPAU], [lavc_hwacc_vdpau_dep], [FOUND_HWACC_VDPAU_DEP=yes], [FOUND_HWACC_VDPAU_DEP=no])
