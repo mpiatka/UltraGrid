@@ -183,9 +183,6 @@ REFLECTOR_OBJS = src/hd-rum-translator/hd-rum-decompress.o \
 IMPORT_CONTROL_KEYBOARD_OBJS = src/import_control_keyboard.o
 SWITCHER_CONTROL_KEYBOARD_OBJS = src/switcher_control_keyboard.o
 
-# extra module interdependencies
-@MODULE_EXTRA_DEPENDENCIES@ 
-
 # -------------------------------------------------------------------------------------------------
 all: src/dir-stamp $(TARGET) $(GUI_TARGET) $(IMPORT_C_TARGET) $(SWITCHER_TARGET) $(REFLECTOR_TARGET) modules ag-plugins configure-messages
 
