@@ -222,12 +222,17 @@ static inline int posix_memalign(void **memptr, size_t alignment, size_t size)
 #endif // defined HAVE_MACOSX && OS_VERSION_MAJOR <= 9
 ])
 
+# @param $1 name of the module
+function MODULE_NAME() {
+        echo "lib/ultragrid/ultragrid_"$1".so"
+}
+
 # Adds the module to UltraGrid build system.
 # @param $1 name of the module
 # @param $2 object files
 # @param $3 libraries
 AC_DEFUN([ADD_MODULE], [
-          TARGET="lib/ultragrid/ultragrid_"$1".so"
+          TARGET=$(MODULE_NAME "$1")
           LIB_OBJS=$LIB_OBJS" "$2
           LIB_MODULES=$LIB_MODULES" "$3
 	  AM_CONDITIONAL([IS_TARGET], [test x$1 != x])
@@ -235,7 +240,7 @@ AC_DEFUN([ADD_MODULE], [
 		                [
 				 MODULES="$MODULES $TARGET"
 				 TARGETS="$TARGETS
-$TARGET: "$2"
+$TARGET: "$2" $4
 	\$(LINKER) \$(LDFLAGS) -shared -Wl,-soname,ultragrid_"$1.so" -Wl,-rpath,'\$\${ORIGIN}' "$2" -o lib/ultragrid/ultragrid_"$1".so "$3" $4
 "
 				 ])
@@ -1557,7 +1562,7 @@ esac
 if test $gl = yes
 then
 	INC="$INC $GL_INC"
-        ADD_MODULE("display_gl", "$GL_OBJ \$(DISPLAY_GL_EXTRA)", "$GL_LIB")
+	ADD_MODULE("display_gl", "$GL_OBJ", "$GL_LIB", "\$\(DISPLAY_GL_EXTRA\)")
 fi
 
 if test $gl_req = yes -a $gl = no; then
@@ -2550,7 +2555,7 @@ COMMON_FLAGS="$COMMON_FLAGS $LAVC_HWACC_FLAGS"
 if test -n "$HW_ACC_OBJ"
 then
         ADD_MODULE("hw_accel", "$HW_ACC_OBJ", "$LAVC_HWACC_LIBS")
-        DISPLAY_GL_EXTRA="$DISPLAY_GL_EXTRA $HW_ACC_OBJ"
+        DISPLAY_GL_EXTRA="$DISPLAY_GL_EXTRA $(MODULE_NAME hw_accel)"
 fi
 
 if test $lavc_hwacc_vdpau_req = yes -a $lavc_hwacc_vdpau = no; then
@@ -2867,7 +2872,10 @@ AC_SUBST(MODULES)
 AC_SUBST(TARGETS)
 
 # substitute module interdependencies
-AC_SUBST(DISPLAY_GL_EXTRA)
+MODULE_EXTRA_DEPENDENCIES="
+DISPLAY_GL_EXTRA=$DISPLAY_GL_EXTRA
+"
+AC_SUBST(MODULE_EXTRA_DEPENDENCIES)
 
 
 # -------------------------------------------------------------------------------------------------
