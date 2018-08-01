@@ -236,7 +236,7 @@ AC_DEFUN([ADD_MODULE], [
 				 MODULES="$MODULES $TARGET"
 				 TARGETS="$TARGETS
 $TARGET: "$2"
-	\$(LINKER) \$(LDFLAGS) -shared -Wl,-soname,ultragrid_"$1.so" "$2" -o lib/ultragrid/ultragrid_"$1".so "$3"
+	\$(LINKER) \$(LDFLAGS) -shared -Wl,-soname,ultragrid_"$1.so" -Wl,-rpath,'\$\$${ORIGIN}' "$2" -o lib/ultragrid/ultragrid_"$1".so "$3" $4
 "
 				 ])
           ])
@@ -1393,6 +1393,7 @@ fi
 GL_INC=
 GL_OBJ=$GL_COMMON_OBJ
 GL_LIB=
+DISPLAY_GL_EXTRA=
 gl=no
 
 AC_ARG_ENABLE(gl,
@@ -1556,7 +1557,7 @@ esac
 if test $gl = yes
 then
 	INC="$INC $GL_INC"
-        ADD_MODULE("display_gl", "$GL_OBJ", "$GL_LIB")
+        ADD_MODULE("display_gl", "$GL_OBJ \$(DISPLAY_GL_EXTRA)", "$GL_LIB")
 fi
 
 if test $gl_req = yes -a $gl = no; then
@@ -2549,6 +2550,7 @@ COMMON_FLAGS="$COMMON_FLAGS $LAVC_HWACC_FLAGS"
 if test -n "$HW_ACC_OBJ"
 then
         ADD_MODULE("hw_accel", "$HW_ACC_OBJ", "$LAVC_HWACC_LIBS")
+        DISPLAY_GL_EXTRA="$DISPLAY_GL_EXTRA $HW_ACC_OBJ"
 fi
 
 if test $lavc_hwacc_vdpau_req = yes -a $lavc_hwacc_vdpau = no; then
@@ -2863,6 +2865,10 @@ AC_SUBST(LIB_GENERATED_HEADERS)
 AC_SUBST(LIB_OBJS)
 AC_SUBST(MODULES)
 AC_SUBST(TARGETS)
+
+# substitute module interdependencies
+AC_SUBST(DISPLAY_GL_EXTRA)
+
 
 # -------------------------------------------------------------------------------------------------
 # Finally, substitute things into the Makefile and config.h
