@@ -9,6 +9,7 @@
 #include "ultragrid_option.hpp"
 #include "log_window.hpp"
 #include "settings_window.hpp"
+#include "availableSettings.hpp"
 
 class UltragridWindow : public QMainWindow{
 	Q_OBJECT
@@ -28,6 +29,8 @@ private:
 	QString ultragridExecutable;
 	QProcess process;
 	QProcess previewProcess;
+
+	AvailableSettings availableSettings;
 
 	QString launchArgs;
 	QStringList getOptionsForParam(QString param);
