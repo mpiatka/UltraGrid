@@ -53,6 +53,7 @@ void AvailableSettings::query(const std::string &executable, SettingType type){
 		case VIDEO_SRC: opt = "-t"; break;
 		case VIDEO_DISPLAY: opt = "-d"; break;
 		case VIDEO_COMPRESS: opt = "-c"; break;
+		case VIDEO_CAPTURE_FILTER: opt = "--capture-filter"; break;
 		case AUDIO_SRC: opt = "-s"; break;
 		case AUDIO_PLAYBACK: opt = "-r"; break;
 		case AUDIO_COMPRESS: opt = "--audio-codec"; break;
