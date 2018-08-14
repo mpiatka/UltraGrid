@@ -70,6 +70,8 @@ UltragridWindow::UltragridWindow(QWidget *parent): QMainWindow(parent){
 	connect(sourceOption, SIGNAL(changed()), this, SLOT(schedulePreview()));
 	connect(audioSrcOption, SIGNAL(changed()), this, SLOT(schedulePreview()));
 
+	availableSettings.queryAll(ultragridExecutable.toStdString());
+
 	queryOpts();
 
 	checkPreview();
@@ -80,34 +82,13 @@ UltragridWindow::UltragridWindow(QWidget *parent): QMainWindow(parent){
 	ui.displayPreview->start();
 	ui.capturePreview->setKey("ultragrid_preview_capture");
 	ui.capturePreview->start();
+
 }
 
 void UltragridWindow::checkPreview(){
-	QStringList out;
-
-	QProcess process;
-
-	QString command = ultragridExecutable;
-
-	command += " -d help";
-
-	process.start(command);
-
-	process.waitForFinished();
-	QByteArray output = process.readAllStandardOutput();
-	QList<QByteArray> lines = output.split('\n');
-
-	foreach ( const QByteArray &line, lines ) {
-		if(line.size() > 0 && QChar(line[0]).isSpace()) {
-			QString opt = QString(line).trimmed();
-			if(opt != "none"
-					&& !opt.startsWith("--")
-					&& !opt.contains("unavailable"))
-				out.append(QString(line).trimmed());
-		}
-	}
-
-	if(!out.contains("multiplier") || !out.contains("preview")){
+	if(!availableSettings.isAvailable("multiplier", VIDEO_DISPLAY)
+			|| !availableSettings.isAvailable("preview", VIDEO_DISPLAY))
+	{
 		ui.previewCheckBox->setChecked(false);
 		ui.previewCheckBox->setEnabled(false);
 
