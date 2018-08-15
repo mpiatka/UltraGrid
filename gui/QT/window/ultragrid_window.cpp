@@ -62,7 +62,7 @@ UltragridWindow::UltragridWindow(QWidget *parent): QMainWindow(parent){
 		connect(opt.get(), SIGNAL(changed()), this, SLOT(setArgs()));
 	}
 
-	connect(&settings, SIGNAL(changed()), this, SLOT(setArgs()));
+	connect(&settingsWindow, SIGNAL(changed()), this, SLOT(setArgs()));
 
 	previewTimer.setSingleShot(true);
 	connect(&previewTimer, SIGNAL(timeout()), this, SLOT(startPreview()));
@@ -221,7 +221,7 @@ void UltragridWindow::setArgs(){
 		launchArgs += opt->getLaunchParam();
 	}
 
-	launchArgs += settings.getPortArgs();
+	launchArgs += settingsWindow.getPortArgs();
 
 	launchArgs += ui.networkDestinationEdit->text();
 
@@ -275,8 +275,8 @@ void UltragridWindow::showLog(){
 }
 
 void UltragridWindow::showSettings(){
-	settings.show();
-	settings.raise();
+	settingsWindow.show();
+	settingsWindow.raise();
 }
 
 void UltragridWindow::setStartBtnText(QProcess::ProcessState s){
