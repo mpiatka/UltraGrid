@@ -34,6 +34,7 @@ public:
 	void setEnabled(bool enable) { enabled = enable; }
 
 	void addSuboption(Option *sub, const std::string &limit = "");
+	void addOnChangeCallback(std::function<void(const std::string &, const std::string &)> callback);
 
 protected:
 	std::string name;

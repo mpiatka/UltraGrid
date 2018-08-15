@@ -48,18 +48,29 @@ void Option::setValue(const std::string &val){
 }
 
 void Option::addSuboption(Option *sub, const std::string &limit){
+	sub->addOnChangeCallback(std::bind(&Option::changed, this));
 	suboptions.push_back(std::make_pair(limit, sub));
 }
 
+void Option::addOnChangeCallback(std::function<void(const std::string &, const std::string &)> callback){
+	onChangeCallbacks.push_back(callback);
+}
+
+static void test_callback(const std::string &name, const std::string &val){
+	std::cout << "Callback: " << name << ": " << val << std::endl;
+}
+
 Settings::Settings(){
-	addOption("video.source", "-t ");
+	addOption("video.source", "-t ").addOnChangeCallback(test_callback);
 	addOption("testcard.width", ":", "1920", true, "video.source", "testcard");
-	addOption("screen.width", ":", "1080", true, "video.source", "screen");
+	addOption("screen.width", ":", "1080", true, "video.source", "screen").addOnChangeCallback(test_callback);
+;
 
 	addOption("video.display", "-d ");
 	addOption("gl.novsync", ":", "novsync", true, "video.display", "gl");
 
 	getOption("video.source").setValue("screen");
+	getOption("video.source.screen.width").setValue("1920");
 	getOption("video.display").setValue("gl");
 
 	std::cout << getLaunchParams() << std::endl;
