@@ -34,6 +34,7 @@ PRE_TARGETDEPS += astat_lib
 HEADERS += window/ultragrid_window.hpp \
 	option/ultragrid_option.hpp \
 	option/availableSettings.hpp \
+	option/settings.hpp \
 	util/v4l2.hpp \
 	widget/previewWidget.hpp \
 	window/log_window.hpp \
@@ -49,6 +50,7 @@ FORMS += ui/ultragrid_window.ui \
 SOURCES += window/ultragrid_window.cpp \
 	option/ultragrid_option.cpp \
 	option/availableSettings.cpp \
+	option/settings.cpp \
 	util/v4l2.cpp \
 	widget/previewWidget.cpp \
 	window/log_window.cpp \

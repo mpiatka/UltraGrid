@@ -10,6 +10,7 @@
 #include "log_window.hpp"
 #include "settings_window.hpp"
 #include "availableSettings.hpp"
+#include "settings.hpp"
 
 class UltragridWindow : public QMainWindow{
 	Q_OBJECT
@@ -35,13 +36,15 @@ private:
 	QString launchArgs;
 	QStringList getOptionsForParam(QString param);
 	LogWindow log;
-	SettingsWindow settings;
+	SettingsWindow settingsWindow;
 
 	std::vector<std::unique_ptr<UltragridOption>> opts;
 	VideoSourceOption *sourceOption;
 	VideoDisplayOption *displayOption;
 
 	AudioSourceOption *audioSrcOption;
+
+	Settings settings;
 
 
 public slots:
