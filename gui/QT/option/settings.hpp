@@ -8,6 +8,7 @@
 #include <memory>
 
 class Option{
+	using Callback = std::function<void(const std::string &, const std::string &, bool)>;
 public:
 	Option(const std::string &name,
 			const std::string &param = "",
@@ -31,10 +32,10 @@ public:
 	void setParam(const std::string &p) { param = p; }
 
 	bool isEnabled() const { return enabled; }
-	void setEnabled(bool enable) { enabled = enable; }
+	void setEnabled(bool enable);
 
 	void addSuboption(Option *sub, const std::string &limit = "");
-	void addOnChangeCallback(std::function<void(const std::string &, const std::string &)> callback);
+	void addOnChangeCallback(Callback callback);
 
 protected:
 	std::string name;
@@ -45,7 +46,7 @@ protected:
 
 	void changed();
 
-	std::vector<std::function<void(const std::string &, const std::string &)>> onChangeCallbacks;
+	std::vector<Callback> onChangeCallbacks;
 	std::vector<std::pair<std::string, Option *>> suboptions;
 };
 
