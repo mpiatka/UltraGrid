@@ -11,6 +11,7 @@
 #include "settings_window.hpp"
 #include "available_settings.hpp"
 #include "settings.hpp"
+#include "settings_ui.hpp"
 
 class UltragridWindow : public QMainWindow{
 	Q_OBJECT
@@ -46,6 +47,7 @@ private:
 
 	QTimer previewTimer;
 	Settings settings;
+	SettingsUi settingsUi;
 
 
 public slots:
