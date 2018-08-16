@@ -1,6 +1,6 @@
 #include <QProcess>
 #include <QString>
-#include "availableSettings.hpp"
+#include "available_settings.hpp"
 
 static bool vectorContains(const std::vector<std::string> &v, const std::string & s){
 	for(unsigned i = 0; i < v.size(); i++){
