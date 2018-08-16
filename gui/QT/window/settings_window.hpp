@@ -3,6 +3,7 @@
 
 #include <QString>
 #include "ui_settings.h"
+#include "settings_ui.hpp"
 
 class SettingsWindow : public QDialog{
 	Q_OBJECT
@@ -13,6 +14,8 @@ public:
 	QString getAudioPort() const;
 	bool isDefault() const;
 	QString getPortArgs() const;
+
+	void init(SettingsUi *settingsUi);
 
 signals:
 	void changed();
