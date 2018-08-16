@@ -40,8 +40,8 @@ UltragridWindow::UltragridWindow(QWidget *parent): QMainWindow(parent){
 	displayOption = new VideoDisplayOption(&ui, ultragridExecutable);
 	opts.emplace_back(displayOption);
 
-	opts.emplace_back(new VideoCompressOption(&ui,
-				ultragridExecutable));
+	//opts.emplace_back(new VideoCompressOption(&ui,
+	//			ultragridExecutable));
 
 	audioSrcOption = new AudioSourceOption(&ui,
 			sourceOption,
@@ -73,6 +73,10 @@ UltragridWindow::UltragridWindow(QWidget *parent): QMainWindow(parent){
 	availableSettings.queryAll(ultragridExecutable.toStdString());
 
 	queryOpts();
+
+	settingsUi.init(&settings, &availableSettings);
+	settingsUi.initMainWin(&ui);
+	settingsWindow.init(&settingsUi);
 
 	checkPreview();
 

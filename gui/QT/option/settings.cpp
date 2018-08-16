@@ -20,7 +20,7 @@ static void addSpace(std::string &str){
 }
 
 std::string Option::getLaunchOption() const{
-	if(!enabled)
+	if(!enabled || value.empty())
 		return "";
 
 	std::string out = param + value;
@@ -38,7 +38,7 @@ std::string Option::getLaunchOption() const{
 
 void Option::changed(){
 	for(const auto &callback : onChangeCallbacks){
-		callback(name, value);
+		callback(name, value, enabled);
 	}
 }
 
@@ -47,17 +47,22 @@ void Option::setValue(const std::string &val){
 	changed();
 }
 
+void Option::setEnabled(bool enable){
+	enabled = enable;
+	changed();
+}
+
 void Option::addSuboption(Option *sub, const std::string &limit){
 	sub->addOnChangeCallback(std::bind(&Option::changed, this));
 	suboptions.push_back(std::make_pair(limit, sub));
 }
 
-void Option::addOnChangeCallback(std::function<void(const std::string &, const std::string &)> callback){
+void Option::addOnChangeCallback(Callback callback){
 	onChangeCallbacks.push_back(callback);
 }
 
-static void test_callback(const std::string &name, const std::string &val){
-	std::cout << "Callback: " << name << ": " << val << std::endl;
+static void test_callback(const std::string &name, const std::string &val, bool enabled){
+	std::cout << "Callback: " << name << ": " << val << " (" << enabled << ")" << std::endl;
 }
 
 Settings::Settings(){
@@ -68,6 +73,8 @@ Settings::Settings(){
 
 	addOption("video.display", "-d ");
 	addOption("gl.novsync", ":", "novsync", true, "video.display", "gl");
+
+	addOption("advanced", "", "", false).addOnChangeCallback(test_callback);
 
 	getOption("video.source").setValue("screen");
 	getOption("video.source.screen.width").setValue("1920");

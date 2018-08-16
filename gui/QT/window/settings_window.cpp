@@ -10,6 +10,10 @@ SettingsWindow::SettingsWindow(QWidget *parent): QDialog(parent){
 	connect(ui.audioPort, SIGNAL(textEdited(const QString&)), this, SIGNAL(changed()));
 }
 
+void SettingsWindow::init(SettingsUi *settingsUi){
+	settingsUi->initSettingsWin(&ui);
+}
+
 QString SettingsWindow::getVideoPort() const {
 	QString s = ui.videoPort->text();
 	if(s == "")
