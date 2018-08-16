@@ -36,7 +36,7 @@ PRE_TARGETDEPS += astat_lib
 # Input
 HEADERS += window/ultragrid_window.hpp \
 	option/ultragrid_option.hpp \
-	option/availableSettings.hpp \
+	option/available_settings.hpp \
 	option/settings.hpp \
 	util/v4l2.hpp \
 	widget/previewWidget.hpp \
@@ -52,7 +52,7 @@ FORMS += ui/ultragrid_window.ui \
 
 SOURCES += window/ultragrid_window.cpp \
 	option/ultragrid_option.cpp \
-	option/availableSettings.cpp \
+	option/availabl_settings.cpp \
 	option/settings.cpp \
 	util/v4l2.cpp \
 	widget/previewWidget.cpp \
