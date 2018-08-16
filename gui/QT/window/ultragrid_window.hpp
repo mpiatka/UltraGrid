@@ -9,7 +9,7 @@
 #include "ultragrid_option.hpp"
 #include "log_window.hpp"
 #include "settings_window.hpp"
-#include "availableSettings.hpp"
+#include "available_settings.hpp"
 #include "settings.hpp"
 
 class UltragridWindow : public QMainWindow{
