@@ -44,6 +44,8 @@ void Option::changed(){
 
 void Option::setValue(const std::string &val){
 	value = val;
+	enabled = !val.empty();
+
 	changed();
 }
 
@@ -65,20 +67,38 @@ static void test_callback(const std::string &name, const std::string &val, bool 
 	std::cout << "Callback: " << name << ": " << val << " (" << enabled << ")" << std::endl;
 }
 
+const static struct{
+	const char *name;
+	const char *param;
+	const char *defaultVal;
+	bool enabled;
+	const char *parent;
+	const char *limit;
+} optionList[] = {
+	{"video.source", "-t", "", false, "", ""},
+	{"testcard.width", ":", "", false, "video.source", "testcard"},
+	{"screen.width", ":", "", false, "video.source", "screen"},
+	{"video.display", "-d ", "", false, "", ""},
+	{"gl.novsync", ":", "novsync", false, "video.display", "gl"},
+	{"video.compress", "-c ", "", false, "", ""},
+	{"libavcodec.codec", ":codec=", "", false, "video.compress", "libavcodec"},
+	{"H.264.bitrate", ":bitrate=", "", false, "video.compress.libavcodec.codec", "H.264"},
+	{"H.265.bitrate", ":bitrate=", "", false, "video.compress.libavcodec.codec", "H.265"},
+	{"MJPEG.bitrate", ":bitrate=", "", false, "video.compress.libavcodec.codec", "MJPEG"},
+	{"VP8.bitrate", ":bitrate=", "", false, "video.compress.libavcodec.codec", "VP8"},
+	{"jpeg.quality", ":", "", false, "video.compress", "jpeg"},
+	{"advanced", "", "", false, "", ""},
+};
+
 Settings::Settings(){
-	addOption("video.source", "-t ").addOnChangeCallback(test_callback);
-	addOption("testcard.width", ":", "1920", true, "video.source", "testcard");
-	addOption("screen.width", ":", "1080", true, "video.source", "screen").addOnChangeCallback(test_callback);
-;
-
-	addOption("video.display", "-d ");
-	addOption("gl.novsync", ":", "novsync", true, "video.display", "gl");
-
-	addOption("advanced", "", "", false).addOnChangeCallback(test_callback);
-
-	getOption("video.source").setValue("screen");
-	getOption("video.source.screen.width").setValue("1920");
-	getOption("video.display").setValue("gl");
+	for(const auto &i : optionList){
+		addOption(i.name,
+				i.param,
+				i.defaultVal,
+				i.enabled,
+				i.parent,
+				i.limit).addOnChangeCallback(test_callback);
+	}
 
 	std::cout << getLaunchParams() << std::endl;
 }
@@ -86,6 +106,7 @@ Settings::Settings(){
 std::string Settings::getLaunchParams() const{
 	std::string out;
 	out += getOption("video.source").getLaunchOption();
+	out += getOption("video.compress").getLaunchOption();
 	out += getOption("video.display").getLaunchOption();
 	return out;
 }

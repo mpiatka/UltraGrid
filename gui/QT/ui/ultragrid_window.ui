@@ -717,6 +717,7 @@
      <string>&amp;Help</string>
     </property>
     <addaction name="actionAbout_UltraGrid"/>
+    <addaction name="actionTest"/>
    </widget>
    <addaction name="menu_UltraGrid"/>
    <addaction name="menu_Tools"/>
@@ -779,6 +780,11 @@
   <action name="actionSettings">
    <property name="text">
     <string>Settings</string>
+   </property>
+  </action>
+  <action name="actionTest">
+   <property name="text">
+    <string>Test</string>
    </property>
   </action>
  </widget>
