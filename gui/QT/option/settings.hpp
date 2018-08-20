@@ -8,7 +8,7 @@
 #include <memory>
 
 class Option{
-	using Callback = std::function<void(const std::string &, const std::string &, bool)>;
+	using Callback = std::function<void(Option &)>;
 public:
 	Option(const std::string &name,
 			const std::string &param = "",
