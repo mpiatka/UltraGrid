@@ -29,8 +29,8 @@ UltragridWindow::UltragridWindow(QWidget *parent): QMainWindow(parent){
 	connect(ui.actionSettings, SIGNAL(triggered()), this, SLOT(showSettings()));
 	connect(ui.previewCheckBox, SIGNAL(toggled(bool)), this, SLOT(enablePreview(bool)));
 
-	sourceOption = new VideoSourceOption(&ui, ultragridExecutable);
-	opts.emplace_back(sourceOption);
+	//sourceOption = new VideoSourceOption(&ui, ultragridExecutable);
+	//opts.emplace_back(sourceOption);
 
 	displayOption = new VideoDisplayOption(&ui, ultragridExecutable);
 	opts.emplace_back(displayOption);
@@ -38,10 +38,10 @@ UltragridWindow::UltragridWindow(QWidget *parent): QMainWindow(parent){
 	//opts.emplace_back(new VideoCompressOption(&ui,
 	//			ultragridExecutable));
 
-	audioSrcOption = new AudioSourceOption(&ui,
-			sourceOption,
-			ultragridExecutable);
-	opts.emplace_back(audioSrcOption);
+	//audioSrcOption = new AudioSourceOption(&ui,
+	//		sourceOption,
+	//		ultragridExecutable);
+	//opts.emplace_back(audioSrcOption);
 
 	opts.emplace_back(new AudioPlaybackOption(&ui,
 				displayOption,
@@ -59,8 +59,8 @@ UltragridWindow::UltragridWindow(QWidget *parent): QMainWindow(parent){
 
 	connect(&settingsWindow, SIGNAL(changed()), this, SLOT(setArgs()));
 
-	connect(sourceOption, SIGNAL(changed()), this, SLOT(startPreview()));
-	connect(audioSrcOption, SIGNAL(changed()), this, SLOT(startPreview()));
+	//connect(sourceOption, SIGNAL(changed()), this, SLOT(startPreview()));
+	//connect(audioSrcOption, SIGNAL(changed()), this, SLOT(startPreview()));
 
 	availableSettings.queryAll(ultragridExecutable.toStdString());
 
@@ -157,17 +157,19 @@ void UltragridWindow::startPreview(){
 
 	QString command(ultragridExecutable);
 	command += " ";
-	QString source = sourceOption->getLaunchParam();
+	QString source = "";
 	command += "--capture-filter preview ";
 	command += source;
-	command += audioSrcOption->getLaunchParam();
+	//command += audioSrcOption->getLaunchParam();
 	//TODO better control port handling
 	command += "-d preview -r dummy --control-port 8888";
+	/*
 	if(sourceOption->getCurrentValue() != "none"){
 		//We prevent video from network overriding local sources
 		//by listening on port 0
 		command += "-P 0 ";
 	}
+	*/
 
 	previewProcess.start(command);
 }
