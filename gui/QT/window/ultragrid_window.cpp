@@ -34,8 +34,8 @@ UltragridWindow::UltragridWindow(QWidget *parent): QMainWindow(parent){
 	ui.actionUse_hw_acceleration->setVisible(false);
 #endif
 
-	sourceOption = new VideoSourceOption(&ui, ultragridExecutable);
-	opts.emplace_back(sourceOption);
+	//sourceOption = new VideoSourceOption(&ui, ultragridExecutable);
+	//opts.emplace_back(sourceOption);
 
 	displayOption = new VideoDisplayOption(&ui, ultragridExecutable);
 	opts.emplace_back(displayOption);
@@ -43,10 +43,10 @@ UltragridWindow::UltragridWindow(QWidget *parent): QMainWindow(parent){
 	//opts.emplace_back(new VideoCompressOption(&ui,
 	//			ultragridExecutable));
 
-	audioSrcOption = new AudioSourceOption(&ui,
-			sourceOption,
-			ultragridExecutable);
-	opts.emplace_back(audioSrcOption);
+	//audioSrcOption = new AudioSourceOption(&ui,
+	//		sourceOption,
+	//		ultragridExecutable);
+	//opts.emplace_back(audioSrcOption);
 
 	opts.emplace_back(new AudioPlaybackOption(&ui,
 				displayOption,
@@ -67,8 +67,8 @@ UltragridWindow::UltragridWindow(QWidget *parent): QMainWindow(parent){
 	previewTimer.setSingleShot(true);
 	connect(&previewTimer, SIGNAL(timeout()), this, SLOT(startPreview()));
 
-	connect(sourceOption, SIGNAL(changed()), this, SLOT(schedulePreview()));
-	connect(audioSrcOption, SIGNAL(changed()), this, SLOT(schedulePreview()));
+	//connect(sourceOption, SIGNAL(changed()), this, SLOT(schedulePreview()));
+	//connect(audioSrcOption, SIGNAL(changed()), this, SLOT(schedulePreview()));
 
 	availableSettings.queryAll(ultragridExecutable.toStdString());
 
@@ -185,17 +185,19 @@ void UltragridWindow::startPreview(){
 
 	QString command(ultragridExecutable);
 	command += " ";
-	QString source = sourceOption->getLaunchParam();
+	QString source = "";
 	command += "--capture-filter preview ";
 	command += source;
-	command += audioSrcOption->getLaunchParam();
+	//command += audioSrcOption->getLaunchParam();
 	//TODO better control port handling
 	command += "-d preview -r dummy --control-port 8888";
+	/*
 	if(sourceOption->getCurrentValue() != "none"){
 		//We prevent video from network overriding local sources
 		//by listening on port 0
 		command += " -P 0:0:0:0 ";
 	}
+	*/
 
 	previewProcess.start(command);
 }

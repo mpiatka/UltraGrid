@@ -11,6 +11,7 @@
 
 class SettingsUi : public QObject{
 	Q_OBJECT
+
 public:
 	void init(Settings *settings, AvailableSettings *availableSettings);
 	void initMainWin(Ui::UltragridWindow *ui);
@@ -23,11 +24,19 @@ private:
 	AvailableSettings *availableSettings = nullptr;
 
 	void initVideoCompress();
+	void initVideoSource();
+
+	void videoCompressionCallback(Option &opt); 
+	void videoSourceCallback(Option &opt); 
+
+	bool isAdvancedMode();
 
 private slots:
 	void setAdvanced(bool enable);
 	void setVideoCompression(int idx);
 	void setVideoBitrate(const QString &);
+	void setVideoSource(int idx);
+	void setVideoSourceMode(int idx);
 	void test();
 };
 
