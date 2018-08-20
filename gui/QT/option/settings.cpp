@@ -38,7 +38,7 @@ std::string Option::getLaunchOption() const{
 
 void Option::changed(){
 	for(const auto &callback : onChangeCallbacks){
-		callback(name, value, enabled);
+		callback(*this);
 	}
 }
 
@@ -63,8 +63,10 @@ void Option::addOnChangeCallback(Callback callback){
 	onChangeCallbacks.push_back(callback);
 }
 
-static void test_callback(const std::string &name, const std::string &val, bool enabled){
-	std::cout << "Callback: " << name << ": " << val << " (" << enabled << ")" << std::endl;
+static void test_callback(Option &opt){
+	std::cout << "Callback: " << opt.getName()
+		<< ": " << opt.getValue()
+		<< " (" << opt.isEnabled() << ")" << std::endl;
 }
 
 const static struct{
@@ -77,6 +79,9 @@ const static struct{
 } optionList[] = {
 	{"video.source", "-t", "", false, "", ""},
 	{"testcard.width", ":", "", false, "video.source", "testcard"},
+	{"testcard.height", ":", "", false, "video.source", "testcard"},
+	{"testcard.fps", ":", "", false, "video.source", "testcard"},
+	{"testcard.format", ":", "", false, "video.source", "testcard"},
 	{"screen.width", ":", "", false, "video.source", "screen"},
 	{"video.display", "-d ", "", false, "", ""},
 	{"gl.novsync", ":", "novsync", false, "video.display", "gl"},
