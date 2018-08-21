@@ -24,6 +24,9 @@ void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 
 	initVideoCompress();
 	initVideoSource();
+	initVideoDisplay();
+	initAudioSource();
+	initAudioPlayback();
 
 	connect(mainWin->actionTest, SIGNAL(triggered()), this, SLOT(test()));
 
@@ -152,6 +155,21 @@ static std::string getResolutionStr(int w, int h, char separator){
 	return std::to_string(w) + separator + std::to_string(h);
 }
 
+void SettingsUi::populateComboBox(QComboBox *box,
+		SettingType type,
+		const std::vector<std::string> &whitelist)
+{
+	box->addItem("none", QVariant(""));
+
+	for(const auto &i : availableSettings->getAvailableSettings(type)){
+		if(!isAdvancedMode() && !vecContains(whitelist, i))
+			continue;
+
+		box->addItem(QString::fromStdString(i),
+				QVariant(QString::fromStdString(i)));
+	}
+}
+
 static void initTestcardModes(QComboBox *box){
 	static const struct{
 		int w;
@@ -206,15 +224,7 @@ void SettingsUi::initVideoSource(){
 		"dvs"
 	};
 
-	box->addItem("none", QVariant(""));
-
-	for(const auto &i : availableSettings->getAvailableSettings(VIDEO_SRC)){
-		if(!isAdvancedMode() && !vecContains(whiteList, i))
-			continue;
-
-		box->addItem(QString::fromStdString(i),
-				QVariant(QString::fromStdString(i)));
-	}
+	populateComboBox(box, VIDEO_SRC, whiteList);
 
 	using namespace std::placeholders;
 	settings->getOption("video.source").addOnChangeCallback(
@@ -246,6 +256,93 @@ void SettingsUi::videoSourceCallback(Option &opt){
 	} else if (opt.getValue() == "screen"){
 		initScreenModes(mainWin->videoModeComboBox);
 	}
+}
+
+void SettingsUi::initVideoDisplay(){
+	QComboBox *box = mainWin->videoDisplayComboBox;
+	connect(box, SIGNAL(currentIndexChanged(int)), this, SLOT(setVideoDisplay(int)));
+	const std::vector<std::string> whiteList = {
+		"gl",
+		"sdl",
+		"decklink",
+		"aja",
+		"dvs"
+	};
+
+	populateComboBox(box, VIDEO_DISPLAY, whiteList);
+
+	using namespace std::placeholders;
+	settings->getOption("video.display").addOnChangeCallback(
+			std::bind(&SettingsUi::videoDisplayCallback, this, _1)
+			);
+
+}
+
+void SettingsUi::setVideoDisplay(int idx){
+	std::string val = mainWin->videoDisplayComboBox->itemData(idx).toString().toStdString();
+	settings->getOption("video.display").setValue(val);
+}
+
+void SettingsUi::videoDisplayCallback(Option &opt){
+	
+}
+
+void SettingsUi::initAudioSource(){
+	const QStringList sdiAudioCards = {"decklink", "aja", "dvs", "deltacast"};
+	const QStringList sdiAudio = {"analog", "AESEBU", "embedded"};
+
+	QComboBox *box = mainWin->audioSourceComboBox;
+	connect(box, SIGNAL(currentIndexChanged(int)), this, SLOT(setAudioSource(int)));
+
+	box->addItem("none", QVariant(""));
+
+	for(const auto &i : availableSettings->getAvailableSettings(AUDIO_SRC)){
+		box->addItem(QString::fromStdString(i),
+				QVariant(QString::fromStdString(i)));
+	}
+
+	using namespace std::placeholders;
+	settings->getOption("audio.source").addOnChangeCallback(
+			std::bind(&SettingsUi::audioSourceCallback, this, _1)
+			);
+}
+
+void SettingsUi::setAudioSource(int idx){
+	std::string val = mainWin->audioSourceComboBox->itemData(idx).toString().toStdString();
+	settings->getOption("audio.source").setValue(val);
+}
+
+void SettingsUi::audioSourceCallback(Option &opt){
+
+}
+
+void SettingsUi::initAudioPlayback(){
+	const QStringList sdiAudioCards = {"decklink", "aja", "dvs", "deltacast"};
+	const QStringList sdiAudio = {"analog", "AESEBU", "embedded"};
+
+	QComboBox *box = mainWin->audioPlaybackComboBox;
+	connect(box, SIGNAL(currentIndexChanged(int)), this, SLOT(setAudioPlayback(int)));
+
+	box->addItem("none", QVariant(""));
+
+	for(const auto &i : availableSettings->getAvailableSettings(AUDIO_PLAYBACK)){
+		box->addItem(QString::fromStdString(i),
+				QVariant(QString::fromStdString(i)));
+	}
+
+	using namespace std::placeholders;
+	settings->getOption("audio.playback").addOnChangeCallback(
+			std::bind(&SettingsUi::audioPlaybackCallback, this, _1)
+			);
+}
+
+void SettingsUi::setAudioPlayback(int idx){
+	std::string val = mainWin->audioPlaybackComboBox->itemData(idx).toString().toStdString();
+	settings->getOption("audio.playback").setValue(val);
+}
+
+void SettingsUi::audioPlaybackCallback(Option &opt){
+
 }
 
 void SettingsUi::initSettingsWin(Ui::Settings *ui){

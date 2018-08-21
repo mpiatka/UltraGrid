@@ -23,11 +23,24 @@ private:
 	Settings *settings = nullptr;
 	AvailableSettings *availableSettings = nullptr;
 
+
+	void populateComboBox(QComboBox *box,
+			SettingType type,
+			const std::vector<std::string> &whitelist);
+
 	void initVideoCompress();
 	void initVideoSource();
+	void initVideoDisplay();
+
+	void initAudioSource();
+	void initAudioPlayback();
 
 	void videoCompressionCallback(Option &opt); 
 	void videoSourceCallback(Option &opt); 
+	void videoDisplayCallback(Option &opt); 
+
+	void audioSourceCallback(Option &opt);
+	void audioPlaybackCallback(Option &opt);
 
 	bool isAdvancedMode();
 
@@ -37,6 +50,10 @@ private slots:
 	void setVideoBitrate(const QString &);
 	void setVideoSource(int idx);
 	void setVideoSourceMode(int idx);
+	void setVideoDisplay(int idx);
+
+	void setAudioSource(int idx);
+	void setAudioPlayback(int idx);
 	void test();
 };
 
