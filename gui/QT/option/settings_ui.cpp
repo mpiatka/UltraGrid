@@ -146,7 +146,13 @@ struct SettingItem{
 	std::vector<SettingValue> opts;
 };
 
-static void initTestcardModes(){
+Q_DECLARE_METATYPE(SettingItem);
+
+static std::string getResolutionStr(int w, int h, char separator){
+	return std::to_string(w) + separator + std::to_string(h);
+}
+
+static void initTestcardModes(QComboBox *box){
 	static const struct{
 		int w;
 		int h;
@@ -161,7 +167,30 @@ static void initTestcardModes(){
 	for(const auto &res : resolutions){
 		for(const auto &rate : rates){
 			SettingItem item;
+			item.name = getResolutionStr(res.w, res.h, 'x');
+			item.name += ", " + std::to_string(rate) + " fps";
+			item.opts.push_back({"video.source.testcard.width", std::to_string(res.w)});
+			item.opts.push_back({"video.source.testcard.height", std::to_string(res.h)});
+			item.opts.push_back({"video.source.testcard.fps", std::to_string(rate)});
+			item.opts.push_back({"video.source.testcard.format", "UYVY"});
+
+			box->addItem(QString::fromStdString(item.name),
+					QVariant::fromValue(item));
 		}
+	}
+}
+
+static void initScreenModes(QComboBox *box){
+	SettingItem item;
+	
+	static int const rates[] = {24, 30, 60};
+
+	for(const auto &rate : rates){
+		item.name = std::to_string(rate) + " fps";
+		item.opts.push_back({"video.source.screen.fps", std::to_string(rate)});
+
+		box->addItem(QString::fromStdString(item.name),
+				QVariant::fromValue(item));
 	}
 }
 
@@ -176,6 +205,8 @@ void SettingsUi::initVideoSource(){
 		"aja",
 		"dvs"
 	};
+
+	box->addItem("none", QVariant(""));
 
 	for(const auto &i : availableSettings->getAvailableSettings(VIDEO_SRC)){
 		if(!isAdvancedMode() && !vecContains(whiteList, i))
@@ -193,15 +224,28 @@ void SettingsUi::initVideoSource(){
 }
 
 void SettingsUi::setVideoSource(int idx){
-	
+	std::string val = mainWin->videoSourceComboBox->itemData(idx).toString().toStdString();
+	settings->getOption("video.source").setValue(val);
 }
 
 void SettingsUi::setVideoSourceMode(int idx){
-	
+	const SettingItem &i = mainWin->videoModeComboBox->itemData(idx).value<SettingItem>();
+
+	for(const auto &opt : i.opts){
+		settings->getOption(opt.opt).setValue(opt.val);
+	}
 }
 
 void SettingsUi::videoSourceCallback(Option &opt){
-	
+	if(opt.getName() != "video.source")
+		return;
+
+	mainWin->videoModeComboBox->clear();
+	if(opt.getValue() == "testcard"){
+		initTestcardModes(mainWin->videoModeComboBox);
+	} else if (opt.getValue() == "screen"){
+		initScreenModes(mainWin->videoModeComboBox);
+	}
 }
 
 void SettingsUi::initSettingsWin(Ui::Settings *ui){
