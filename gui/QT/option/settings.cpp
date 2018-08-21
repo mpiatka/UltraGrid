@@ -19,11 +19,8 @@ static void addSpace(std::string &str){
 	}
 }
 
-std::string Option::getLaunchOption() const{
-	if(!enabled || value.empty())
-		return "";
-
-	std::string out = param + value;
+std::string Option::getSubVals() const{
+	std::string out;
 
 	for(const auto &sub : suboptions){
 		if(sub.first.empty() || sub.first == value){
@@ -31,7 +28,15 @@ std::string Option::getLaunchOption() const{
 		}
 	}
 
-	//addSpace(out);
+	return out;
+}
+
+std::string Option::getLaunchOption() const{
+	if(!enabled || value.empty())
+		return "";
+
+	std::string out = param + value;
+	out += getSubVals();
 
 	return out;
 }
@@ -99,7 +104,10 @@ const static struct{
 	{"MJPEG.bitrate", ":bitrate=", "", false, "video.compress.libavcodec.codec", "MJPEG"},
 	{"VP8.bitrate", ":bitrate=", "", false, "video.compress.libavcodec.codec", "VP8"},
 	{"jpeg.quality", ":", "", false, "video.compress", "jpeg"},
+	{"audio.source", " -s ", "", false, "", ""},
+	{"audio.playback", " -r ", "", false, "", ""},
 	{"advanced", "", "", false, "", ""},
+	{"preview.display", "", "", true, "", ""},
 };
 
 Settings::Settings(){
@@ -121,7 +129,16 @@ std::string Settings::getLaunchParams() const{
 	std::string out;
 	out += getOption("video.source").getLaunchOption();
 	out += getOption("video.compress").getLaunchOption();
-	out += getOption("video.display").getLaunchOption();
+	const auto &dispOpt = getOption("video.display");
+	if(dispOpt.isEnabled() && getOption("preview.display").isEnabled()){
+		out += dispOpt.getParam();
+		out += "multiplier:" + dispOpt.getValue() + dispOpt.getSubVals();
+		out += "#preview";
+	} else {
+		out += getOption("video.display").getLaunchOption();
+	}
+	out += getOption("audio.source").getLaunchOption();
+	out += getOption("audio.playback").getLaunchOption();
 	return out;
 }
 
