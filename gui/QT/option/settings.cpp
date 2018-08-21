@@ -31,7 +31,7 @@ std::string Option::getLaunchOption() const{
 		}
 	}
 
-	addSpace(out);
+	//addSpace(out);
 
 	return out;
 }
@@ -39,6 +39,12 @@ std::string Option::getLaunchOption() const{
 void Option::changed(){
 	for(const auto &callback : onChangeCallbacks){
 		callback(*this);
+	}
+}
+
+void Option::suboptionChanged(Option &opt){
+	for(const auto &callback : onChangeCallbacks){
+		callback(opt);
 	}
 }
 
@@ -55,7 +61,8 @@ void Option::setEnabled(bool enable){
 }
 
 void Option::addSuboption(Option *sub, const std::string &limit){
-	sub->addOnChangeCallback(std::bind(&Option::changed, this));
+	using namespace std::placeholders;
+	sub->addOnChangeCallback(std::bind(&Option::suboptionChanged, this, _1));
 	suboptions.push_back(std::make_pair(limit, sub));
 }
 
@@ -77,15 +84,15 @@ const static struct{
 	const char *parent;
 	const char *limit;
 } optionList[] = {
-	{"video.source", "-t", "", false, "", ""},
+	{"video.source", " -t ", "", false, "", ""},
 	{"testcard.width", ":", "", false, "video.source", "testcard"},
 	{"testcard.height", ":", "", false, "video.source", "testcard"},
 	{"testcard.fps", ":", "", false, "video.source", "testcard"},
 	{"testcard.format", ":", "", false, "video.source", "testcard"},
-	{"screen.width", ":", "", false, "video.source", "screen"},
-	{"video.display", "-d ", "", false, "", ""},
+	{"screen.fps", ":fps=", "", false, "video.source", "screen"},
+	{"video.display", " -d ", "", false, "", ""},
 	{"gl.novsync", ":", "novsync", false, "video.display", "gl"},
-	{"video.compress", "-c ", "", false, "", ""},
+	{"video.compress", " -c ", "", false, "", ""},
 	{"libavcodec.codec", ":codec=", "", false, "video.compress", "libavcodec"},
 	{"H.264.bitrate", ":bitrate=", "", false, "video.compress.libavcodec.codec", "H.264"},
 	{"H.265.bitrate", ":bitrate=", "", false, "video.compress.libavcodec.codec", "H.265"},
@@ -97,12 +104,14 @@ const static struct{
 
 Settings::Settings(){
 	for(const auto &i : optionList){
-		addOption(i.name,
+		auto &opt = addOption(i.name,
 				i.param,
 				i.defaultVal,
 				i.enabled,
 				i.parent,
-				i.limit).addOnChangeCallback(test_callback);
+				i.limit);
+		if(!i.parent[0])
+			opt.addOnChangeCallback(test_callback);
 	}
 
 	std::cout << getLaunchParams() << std::endl;
