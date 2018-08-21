@@ -45,6 +45,7 @@ protected:
 	bool enabled;
 
 	void changed();
+	void suboptionChanged(Option &opt);
 
 	std::vector<Callback> onChangeCallbacks;
 	std::vector<std::pair<std::string, Option *>> suboptions;
