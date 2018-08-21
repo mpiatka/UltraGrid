@@ -25,6 +25,7 @@ public:
 
 	std::string getName() const;
 	std::string getValue() const;
+	std::string getSubVals() const;
 	std::string getParam() const;
 	virtual std::string getLaunchOption() const;
 
