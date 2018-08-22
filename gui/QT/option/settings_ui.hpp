@@ -26,7 +26,7 @@ private:
 
 	void populateComboBox(QComboBox *box,
 			SettingType type,
-			const std::vector<std::string> &whitelist);
+			const std::vector<std::string> &whitelist = {});
 
 	void initVideoCompress();
 	void initVideoSource();
@@ -34,6 +34,7 @@ private:
 
 	void initAudioSource();
 	void initAudioPlayback();
+	void initAudioCompression();
 
 	void videoCompressionCallback(Option &opt); 
 	void videoSourceCallback(Option &opt); 
@@ -41,6 +42,7 @@ private:
 
 	void audioSourceCallback(Option &opt);
 	void audioPlaybackCallback(Option &opt);
+	void audioCompressionCallback(Option &opt);
 
 	bool isAdvancedMode();
 
@@ -54,6 +56,11 @@ private slots:
 
 	void setAudioSource(int idx);
 	void setAudioPlayback(int idx);
+	void setAudioCompression(int idx);
+	void setAudioBitrate(const QString &);
+	void setAudioChannels(int i);
+
+	void setNetworkDestination(const QString &);
 	void test();
 };
 

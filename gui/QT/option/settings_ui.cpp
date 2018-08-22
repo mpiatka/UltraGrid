@@ -21,12 +21,14 @@ void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 	mainWin = ui;
 
 	connect(mainWin->actionAdvanced, SIGNAL(triggered(bool)), this, SLOT(setAdvanced(bool)));
+	connect(mainWin->networkDestinationEdit, SIGNAL(textEdited(const QString &)), this, SLOT(setNetworkDestination(const QString &)));
 
 	initVideoCompress();
 	initVideoSource();
 	initVideoDisplay();
 	initAudioSource();
 	initAudioPlayback();
+	initAudioCompression();
 
 	connect(mainWin->actionTest, SIGNAL(triggered()), this, SLOT(test()));
 
@@ -106,7 +108,7 @@ void SettingsUi::populateComboBox(QComboBox *box,
 	box->addItem("none", QVariant(""));
 
 	for(const auto &i : availableSettings->getAvailableSettings(type)){
-		if(!isAdvancedMode() && !vecContains(whitelist, i))
+		if(!whitelist.empty() && !isAdvancedMode() && !vecContains(whitelist, i))
 			continue;
 
 		box->addItem(QString::fromStdString(i),
@@ -118,7 +120,7 @@ void SettingsUi::populateComboBox(QComboBox *box,
 void SettingsUi::initVideoCompress(){
 	QComboBox *box = mainWin->videoCompressionComboBox;
 	connect(box, SIGNAL(activated(int)), this, SLOT(setVideoCompression(int)));
-	connect(mainWin->videoBitrateEdit, SIGNAL(textChanged(const QString&)), this, SLOT(setVideoBitrate(const QString &)));
+	connect(mainWin->videoBitrateEdit, SIGNAL(textEdited(const QString&)), this, SLOT(setVideoBitrate(const QString &)));
 	/*
 	for(const auto &i : availableSettings->getAvailableSettings(VIDEO_COMPRESS)){
 		box->addItem(QString::fromStdString(i),
@@ -134,6 +136,27 @@ void SettingsUi::initVideoCompress(){
 	settings->getOption("video.compress").addOnChangeCallback(
 			std::bind(&SettingsUi::videoCompressionCallback, this, _1)
 			);
+}
+
+void SettingsUi::initVideoSource(){
+	QComboBox *box = mainWin->videoSourceComboBox;
+	connect(box, SIGNAL(activated(int)), this, SLOT(setVideoSource(int)));
+	connect(mainWin->videoModeComboBox, SIGNAL(activated(int)), this, SLOT(setVideoSourceMode(int)));
+	const std::vector<std::string> whiteList = {
+		"testcard",
+		"screen",
+		"decklink",
+		"aja",
+		"dvs"
+	};
+
+	populateComboBox(box, VIDEO_SRC, whiteList);
+
+	using namespace std::placeholders;
+	settings->getOption("video.source").addOnChangeCallback(
+			std::bind(&SettingsUi::videoSourceCallback, this, _1)
+			);
+
 }
 
 static void initTestcardModes(QComboBox *box){
@@ -178,30 +201,9 @@ static void initScreenModes(QComboBox *box){
 	}
 }
 
-void SettingsUi::initVideoSource(){
-	QComboBox *box = mainWin->videoSourceComboBox;
-	connect(box, SIGNAL(currentIndexChanged(int)), this, SLOT(setVideoSource(int)));
-	connect(mainWin->videoModeComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(setVideoSourceMode(int)));
-	const std::vector<std::string> whiteList = {
-		"testcard",
-		"screen",
-		"decklink",
-		"aja",
-		"dvs"
-	};
-
-	populateComboBox(box, VIDEO_SRC, whiteList);
-
-	using namespace std::placeholders;
-	settings->getOption("video.source").addOnChangeCallback(
-			std::bind(&SettingsUi::videoSourceCallback, this, _1)
-			);
-
-}
-
 void SettingsUi::initVideoDisplay(){
 	QComboBox *box = mainWin->videoDisplayComboBox;
-	connect(box, SIGNAL(currentIndexChanged(int)), this, SLOT(setVideoDisplay(int)));
+	connect(box, SIGNAL(activated(int)), this, SLOT(setVideoDisplay(int)));
 	const std::vector<std::string> whiteList = {
 		"gl",
 		"sdl",
@@ -224,7 +226,8 @@ void SettingsUi::initAudioSource(){
 	const QStringList sdiAudio = {"analog", "AESEBU", "embedded"};
 
 	QComboBox *box = mainWin->audioSourceComboBox;
-	connect(box, SIGNAL(currentIndexChanged(int)), this, SLOT(setAudioSource(int)));
+	connect(box, SIGNAL(activated(int)), this, SLOT(setAudioSource(int)));
+	connect(mainWin->audioChannelsSpinBox, SIGNAL(valueChanged(int)), this, SLOT(setAudioChannels(int)));
 
 	box->addItem("none", QVariant(""));
 
@@ -244,7 +247,7 @@ void SettingsUi::initAudioPlayback(){
 	const QStringList sdiAudio = {"analog", "AESEBU", "embedded"};
 
 	QComboBox *box = mainWin->audioPlaybackComboBox;
-	connect(box, SIGNAL(currentIndexChanged(int)), this, SLOT(setAudioPlayback(int)));
+	connect(box, SIGNAL(activated(int)), this, SLOT(setAudioPlayback(int)));
 
 	box->addItem("none", QVariant(""));
 
@@ -256,6 +259,19 @@ void SettingsUi::initAudioPlayback(){
 	using namespace std::placeholders;
 	settings->getOption("audio.playback").addOnChangeCallback(
 			std::bind(&SettingsUi::audioPlaybackCallback, this, _1)
+			);
+}
+
+void SettingsUi::initAudioCompression(){
+	QComboBox *box = mainWin->audioCompressionComboBox;
+	connect(box, SIGNAL(activated(int)), this, SLOT(setAudioCompression(int)));
+	connect(mainWin->audioBitrateEdit, SIGNAL(textEdited(const QString &)), this, SLOT(setAudioBitrate(const QString &)));
+
+	populateComboBox(box, AUDIO_COMPRESS);
+
+	using namespace std::placeholders;
+	settings->getOption("audio.compress").addOnChangeCallback(
+			std::bind(&SettingsUi::audioCompressionCallback, this, _1)
 			);
 }
 
@@ -297,6 +313,24 @@ void SettingsUi::audioPlaybackCallback(Option &opt){
 
 }
 
+void SettingsUi::audioCompressionCallback(Option &opt){
+	if(opt.getName() != "audio.compress")
+		return;
+
+	static const std::vector<std::string> losslessCodecs = {
+		"FLAC",
+		"u-law",
+		"A-law",
+		"PCM"
+	};
+
+	bool enableBitrate = !vecContains(losslessCodecs, opt.getValue());
+
+	settings->getOption("audio.compress.bitrate").setEnabled(enableBitrate);
+	mainWin->audioBitrateEdit->setEnabled(enableBitrate);
+	mainWin->audioBitrateLabel->setEnabled(enableBitrate);
+}
+
 void SettingsUi::setVideoCompression(int idx){
 	QComboBox *box = mainWin->videoCompressionComboBox;
 
@@ -315,7 +349,6 @@ void SettingsUi::setVideoCompression(int idx){
 void SettingsUi::setVideoBitrate(const QString &str){
 	std::string opt = getBitrateOpt(settings);
 
-	std::cout << opt << ": " << str.toStdString() << std::endl;
 	settings->getOption(opt).setValue(str.toStdString());
 }
 
@@ -347,8 +380,25 @@ void SettingsUi::setAudioPlayback(int idx){
 	settings->getOption("audio.playback").setValue(val);
 }
 
+void SettingsUi::setAudioCompression(int idx){
+	std::string val = mainWin->audioCompressionComboBox->itemData(idx).toString().toStdString();
+	settings->getOption("audio.compress").setValue(val);
+}
+
+void SettingsUi::setAudioBitrate(const QString &str){
+	settings->getOption("audio.compress.bitrate").setValue(str.toStdString());
+}
+
+void SettingsUi::setAudioChannels(int i){
+	settings->getOption("audio.source.channels").setValue(std::to_string(i));
+}
+
 void SettingsUi::setAdvanced(bool enable){
 	settings->getOption("advanced").setEnabled(enable);
+}
+
+void SettingsUi::setNetworkDestination(const QString &str){
+	settings->getOption("network.destination").setValue(str.toStdString());
 }
 
 void SettingsUi::initSettingsWin(Ui::Settings *ui){
