@@ -36,6 +36,7 @@ bool SettingsUi::isAdvancedMode(){
 	return settings->getOption("advanced").isEnabled();
 }
 
+
 struct VideoCompressItem{
 	const char * displayName;
 	const char * value;
@@ -82,63 +83,6 @@ void SettingsUi::test(){
 	printf("%s\n", settings->getLaunchParams().c_str());
 }
 
-void SettingsUi::initVideoCompress(){
-	QComboBox *box = mainWin->videoCompressionComboBox;
-	connect(box, SIGNAL(activated(int)), this, SLOT(setVideoCompression(int)));
-	connect(mainWin->videoBitrateEdit, SIGNAL(textChanged(const QString&)), this, SLOT(setVideoBitrate(const QString &)));
-	/*
-	for(const auto &i : availableSettings->getAvailableSettings(VIDEO_COMPRESS)){
-		box->addItem(QString::fromStdString(i),
-				QVariant(QString::fromStdString(i)));
-	}
-	*/
-
-	for(const auto& item : videoCodecs){
-		box->addItem(QString(item.displayName), QVariant::fromValue(item));
-	}
-
-	using namespace std::placeholders;
-	settings->getOption("video.compress").addOnChangeCallback(
-			std::bind(&SettingsUi::videoCompressionCallback, this, _1)
-			);
-}
-
-void SettingsUi::videoCompressionCallback(Option &opt){
-	const std::string &val = opt.getValue();
-	mainWin->videoCompressionComboBox->setCurrentText(QString::fromStdString(val));
-	if(val == "jpeg"){
-		mainWin->videoBitrateLabel->setText(QString("Jpeg quality"));
-	} else {
-		mainWin->videoBitrateLabel->setText(QString("Bitrate"));
-	}
-
-	mainWin->videoBitrateEdit->setText(QString::fromStdString(
-				settings->getOption(getBitrateOpt(settings)).getValue()
-				));
-}
-
-void SettingsUi::setVideoCompression(int idx){
-	QComboBox *box = mainWin->videoCompressionComboBox;
-
-	VideoCompressItem i = box->itemData(idx).value<VideoCompressItem>();
-	std::string codec;
-	if(i.isLibav){
-		codec = "libavcodec";
-		settings->getOption("video.compress.libavcodec.codec").setValue(i.value);
-	} else {
-		codec = i.value;
-	}
-
-	settings->getOption("video.compress").setValue(codec);
-}
-
-void SettingsUi::setVideoBitrate(const QString &str){
-	std::string opt = getBitrateOpt(settings);
-
-	std::cout << opt << ": " << str.toStdString() << std::endl;
-	settings->getOption(opt).setValue(str.toStdString());
-}
-
 struct SettingValue{
 	std::string opt;
 	std::string val;
@@ -168,6 +112,28 @@ void SettingsUi::populateComboBox(QComboBox *box,
 		box->addItem(QString::fromStdString(i),
 				QVariant(QString::fromStdString(i)));
 	}
+}
+
+
+void SettingsUi::initVideoCompress(){
+	QComboBox *box = mainWin->videoCompressionComboBox;
+	connect(box, SIGNAL(activated(int)), this, SLOT(setVideoCompression(int)));
+	connect(mainWin->videoBitrateEdit, SIGNAL(textChanged(const QString&)), this, SLOT(setVideoBitrate(const QString &)));
+	/*
+	for(const auto &i : availableSettings->getAvailableSettings(VIDEO_COMPRESS)){
+		box->addItem(QString::fromStdString(i),
+				QVariant(QString::fromStdString(i)));
+	}
+	*/
+
+	for(const auto& item : videoCodecs){
+		box->addItem(QString(item.displayName), QVariant::fromValue(item));
+	}
+
+	using namespace std::placeholders;
+	settings->getOption("video.compress").addOnChangeCallback(
+			std::bind(&SettingsUi::videoCompressionCallback, this, _1)
+			);
 }
 
 static void initTestcardModes(QComboBox *box){
@@ -233,31 +199,6 @@ void SettingsUi::initVideoSource(){
 
 }
 
-void SettingsUi::setVideoSource(int idx){
-	std::string val = mainWin->videoSourceComboBox->itemData(idx).toString().toStdString();
-	settings->getOption("video.source").setValue(val);
-}
-
-void SettingsUi::setVideoSourceMode(int idx){
-	const SettingItem &i = mainWin->videoModeComboBox->itemData(idx).value<SettingItem>();
-
-	for(const auto &opt : i.opts){
-		settings->getOption(opt.opt).setValue(opt.val);
-	}
-}
-
-void SettingsUi::videoSourceCallback(Option &opt){
-	if(opt.getName() != "video.source")
-		return;
-
-	mainWin->videoModeComboBox->clear();
-	if(opt.getValue() == "testcard"){
-		initTestcardModes(mainWin->videoModeComboBox);
-	} else if (opt.getValue() == "screen"){
-		initScreenModes(mainWin->videoModeComboBox);
-	}
-}
-
 void SettingsUi::initVideoDisplay(){
 	QComboBox *box = mainWin->videoDisplayComboBox;
 	connect(box, SIGNAL(currentIndexChanged(int)), this, SLOT(setVideoDisplay(int)));
@@ -276,15 +217,6 @@ void SettingsUi::initVideoDisplay(){
 			std::bind(&SettingsUi::videoDisplayCallback, this, _1)
 			);
 
-}
-
-void SettingsUi::setVideoDisplay(int idx){
-	std::string val = mainWin->videoDisplayComboBox->itemData(idx).toString().toStdString();
-	settings->getOption("video.display").setValue(val);
-}
-
-void SettingsUi::videoDisplayCallback(Option &opt){
-	
 }
 
 void SettingsUi::initAudioSource(){
@@ -307,15 +239,6 @@ void SettingsUi::initAudioSource(){
 			);
 }
 
-void SettingsUi::setAudioSource(int idx){
-	std::string val = mainWin->audioSourceComboBox->itemData(idx).toString().toStdString();
-	settings->getOption("audio.source").setValue(val);
-}
-
-void SettingsUi::audioSourceCallback(Option &opt){
-
-}
-
 void SettingsUi::initAudioPlayback(){
 	const QStringList sdiAudioCards = {"decklink", "aja", "dvs", "deltacast"};
 	const QStringList sdiAudio = {"analog", "AESEBU", "embedded"};
@@ -336,21 +259,100 @@ void SettingsUi::initAudioPlayback(){
 			);
 }
 
-void SettingsUi::setAudioPlayback(int idx){
-	std::string val = mainWin->audioPlaybackComboBox->itemData(idx).toString().toStdString();
-	settings->getOption("audio.playback").setValue(val);
+void SettingsUi::videoCompressionCallback(Option &opt){
+	const std::string &val = opt.getValue();
+	mainWin->videoCompressionComboBox->setCurrentText(QString::fromStdString(val));
+	if(val == "jpeg"){
+		mainWin->videoBitrateLabel->setText(QString("Jpeg quality"));
+	} else {
+		mainWin->videoBitrateLabel->setText(QString("Bitrate"));
+	}
+
+	mainWin->videoBitrateEdit->setText(QString::fromStdString(
+				settings->getOption(getBitrateOpt(settings)).getValue()
+				));
+}
+
+void SettingsUi::videoSourceCallback(Option &opt){
+	if(opt.getName() != "video.source")
+		return;
+
+	mainWin->videoModeComboBox->clear();
+	if(opt.getValue() == "testcard"){
+		initTestcardModes(mainWin->videoModeComboBox);
+	} else if (opt.getValue() == "screen"){
+		initScreenModes(mainWin->videoModeComboBox);
+	}
+}
+
+void SettingsUi::videoDisplayCallback(Option &opt){
+	
+}
+
+void SettingsUi::audioSourceCallback(Option &opt){
+
 }
 
 void SettingsUi::audioPlaybackCallback(Option &opt){
 
 }
 
-void SettingsUi::initSettingsWin(Ui::Settings *ui){
-	settingsWin = ui;
+void SettingsUi::setVideoCompression(int idx){
+	QComboBox *box = mainWin->videoCompressionComboBox;
 
+	VideoCompressItem i = box->itemData(idx).value<VideoCompressItem>();
+	std::string codec;
+	if(i.isLibav){
+		codec = "libavcodec";
+		settings->getOption("video.compress.libavcodec.codec").setValue(i.value);
+	} else {
+		codec = i.value;
+	}
 
+	settings->getOption("video.compress").setValue(codec);
+}
+
+void SettingsUi::setVideoBitrate(const QString &str){
+	std::string opt = getBitrateOpt(settings);
+
+	std::cout << opt << ": " << str.toStdString() << std::endl;
+	settings->getOption(opt).setValue(str.toStdString());
+}
+
+void SettingsUi::setVideoSource(int idx){
+	std::string val = mainWin->videoSourceComboBox->itemData(idx).toString().toStdString();
+	settings->getOption("video.source").setValue(val);
+}
+
+void SettingsUi::setVideoSourceMode(int idx){
+	const SettingItem &i = mainWin->videoModeComboBox->itemData(idx).value<SettingItem>();
+
+	for(const auto &opt : i.opts){
+		settings->getOption(opt.opt).setValue(opt.val);
+	}
+}
+
+void SettingsUi::setVideoDisplay(int idx){
+	std::string val = mainWin->videoDisplayComboBox->itemData(idx).toString().toStdString();
+	settings->getOption("video.display").setValue(val);
+}
+
+void SettingsUi::setAudioSource(int idx){
+	std::string val = mainWin->audioSourceComboBox->itemData(idx).toString().toStdString();
+	settings->getOption("audio.source").setValue(val);
+}
+
+void SettingsUi::setAudioPlayback(int idx){
+	std::string val = mainWin->audioPlaybackComboBox->itemData(idx).toString().toStdString();
+	settings->getOption("audio.playback").setValue(val);
 }
 
 void SettingsUi::setAdvanced(bool enable){
 	settings->getOption("advanced").setEnabled(enable);
+}
+
+void SettingsUi::initSettingsWin(Ui::Settings *ui){
+	settingsWin = ui;
+
+
 }
