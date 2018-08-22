@@ -52,8 +52,8 @@ UltragridWindow::UltragridWindow(QWidget *parent): QMainWindow(parent){
 	//			displayOption,
 	//			ultragridExecutable));
 
-	opts.emplace_back(new AudioCompressOption(&ui,
-				ultragridExecutable));
+	//opts.emplace_back(new AudioCompressOption(&ui,
+	//			ultragridExecutable));
 
 	opts.emplace_back(new FecOption(&ui));
 	opts.emplace_back(new ArgumentOption(&ui));

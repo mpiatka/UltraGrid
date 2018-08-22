@@ -105,7 +105,11 @@ const static struct{
 	{"VP8.bitrate", ":bitrate=", "", false, "video.compress.libavcodec.codec", "VP8"},
 	{"jpeg.quality", ":", "", false, "video.compress", "jpeg"},
 	{"audio.source", " -s ", "", false, "", ""},
+	{"audio.source.channels", " --audio-capture-format channels=", "", false, "", ""},
 	{"audio.playback", " -r ", "", false, "", ""},
+	{"audio.compress", " --audio-codec ", "", false, "", ""},
+	{"bitrate", ":bitrate=", "", false, "audio.compress", ""},
+	{"network.destination", " ", "", false, "", ""},
 	{"advanced", "", "", false, "", ""},
 	{"preview.display", "", "", true, "", ""},
 };
@@ -138,7 +142,10 @@ std::string Settings::getLaunchParams() const{
 		out += getOption("video.display").getLaunchOption();
 	}
 	out += getOption("audio.source").getLaunchOption();
+	out += getOption("audio.source.channels").getLaunchOption();
+	out += getOption("audio.compress").getLaunchOption();
 	out += getOption("audio.playback").getLaunchOption();
+	out += getOption("network.destination").getLaunchOption();
 	return out;
 }
 
