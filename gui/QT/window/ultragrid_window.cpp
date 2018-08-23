@@ -50,12 +50,13 @@ UltragridWindow::UltragridWindow(QWidget *parent): QMainWindow(parent){
 	//opts.emplace_back(new AudioCompressOption(&ui,
 	//			ultragridExecutable));
 
-	opts.emplace_back(new FecOption(&ui));
-	opts.emplace_back(new ArgumentOption(&ui));
+	//opts.emplace_back(new FecOption(&ui));
+	//opts.emplace_back(new ArgumentOption(&ui));
 
 	for(auto &opt : opts){
 		connect(opt.get(), SIGNAL(changed()), this, SLOT(setArgs()));
 	}
+
 
 	connect(&settingsWindow, SIGNAL(changed()), this, SLOT(setArgs()));
 
@@ -69,6 +70,8 @@ UltragridWindow::UltragridWindow(QWidget *parent): QMainWindow(parent){
 	settingsUi.init(&settings, &availableSettings);
 	settingsUi.initMainWin(&ui);
 	settingsWindow.init(&settingsUi);
+
+	connect(&settingsUi, SIGNAL(changed()), this, SLOT(setArgs()));
 
 	checkPreview();
 
@@ -190,10 +193,6 @@ void UltragridWindow::editArgs(const QString &text){
 void UltragridWindow::setArgs(){
 	launchArgs = "";
 
-	if(ui.previewCheckBox->isChecked()){
-		launchArgs += "--capture-filter preview ";
-	}
-
 	for(auto &opt : opts){
 		launchArgs += opt->getLaunchParam();
 	}
@@ -202,7 +201,7 @@ void UltragridWindow::setArgs(){
 
 	launchArgs += ui.networkDestinationEdit->text();
 
-	ui.arguments->setText(launchArgs);
+	ui.arguments->setText(QString::fromStdString(settings.getLaunchParams()));
 }
 
 void UltragridWindow::queryOpts(){

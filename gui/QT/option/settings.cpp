@@ -43,13 +43,13 @@ std::string Option::getLaunchOption() const{
 
 void Option::changed(){
 	for(const auto &callback : onChangeCallbacks){
-		callback(*this);
+		callback(*this, false);
 	}
 }
 
-void Option::suboptionChanged(Option &opt){
+void Option::suboptionChanged(Option &opt, bool){
 	for(const auto &callback : onChangeCallbacks){
-		callback(opt);
+		callback(opt, true);
 	}
 }
 
@@ -67,7 +67,7 @@ void Option::setEnabled(bool enable){
 
 void Option::addSuboption(Option *sub, const std::string &limit){
 	using namespace std::placeholders;
-	sub->addOnChangeCallback(std::bind(&Option::suboptionChanged, this, _1));
+	sub->addOnChangeCallback(std::bind(&Option::suboptionChanged, this, _1, _2));
 	suboptions.push_back(std::make_pair(limit, sub));
 }
 
@@ -75,7 +75,7 @@ void Option::addOnChangeCallback(Callback callback){
 	onChangeCallbacks.push_back(callback);
 }
 
-static void test_callback(Option &opt){
+static void test_callback(Option &opt, bool){
 	std::cout << "Callback: " << opt.getName()
 		<< ": " << opt.getValue()
 		<< " (" << opt.isEnabled() << ")" << std::endl;
@@ -110,6 +110,7 @@ const static struct{
 	{"audio.compress", " --audio-codec ", "", false, "", ""},
 	{"bitrate", ":bitrate=", "", false, "audio.compress", ""},
 	{"network.destination", " ", "", false, "", ""},
+	{"decode.hwaccel", " --param ", "use-hw-accel", false, "", ""},
 	{"advanced", "", "", false, "", ""},
 	{"preview.display", "", "", true, "", ""},
 };
@@ -146,6 +147,7 @@ std::string Settings::getLaunchParams() const{
 	out += getOption("audio.compress").getLaunchOption();
 	out += getOption("audio.playback").getLaunchOption();
 	out += getOption("network.destination").getLaunchOption();
+	out += getOption("decode.hwaccel").getLaunchOption();
 	return out;
 }
 
