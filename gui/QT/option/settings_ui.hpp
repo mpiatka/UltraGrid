@@ -36,26 +36,27 @@ private:
 	void initAudioPlayback();
 	void initAudioCompression();
 
-	void videoCompressionCallback(Option &opt); 
+	void videoCompressionCallback(Option &opt, bool suboption); 
 	void videoSourceCallback(Option &opt, bool suboption); 
-	void videoDisplayCallback(Option &opt); 
+	void videoDisplayCallback(Option &opt, bool suboption); 
 
-	void audioSourceCallback(Option &opt);
-	void audioPlaybackCallback(Option &opt);
+	void audioSourceCallback(Option &opt, bool suboption);
+	void audioPlaybackCallback(Option &opt, bool suboption);
 	void audioCompressionCallback(Option &opt, bool suboption);
 
 	bool isAdvancedMode();
 
 	void setComboBox(QComboBox *box, const std::string &opt, int idx);
 	void setString(const std::string &opt, const QString &str);
+	void setBool(const std::string &opt, bool b);
+
+	void connectSignals();
+	void addCallbacks();
 
 private slots:
-	void setAdvanced(bool enable);
 	void setVideoCompression(int idx);
 	void setVideoBitrate(const QString &);
 	void setVideoSourceMode(int idx);
-
-	void setHwAccel(bool b);
 
 	void test();
 
