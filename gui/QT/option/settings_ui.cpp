@@ -12,6 +12,16 @@ static bool vecContains(std::vector<std::string> vec, std::string str){
 	return false;
 }
 
+static void setItem(QComboBox *box, const QVariant &data){
+	if(!data.isValid())
+		return;
+
+	int idx = box->findData(data);
+
+	if(idx != -1)
+		box->setCurrentIndex(idx);
+}
+
 void SettingsUi::init(Settings *settings, AvailableSettings *availableSettings){
 	this->settings = settings;
 	this->availableSettings = availableSettings;
@@ -22,16 +32,20 @@ void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 
 	connectSignals();
 
-	initVideoCompress();
-	initVideoSource();
-	initVideoDisplay();
-	initAudioSource();
-	initAudioPlayback();
-	initAudioCompression();
+	refreshAll();
  
 	addCallbacks();
 	connect(mainWin->actionTest, SIGNAL(triggered()), this, SLOT(test()));
 
+}
+
+void SettingsUi::refreshAll(){
+	refreshVideoCompress();
+	refreshVideoSource();
+	refreshVideoDisplay();
+	refreshAudioSource();
+	refreshAudioPlayback();
+	refreshAudioCompression();
 }
 
 void SettingsUi::connectSignals(){
@@ -43,6 +57,8 @@ void SettingsUi::connectSignals(){
 			this, std::bind(&SettingsUi::setString, this, "network.destination", _1));
 	connect(mainWin->actionUse_hw_acceleration, &QAction::triggered,
 			this, std::bind(&SettingsUi::setBool, this, "decode.hwaccel", _1));
+	connect(mainWin->actionRefresh, &QAction::triggered,
+			this, &SettingsUi::refreshAll);
 
 	//Video
 	connect(mainWin->videoCompressionComboBox,
@@ -84,10 +100,13 @@ void SettingsUi::addCallbacks(){
 	} callbacks[] = {
 		CALLBACK("video.compress", &SettingsUi::videoCompressionCallback),
 		CALLBACK("video.source", &SettingsUi::videoSourceCallback),
+		{"video.source", std::bind(&SettingsUi::refreshAudioSource, this)},
 		CALLBACK("video.display", &SettingsUi::videoDisplayCallback),
+		{"video.display", std::bind(&SettingsUi::refreshAudioPlayback, this)},
 		CALLBACK("audio.source", &SettingsUi::audioSourceCallback),
 		CALLBACK("audio.playback", &SettingsUi::audioPlaybackCallback),
 		CALLBACK("audio.compress", &SettingsUi::audioCompressionCallback),
+		{"advanced", std::bind(&SettingsUi::refreshAll, this)},
 	};
 #undef CALLBACK
 
@@ -179,14 +198,17 @@ void SettingsUi::populateComboBox(QComboBox *box,
 }
 
 
-void SettingsUi::initVideoCompress(){
+void SettingsUi::refreshVideoCompress(){
 	QComboBox *box = mainWin->videoCompressionComboBox;
+	QVariant prevData = box->currentData();
+	box->clear();
 	for(const auto& item : videoCodecs){
 		box->addItem(QString(item.displayName), QVariant::fromValue(item));
 	}
+	setItem(box, prevData);
 }
 
-void SettingsUi::initVideoSource(){
+void SettingsUi::refreshVideoSource(){
 	const std::vector<std::string> whiteList = {
 		"testcard",
 		"screen",
@@ -196,7 +218,10 @@ void SettingsUi::initVideoSource(){
 	};
 
 	QComboBox *box = mainWin->videoSourceComboBox;
+	QVariant prevData = box->currentData();
+	box->clear();
 	populateComboBox(box, VIDEO_SRC, whiteList);
+	setItem(box, prevData);
 }
 
 static void initTestcardModes(QComboBox *box){
@@ -255,7 +280,7 @@ static void initScreenModes(QComboBox *box){
 	}
 }
 
-void SettingsUi::initVideoDisplay(){
+void SettingsUi::refreshVideoDisplay(){
 	const std::vector<std::string> whiteList = {
 		"gl",
 		"sdl",
@@ -265,38 +290,59 @@ void SettingsUi::initVideoDisplay(){
 	};
 
 	QComboBox *box = mainWin->videoDisplayComboBox;
+	QVariant prevData = box->currentData();
+	box->clear();
 	populateComboBox(box, VIDEO_DISPLAY, whiteList);
+	setItem(box, prevData);
 }
 
-void SettingsUi::initAudioSource(){
-	const QStringList sdiAudioCards = {"decklink", "aja", "dvs", "deltacast"};
-	const QStringList sdiAudio = {"analog", "AESEBU", "embedded"};
+void SettingsUi::refreshAudioSource(){
+	const std::vector<std::string> sdiAudioCards = {"decklink", "aja", "dvs", "deltacast"};
+	const std::vector<std::string> sdiAudio = {"analog", "AESEBU", "embedded"};
 
 	QComboBox *box = mainWin->audioSourceComboBox;
+	QVariant prevData = box->currentData();
+	box->clear();
+
 	box->addItem("none", QVariant(""));
+
+	std::string vid = settings->getOption("video.source").getValue();
 
 	for(const auto &i : availableSettings->getAvailableSettings(AUDIO_SRC)){
+		if(!isAdvancedMode() && vecContains(sdiAudio, i) && !vecContains(sdiAudioCards, vid))
+			continue;
 		box->addItem(QString::fromStdString(i),
 				QVariant(QString::fromStdString(i)));
 	}
+	setItem(box, prevData);
 }
 
-void SettingsUi::initAudioPlayback(){
-	const QStringList sdiAudioCards = {"decklink", "aja", "dvs", "deltacast"};
-	const QStringList sdiAudio = {"analog", "AESEBU", "embedded"};
+void SettingsUi::refreshAudioPlayback(){
+	const std::vector<std::string> sdiAudioCards = {"decklink", "aja", "dvs", "deltacast"};
+	const std::vector<std::string> sdiAudio = {"analog", "AESEBU", "embedded"};
 
 	QComboBox *box = mainWin->audioPlaybackComboBox;
+	QVariant prevData = box->currentData();
+	box->clear();
 	box->addItem("none", QVariant(""));
 
+	std::string vid = settings->getOption("video.display").getValue();
+
 	for(const auto &i : availableSettings->getAvailableSettings(AUDIO_PLAYBACK)){
+		if(!isAdvancedMode() && vecContains(sdiAudio, i) && !vecContains(sdiAudioCards, vid))
+			continue;
 		box->addItem(QString::fromStdString(i),
 				QVariant(QString::fromStdString(i)));
 	}
+	setItem(box, prevData);
 }
 
-void SettingsUi::initAudioCompression(){
+void SettingsUi::refreshAudioCompression(){
 	QComboBox *box = mainWin->audioCompressionComboBox;
+	QVariant prevData = box->currentData();
+	box->clear();
 	populateComboBox(box, AUDIO_COMPRESS);
+	setItem(box, prevData);
 }
 
 void SettingsUi::videoCompressionCallback(Option &opt, bool){

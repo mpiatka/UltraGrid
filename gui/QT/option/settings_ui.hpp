@@ -28,13 +28,13 @@ private:
 			SettingType type,
 			const std::vector<std::string> &whitelist = {});
 
-	void initVideoCompress();
-	void initVideoSource();
-	void initVideoDisplay();
+	void refreshVideoCompress();
+	void refreshVideoSource();
+	void refreshVideoDisplay();
 
-	void initAudioSource();
-	void initAudioPlayback();
-	void initAudioCompression();
+	void refreshAudioSource();
+	void refreshAudioPlayback();
+	void refreshAudioCompression();
 
 	void videoCompressionCallback(Option &opt, bool suboption); 
 	void videoSourceCallback(Option &opt, bool suboption); 
@@ -57,6 +57,8 @@ private slots:
 	void setVideoCompression(int idx);
 	void setVideoBitrate(const QString &);
 	void setVideoSourceMode(int idx);
+
+	void refreshAll();
 
 	void test();
 
