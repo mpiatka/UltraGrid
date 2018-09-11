@@ -205,6 +205,9 @@ void SettingsUi::refreshVideoCompress(){
 	for(const auto& item : videoCodecs){
 		box->addItem(QString(item.displayName), QVariant::fromValue(item));
 	}
+	if(isAdvancedMode()){
+		populateComboBox(box, VIDEO_COMPRESS);
+	}
 	setItem(box, prevData);
 }
 
