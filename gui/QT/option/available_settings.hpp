@@ -18,6 +18,7 @@ enum SettingType{
 class AvailableSettings{
 public:
 	void query(const std::string &executable, SettingType type);
+	void queryCap(const QStringList &lines, SettingType type, const char *capStr);
 
 	void queryAll(const std::string &executable);
 
