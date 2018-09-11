@@ -75,6 +75,10 @@ void Option::addOnChangeCallback(Callback callback){
 	onChangeCallbacks.push_back(callback);
 }
 
+Settings *Option::getSettings(){
+	return settings;
+}
+
 static void test_callback(Option &opt, bool){
 	std::cout << "Callback: " << opt.getName()
 		<< ": " << opt.getValue()
@@ -110,12 +114,46 @@ const static struct{
 	{"audio.compress", " --audio-codec ", "", false, "", ""},
 	{"bitrate", ":bitrate=", "", false, "audio.compress", ""},
 	{"network.destination", " ", "", false, "", ""},
+	{"network.port", " -P ", "5004", false, "", ""},
+	{"video_rx", ":", "5004", false, "network.port", ""},
+	{"video_tx", ":", "5004", false, "network.port", ""},
+	{"audio_rx", ":", "5006", false, "network.port", ""},
+	{"audio_tx", ":", "5006", false, "network.port", ""},
 	{"decode.hwaccel", " --param ", "use-hw-accel", false, "", ""},
 	{"advanced", "", "", false, "", ""},
 	{"preview.display", "", "", true, "", ""},
 };
 
-Settings::Settings(){
+static void portCallback(Option &opt, bool suboption){
+	Settings *settings = opt.getSettings();
+	if(!suboption){
+		settings->getOption("network.port.video_rx").setEnabled(false);
+		settings->getOption("network.port.video_tx").setEnabled(false);
+		settings->getOption("network.port.audio_rx").setEnabled(false);
+		settings->getOption("network.port.audio_tx").setEnabled(false);
+	} else {
+		settings->getOption("network.port.video_rx").setEnabled(true);
+		settings->getOption("network.port.video_tx").setEnabled(true);
+		if(opt.getName() == "network.port.audio_rx"
+				|| opt.getName() == "network.port.audio_tx"){
+			settings->getOption("network.port.audio_rx").setEnabled(true);
+			settings->getOption("network.port.audio_tx").setEnabled(true);
+		}
+	}
+}
+
+const struct {
+	const char *name;
+	Option::Callback callback;
+} optionCallbacks[] = {
+	{"network.port", portCallback},
+	{"network.port.video_rx", portCallback},
+	{"network.port.video_tx", portCallback},
+	{"network.port.audio_rx", portCallback},
+	{"network.port.audio_tx", portCallback},
+};
+
+Settings::Settings() : dummy(this){
 	for(const auto &i : optionList){
 		auto &opt = addOption(i.name,
 				i.param,
@@ -125,6 +163,10 @@ Settings::Settings(){
 				i.limit);
 		if(!i.parent[0])
 			opt.addOnChangeCallback(test_callback);
+	}
+
+	for(const auto &i : optionCallbacks){
+		getOption(i.name).addOnChangeCallback(i.callback);
 	}
 
 	std::cout << getLaunchParams() << std::endl;
@@ -159,7 +201,7 @@ Option& Settings::getOption(const std::string &opt){
 	auto search = options.find(opt);
 
 	if(search == options.end()){
-		std::unique_ptr<Option> newOption(new Option(opt));
+		std::unique_ptr<Option> newOption(new Option(this, opt));
 		auto p = newOption.get();
 		options[opt] = std::move(newOption);
 		return *p;
@@ -167,8 +209,6 @@ Option& Settings::getOption(const std::string &opt){
 
 	return *search->second;
 }
-
-const Option Settings::dummy;
 
 const Option& Settings::getOption(const std::string &opt) const{
 	auto search = options.find(opt);
@@ -194,7 +234,7 @@ Option& Settings::addOption(std::string name,
 	Option *opt;
 
 	if(search == options.end()){
-		std::unique_ptr<Option> newOption(new Option(name));
+		std::unique_ptr<Option> newOption(new Option(this, name));
 		opt = newOption.get();
 		options[name] = std::move(newOption);
 	} else {

@@ -1,5 +1,6 @@
 #include <QProcess>
 #include <QString>
+#include <cstring>
 #include "available_settings.hpp"
 
 static bool vectorContains(const std::vector<std::string> &v, const std::string & s){
@@ -8,6 +9,23 @@ static bool vectorContains(const std::vector<std::string> &v, const std::string 
 			return true;
 	}
 	return false;
+}
+
+static QStringList getProcessOutput(const std::string& executable, const std::string& command){
+	QProcess process;
+	process.start((executable + command).c_str());
+	process.waitForFinished();
+
+	QString output = QString(process.readAllStandardOutput());
+#ifdef WIN32
+	QString lineSeparator = "\r\n";
+#else
+	QString lineSeparator = "\n";
+#endif
+
+	QStringList lines = output.split(lineSeparator);
+
+	return lines;
 }
 
 static std::vector<std::string> getAvailOpts(const std::string &opt, const std::string &executable){
@@ -41,8 +59,27 @@ static std::vector<std::string> getAvailOpts(const std::string &opt, const std::
 }
 
 void AvailableSettings::queryAll(const std::string &executable){
-	for(int i = 0; i < SETTING_TYPE_COUNT; i++){
-		query(executable, static_cast<SettingType>(i));
+	QStringList lines = getProcessOutput(executable, " --capabilities");
+
+	queryCap(lines, VIDEO_SRC, "[cap][capture] ");
+	queryCap(lines, VIDEO_DISPLAY, "[cap][display] ");
+	queryCap(lines, VIDEO_COMPRESS, "[cap][compress] ");
+	queryCap(lines, VIDEO_CAPTURE_FILTER, "[cap][capture_filter] ");
+	queryCap(lines, AUDIO_SRC, "[cap][audio_cap] ");
+	queryCap(lines, AUDIO_PLAYBACK, "[cap][audio_play] ");
+
+	query(executable, AUDIO_COMPRESS);
+}
+
+void AvailableSettings::queryCap(const QStringList &lines,
+		SettingType type,
+		const char *capStr)
+{
+	size_t capStrLen = strlen(capStr);
+	foreach ( const QString &line, lines ) {
+		if(line.startsWith(capStr)){
+			available[type].push_back(line.mid(capStrLen).toStdString());
+		}
 	}
 }
 
