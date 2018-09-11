@@ -7,19 +7,24 @@
 #include <functional>
 #include <memory>
 
+class Settings;
+
 class Option{
-	using Callback = std::function<void(Option &, bool)>;
 public:
-	Option(const std::string &name,
+	using Callback = std::function<void(Option &, bool)>;
+
+	Option(Settings *settings,
+			const std::string &name,
 			const std::string &param = "",
 			const std::string &value = "",
 			bool enabled = true) :
 		name(name),
 		param(param),
 		value(value),
-		enabled(enabled) {  }
+		enabled(enabled),
+		settings(settings)	{  }
 
-	Option() {  }
+	Option(Settings *settings) : settings(settings) {  }
 
 	virtual ~Option() {  }
 
@@ -38,6 +43,8 @@ public:
 	void addSuboption(Option *sub, const std::string &limit = "");
 	void addOnChangeCallback(Callback callback);
 
+	Settings *getSettings();
+
 protected:
 	std::string name;
 	std::string param;
@@ -50,6 +57,8 @@ protected:
 
 	std::vector<Callback> onChangeCallbacks;
 	std::vector<std::pair<std::string, Option *>> suboptions;
+
+	Settings *settings;
 };
 
 class Settings{
@@ -73,7 +82,7 @@ private:
 
 	std::map<std::string, std::unique_ptr<Option>> options;
 
-	static const Option dummy;
+	const Option dummy;
 };
 
 #endif //SETTINGS_HPP
