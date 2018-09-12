@@ -53,16 +53,22 @@ void Option::suboptionChanged(Option &opt, bool){
 	}
 }
 
-void Option::setValue(const std::string &val){
+void Option::setValue(const std::string &val, bool suppressCallback){
 	value = val;
 	enabled = !val.empty();
 
-	changed();
+	if(!suppressCallback)
+		changed();
 }
 
-void Option::setEnabled(bool enable){
+void Option::setDefaultValue(const std::string &val){
+	defaultValue = val;
+}
+
+void Option::setEnabled(bool enable, bool suppressCallback){
 	enabled = enable;
-	changed();
+	if(!suppressCallback)
+		changed();
 }
 
 void Option::addSuboption(Option *sub, const std::string &limit){
@@ -115,42 +121,17 @@ const static struct{
 	{"bitrate", ":bitrate=", "", false, "audio.compress", ""},
 	{"network.destination", " ", "", false, "", ""},
 	{"network.port", " -P ", "5004", false, "", ""},
-	{"video_rx", ":", "5004", false, "network.port", ""},
-	{"video_tx", ":", "5004", false, "network.port", ""},
-	{"audio_rx", ":", "5006", false, "network.port", ""},
-	{"audio_tx", ":", "5006", false, "network.port", ""},
+	{"network.control_port", " --control-port ", "8888", false, "", ""},
 	{"decode.hwaccel", " --param ", "use-hw-accel", false, "", ""},
 	{"advanced", "", "", false, "", ""},
 	{"preview.display", "", "", true, "", ""},
 };
 
-static void portCallback(Option &opt, bool suboption){
-	Settings *settings = opt.getSettings();
-	if(!suboption){
-		settings->getOption("network.port.video_rx").setEnabled(false);
-		settings->getOption("network.port.video_tx").setEnabled(false);
-		settings->getOption("network.port.audio_rx").setEnabled(false);
-		settings->getOption("network.port.audio_tx").setEnabled(false);
-	} else {
-		settings->getOption("network.port.video_rx").setEnabled(true);
-		settings->getOption("network.port.video_tx").setEnabled(true);
-		if(opt.getName() == "network.port.audio_rx"
-				|| opt.getName() == "network.port.audio_tx"){
-			settings->getOption("network.port.audio_rx").setEnabled(true);
-			settings->getOption("network.port.audio_tx").setEnabled(true);
-		}
-	}
-}
-
 const struct {
 	const char *name;
 	Option::Callback callback;
 } optionCallbacks[] = {
-	{"network.port", portCallback},
-	{"network.port.video_rx", portCallback},
-	{"network.port.video_tx", portCallback},
-	{"network.port.audio_rx", portCallback},
-	{"network.port.audio_tx", portCallback},
+
 };
 
 Settings::Settings() : dummy(this){
@@ -188,6 +169,8 @@ std::string Settings::getLaunchParams() const{
 	out += getOption("audio.source.channels").getLaunchOption();
 	out += getOption("audio.compress").getLaunchOption();
 	out += getOption("audio.playback").getLaunchOption();
+	out += getOption("network.port").getLaunchOption();
+	out += getOption("network.control_port").getLaunchOption();
 	out += getOption("network.destination").getLaunchOption();
 	out += getOption("decode.hwaccel").getLaunchOption();
 	return out;
@@ -243,6 +226,7 @@ Option& Settings::addOption(std::string name,
 
 	opt->setParam(param);
 	opt->setValue(value);
+	opt->setDefaultValue(value);
 	opt->setEnabled(enabled);
 
 	if(!parent.empty()){

@@ -16,11 +16,12 @@ public:
 	Option(Settings *settings,
 			const std::string &name,
 			const std::string &param = "",
-			const std::string &value = "",
+			const std::string &defaultValue = "",
 			bool enabled = true) :
 		name(name),
 		param(param),
-		value(value),
+		value(defaultValue),
+		defaultValue(defaultValue),
 		enabled(enabled),
 		settings(settings)	{  }
 
@@ -34,11 +35,12 @@ public:
 	std::string getParam() const;
 	virtual std::string getLaunchOption() const;
 
-	virtual void setValue(const std::string &val);
+	virtual void setValue(const std::string &val, bool suppressCallback = false);
+	virtual void setDefaultValue(const std::string &val);
 	void setParam(const std::string &p) { param = p; }
 
 	bool isEnabled() const { return enabled; }
-	void setEnabled(bool enable);
+	void setEnabled(bool enable, bool suppressCallback = false);
 
 	void addSuboption(Option *sub, const std::string &limit = "");
 	void addOnChangeCallback(Callback callback);
@@ -49,6 +51,7 @@ protected:
 	std::string name;
 	std::string param;
 	std::string value;
+	std::string defaultValue;
 
 	bool enabled;
 
