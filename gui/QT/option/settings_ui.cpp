@@ -455,5 +455,9 @@ void SettingsUi::setBool(const std::string &opt, bool b){
 void SettingsUi::initSettingsWin(Ui::Settings *ui){
 	settingsWin = ui;
 
-
+	using namespace std::placeholders;
+	connect(ui->basePort, &QLineEdit::textEdited,
+			this, std::bind(&SettingsUi::setString, this, "network.port", _1));
+	connect(ui->controlPort, &QLineEdit::textEdited,
+			this, std::bind(&SettingsUi::setString, this, "network.control_port", _1));
 }

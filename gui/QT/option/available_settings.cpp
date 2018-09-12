@@ -67,8 +67,25 @@ void AvailableSettings::queryAll(const std::string &executable){
 	queryCap(lines, VIDEO_CAPTURE_FILTER, "[cap][capture_filter] ");
 	queryCap(lines, AUDIO_SRC, "[cap][audio_cap] ");
 	queryCap(lines, AUDIO_PLAYBACK, "[cap][audio_play] ");
+	
+	queryV4l2(lines);
 
 	query(executable, AUDIO_COMPRESS);
+}
+
+void AvailableSettings::queryV4l2(const QStringList &lines){
+	const char *v4l2str = "[cap] (v4l2:";
+	const size_t capStrLen = strlen(v4l2str);
+
+	foreach ( QString line, lines ) {
+		if(line.startsWith(v4l2str)){
+			line.remove(0, capStrLen);
+			int pos = line.indexOf(';');
+			std::string path = line.mid(0, pos).toStdString();
+			std::string name = line.mid(pos).toStdString();
+			v4l2Devices.push_back({name, path});
+		}
+	}
 }
 
 void AvailableSettings::queryCap(const QStringList &lines,
