@@ -197,7 +197,7 @@ void UltragridWindow::setArgs(){
 		launchArgs += opt->getLaunchParam();
 	}
 
-	launchArgs += settingsWindow.getPortArgs();
+	//launchArgs += settingsWindow.getPortArgs();
 
 	launchArgs += ui.networkDestinationEdit->text();
 

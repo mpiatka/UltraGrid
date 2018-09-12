@@ -10,10 +10,6 @@ class SettingsWindow : public QDialog{
 
 public:
 	SettingsWindow(QWidget *parent = 0);
-	QString getVideoPort() const;
-	QString getAudioPort() const;
-	bool isDefault() const;
-	QString getPortArgs() const;
 
 	void init(SettingsUi *settingsUi);
 
