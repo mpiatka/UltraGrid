@@ -55,6 +55,8 @@ void SettingsUi::connectSignals(){
 			this, std::bind(&SettingsUi::setBool, this, "advanced", _1));
 	connect(mainWin->networkDestinationEdit, &QLineEdit::textEdited,
 			this, std::bind(&SettingsUi::setString, this, "network.destination", _1));
+	connect(mainWin->fECCheckBox, &QCheckBox::clicked,
+			this, std::bind(&SettingsUi::setBool, this, "network.fec", _1));
 	connect(mainWin->actionUse_hw_acceleration, &QAction::triggered,
 			this, std::bind(&SettingsUi::setBool, this, "decode.hwaccel", _1));
 	connect(mainWin->actionRefresh, &QAction::triggered,
@@ -106,6 +108,7 @@ void SettingsUi::addCallbacks(){
 		CALLBACK("audio.source", &SettingsUi::audioSourceCallback),
 		CALLBACK("audio.playback", &SettingsUi::audioPlaybackCallback),
 		CALLBACK("audio.compress", &SettingsUi::audioCompressionCallback),
+		CALLBACK("network.fec", &SettingsUi::fecCallback),
 		{"advanced", std::bind(&SettingsUi::refreshAll, this)},
 	};
 #undef CALLBACK
@@ -114,11 +117,6 @@ void SettingsUi::addCallbacks(){
 		settings->getOption(call.opt).addOnChangeCallback(call.callback);
 	}
 }
-
-bool SettingsUi::isAdvancedMode(){
-	return settings->getOption("advanced").isEnabled();
-}
-
 
 struct VideoCompressItem{
 	const char * displayName;
@@ -189,7 +187,7 @@ void SettingsUi::populateComboBox(QComboBox *box,
 	box->addItem("none", QVariant(""));
 
 	for(const auto &i : availableSettings->getAvailableSettings(type)){
-		if(!whitelist.empty() && !isAdvancedMode() && !vecContains(whitelist, i))
+		if(!whitelist.empty() && !settings->isAdvancedMode() && !vecContains(whitelist, i))
 			continue;
 
 		box->addItem(QString::fromStdString(i),
@@ -205,7 +203,7 @@ void SettingsUi::refreshVideoCompress(){
 	for(const auto& item : videoCodecs){
 		box->addItem(QString(item.displayName), QVariant::fromValue(item));
 	}
-	if(isAdvancedMode()){
+	if(settings->isAdvancedMode()){
 		populateComboBox(box, VIDEO_COMPRESS);
 	}
 	setItem(box, prevData);
@@ -312,7 +310,7 @@ void SettingsUi::refreshAudioSource(){
 	std::string vid = settings->getOption("video.source").getValue();
 
 	for(const auto &i : availableSettings->getAvailableSettings(AUDIO_SRC)){
-		if(!isAdvancedMode() && vecContains(sdiAudio, i) && !vecContains(sdiAudioCards, vid))
+		if(!settings->isAdvancedMode() && vecContains(sdiAudio, i) && !vecContains(sdiAudioCards, vid))
 			continue;
 		box->addItem(QString::fromStdString(i),
 				QVariant(QString::fromStdString(i)));
@@ -332,7 +330,7 @@ void SettingsUi::refreshAudioPlayback(){
 	std::string vid = settings->getOption("video.display").getValue();
 
 	for(const auto &i : availableSettings->getAvailableSettings(AUDIO_PLAYBACK)){
-		if(!isAdvancedMode() && vecContains(sdiAudio, i) && !vecContains(sdiAudioCards, vid))
+		if(!settings->isAdvancedMode() && vecContains(sdiAudio, i) && !vecContains(sdiAudioCards, vid))
 			continue;
 		box->addItem(QString::fromStdString(i),
 				QVariant(QString::fromStdString(i)));
@@ -384,6 +382,11 @@ void SettingsUi::audioSourceCallback(Option &opt, bool){
 
 void SettingsUi::audioPlaybackCallback(Option &opt, bool){
 
+}
+
+void SettingsUi::fecCallback(Option &opt, bool){
+	mainWin->fECCheckBox->setChecked(opt.isEnabled());
+	settingsWin->fecGroupBox->setChecked(opt.isEnabled());
 }
 
 void SettingsUi::audioCompressionCallback(Option &opt, bool suboption){
@@ -460,4 +463,8 @@ void SettingsUi::initSettingsWin(Ui::Settings *ui){
 			this, std::bind(&SettingsUi::setString, this, "network.port", _1));
 	connect(ui->controlPort, &QLineEdit::textEdited,
 			this, std::bind(&SettingsUi::setString, this, "network.control_port", _1));
+	connect(ui->fecGroupBox, &QGroupBox::clicked,
+			this, std::bind(&SettingsUi::setBool, this, "network.fec", _1));
+	connect(ui->fecAutoCheck, &QCheckBox::clicked,
+			this, std::bind(&SettingsUi::setBool, this, "network.fec.auto", _1));
 }
