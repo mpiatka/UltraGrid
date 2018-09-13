@@ -77,7 +77,7 @@ UltragridWindow::UltragridWindow(QWidget *parent): QMainWindow(parent){
 
 	settingsUi.init(&settings, &availableSettings);
 	settingsUi.initMainWin(&ui);
-	settingsWindow.init(&settingsUi);
+	settingsWindow.init(&settingsUi, &settings);
 
 	connect(&settingsUi, SIGNAL(changed()), this, SLOT(setArgs()));
 
