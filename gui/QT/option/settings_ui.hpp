@@ -44,7 +44,7 @@ private:
 	void audioPlaybackCallback(Option &opt, bool suboption);
 	void audioCompressionCallback(Option &opt, bool suboption);
 
-	bool isAdvancedMode();
+	void fecCallback(Option &opt, bool suboption);
 
 	void setComboBox(QComboBox *box, const std::string &opt, int idx);
 	void setString(const std::string &opt, const QString &str);

@@ -81,6 +81,8 @@ public:
 			const std::string &parent = "",
 			const std::string &limit = "");
 
+	bool isAdvancedMode();
+
 private:
 
 	std::map<std::string, std::unique_ptr<Option>> options;
