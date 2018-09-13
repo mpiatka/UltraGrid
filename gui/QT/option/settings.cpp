@@ -121,7 +121,8 @@ const static struct{
 	{"bitrate", ":bitrate=", "", false, "audio.compress", ""},
 	{"network.destination", " ", "", false, "", ""},
 	{"network.port", " -P ", "5004", false, "", ""},
-	{"network.control_port", " --control-port ", "8888", false, "", ""},
+	{"network.fec", " -f ", "none", false, "", ""},
+	{"network.fec.auto", "", "", true, "", ""},
 	{"decode.hwaccel", " --param ", "use-hw-accel", false, "", ""},
 	{"advanced", "", "", false, "", ""},
 	{"preview.display", "", "", true, "", ""},
@@ -235,3 +236,9 @@ Option& Settings::addOption(std::string name,
 
 	return *opt;
 }
+
+bool Settings::isAdvancedMode(){
+	return getOption("advanced").isEnabled();
+}
+
+

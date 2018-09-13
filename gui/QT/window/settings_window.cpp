@@ -6,9 +6,42 @@ SettingsWindow::SettingsWindow(QWidget *parent): QDialog(parent){
 	ui.basePort->setValidator(new QIntValidator(0, 65535, this));
 	ui.controlPort->setValidator(new QIntValidator(0, 65535, this));
 
+	connect(ui.multSpin, SIGNAL(valueChanged(int)), this, SIGNAL(changed()));
+	connect(ui.ldgmMaxLoss, SIGNAL(valueChanged(int)), this, SIGNAL(changed()));
+	connect(ui.ldgmC, SIGNAL(valueChanged(int)), this, SIGNAL(changed()));
+	connect(ui.ldgmK, SIGNAL(valueChanged(int)), this, SIGNAL(changed()));
+	connect(ui.ldgmM, SIGNAL(valueChanged(int)), this, SIGNAL(changed()));
+	connect(ui.rsK, SIGNAL(valueChanged(int)), this, SIGNAL(changed()));
+	connect(ui.rsN, SIGNAL(valueChanged(int)), this, SIGNAL(changed()));
+
+	connect(ui.ldgmSimpCpuRadio, SIGNAL(toggled(bool)), this, SIGNAL(changed()));
+	connect(ui.ldgmSimpGpuRadio, SIGNAL(toggled(bool)), this, SIGNAL(changed()));
+	connect(ui.ldgmAdvCpuRadio, SIGNAL(toggled(bool)), this, SIGNAL(changed()));
+	connect(ui.ldgmAdvGpuRadio, SIGNAL(toggled(bool)), this, SIGNAL(changed()));
+
 }
 
-void SettingsWindow::init(SettingsUi *settingsUi){
+void SettingsWindow::init(SettingsUi *settingsUi, Settings *s){
 	settingsUi->initSettingsWin(&ui);
+	settings = s;
+
+	connect(ui.fecNoneRadio, SIGNAL(toggled(bool)), this, SLOT(changeFecPage()));
+	connect(ui.fecMultRadio, SIGNAL(toggled(bool)), this, SLOT(changeFecPage()));
+	connect(ui.fecLdgmRadio, SIGNAL(toggled(bool)), this, SLOT(changeFecPage()));
+	connect(ui.fecRsRadio, SIGNAL(toggled(bool)), this, SLOT(changeFecPage()));
+
+}
+
+void SettingsWindow::changeFecPage(){
+	if(ui.fecMultRadio->isChecked()){
+		ui.stackedWidget->setCurrentIndex(0);
+	} else if(ui.fecLdgmRadio->isChecked()){
+		if(settings->isAdvancedMode())
+			ui.stackedWidget->setCurrentIndex(2);
+		else
+			ui.stackedWidget->setCurrentIndex(1);
+	} else if(ui.fecRsRadio->isChecked()){
+		ui.stackedWidget->setCurrentIndex(3);
+	}
 }
 

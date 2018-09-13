@@ -402,28 +402,13 @@ FecOption::FecOption(Ui::UltragridWindow *ui) :
 	opt("-f"),
 	ui(ui)
 {
-	connect(ui->fecNoneRadio, SIGNAL(toggled(bool)), this, SLOT(update()));
-	connect(ui->fecMultRadio, SIGNAL(toggled(bool)), this, SLOT(update()));
-	connect(ui->fecLdgmRadio, SIGNAL(toggled(bool)), this, SLOT(update()));
-	connect(ui->fecRsRadio, SIGNAL(toggled(bool)), this, SLOT(update()));
 
-	connect(ui->multSpin, SIGNAL(valueChanged(int)), this, SIGNAL(changed()));
-	connect(ui->ldgmMaxLoss, SIGNAL(valueChanged(int)), this, SIGNAL(changed()));
-	connect(ui->ldgmC, SIGNAL(valueChanged(int)), this, SIGNAL(changed()));
-	connect(ui->ldgmK, SIGNAL(valueChanged(int)), this, SIGNAL(changed()));
-	connect(ui->ldgmM, SIGNAL(valueChanged(int)), this, SIGNAL(changed()));
-	connect(ui->rsK, SIGNAL(valueChanged(int)), this, SIGNAL(changed()));
-	connect(ui->rsN, SIGNAL(valueChanged(int)), this, SIGNAL(changed()));
-
-	connect(ui->ldgmSimpCpuRadio, SIGNAL(toggled(bool)), this, SIGNAL(changed()));
-	connect(ui->ldgmSimpGpuRadio, SIGNAL(toggled(bool)), this, SIGNAL(changed()));
-	connect(ui->ldgmAdvCpuRadio, SIGNAL(toggled(bool)), this, SIGNAL(changed()));
-	connect(ui->ldgmAdvGpuRadio, SIGNAL(toggled(bool)), this, SIGNAL(changed()));
 }
 
 QString FecOption::getLaunchParam(){
 	QString param = "";
 
+#if 0
 	if(!ui->fecNoneRadio->isChecked()){
 		param += opt;
 
@@ -453,11 +438,13 @@ QString FecOption::getLaunchParam(){
 		}
 		param += " ";
 	}
+#endif
 
 	return param;
 }
 
 void FecOption::update(){
+#if 0
 	if(ui->fecMultRadio->isChecked()){
 		ui->stackedWidget->setCurrentIndex(0);
 	} else if(ui->fecLdgmRadio->isChecked()){
@@ -470,6 +457,7 @@ void FecOption::update(){
 	}
 
 	emit changed();
+#endif
 }
 
 ArgumentOption::ArgumentOption(Ui::UltragridWindow *ui): ui(ui){
