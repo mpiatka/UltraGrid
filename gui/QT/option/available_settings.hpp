@@ -15,16 +15,17 @@ enum SettingType{
 	SETTING_TYPE_COUNT
 };
 
-struct V4l2Device{
+struct Webcam{
 	std::string name;
-	std::string path;
+	std::string type;
+	std::string config;
 };
 
 class AvailableSettings{
 public:
 	void query(const std::string &executable, SettingType type);
 	void queryCap(const QStringList &lines, SettingType type, const char *capStr);
-	void queryV4l2(const QStringList &lines);
+	void queryV4l2(const std::string &executable);
 
 	void queryAll(const std::string &executable);
 
@@ -33,7 +34,7 @@ public:
 
 private:
 	std::vector<std::string> available[SETTING_TYPE_COUNT];
-	std::vector<V4l2Device> v4l2Devices;
+	std::vector<Webcam> webcams;
 
 };
 

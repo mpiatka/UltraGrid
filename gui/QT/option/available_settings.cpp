@@ -3,6 +3,8 @@
 #include <cstring>
 #include "available_settings.hpp"
 
+#include <iostream>
+
 static bool vectorContains(const std::vector<std::string> &v, const std::string & s){
 	for(unsigned i = 0; i < v.size(); i++){
 		if(v[i] == s)
@@ -68,12 +70,37 @@ void AvailableSettings::queryAll(const std::string &executable){
 	queryCap(lines, AUDIO_SRC, "[cap][audio_cap] ");
 	queryCap(lines, AUDIO_PLAYBACK, "[cap][audio_play] ");
 	
-	queryV4l2(lines);
+	queryV4l2(executable);
 
 	query(executable, AUDIO_COMPRESS);
 }
 
-void AvailableSettings::queryV4l2(const QStringList &lines){
+void AvailableSettings::queryV4l2(const std::string &executable){
+	std::string cmd = " -t v4l2:help";
+
+	QStringList lines = getProcessOutput(executable, cmd);
+
+	const QString dev_str = "Device /dev/video";
+	const int path_offset = strlen("Device ");
+
+	for(int i = 0; i < lines.count(); i++){
+		QString line = lines[i].trimmed();
+		int idx;
+		if((idx = line.indexOf(dev_str)) >= 0){
+			Webcam cam;
+			cam.config = "device=" + line.mid(idx + path_offset).split(' ')[0].toStdString();
+			QString name = line.mid(line.indexOf('(', idx));
+			name.chop(2);
+			cam.name = name.toStdString();
+			cam.type = "v4l2";
+			webcams.push_back(std::move(cam));
+		}
+	}
+
+	for(const auto cam : webcams){
+		std::cout << cam.name << ": " << cam.config << std::endl;
+	}
+#if 0
 	const char *v4l2str = "[cap] (v4l2:";
 	const size_t capStrLen = strlen(v4l2str);
 
@@ -86,6 +113,8 @@ void AvailableSettings::queryV4l2(const QStringList &lines){
 			v4l2Devices.push_back({name, path});
 		}
 	}
+#endif
+
 }
 
 void AvailableSettings::queryCap(const QStringList &lines,
