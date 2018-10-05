@@ -116,7 +116,7 @@ void print_available_capturers()
                 auto vci = static_cast<const struct video_capture_info *>(item.second);
 
                 struct vidcap_type *vt = vci->probe(true);
-				printf("[cap][capture] %s\n", item.first.c_str());
+                printf("[cap][capture] %s\n", item.first.c_str());
                 for (int i = 0; i < vt->card_count; ++i) {
                         printf("[cap] (%s:%s;%s)\n", vt->name, vt->cards[i].id, vt->cards[i].name);
                 }
