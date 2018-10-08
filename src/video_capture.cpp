@@ -120,6 +120,9 @@ void print_available_capturers()
                         printf("[cap] (%s:%s;%s)\n", vt->name, vt->cards[i].id, vt->cards[i].name);
                 }
 
+                free(vt->cards);
+                free(vt);
+
         }
 
         char buf[1024] = "";
@@ -247,5 +250,21 @@ struct video_frame *vidcap_grab(struct vidcap *state, struct audio_frame **audio
         if (frame != NULL)
                 frame = capture_filter(state->capture_filter, frame);
         return frame;
+}
+
+void vidcap_type_free(struct vidcap_type *vt){
+        if(vt->modes){
+                for(int i = 0; i < vt->card_count; i++){
+                        struct vidcap_mode *mode = vt->modes[i];
+                        if(mode)
+                                free(mode);
+                }
+                free(vt->modes);
+        }
+
+        if(vt->cards)
+                free(vt->cards);
+
+        free(vt);
 }
 
