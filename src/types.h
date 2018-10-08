@@ -278,6 +278,7 @@ struct device_info {
         bool repeatable; ///< Whether can be card used multiple times (eg. GL) or it
                          ///< can output simoultaneously only one output (DeckLink).
                          ///< Used for video display only.
+        int mode_count;
 };
 
 struct vidcap_params;

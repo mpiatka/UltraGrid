@@ -94,6 +94,66 @@ extern "C" {
 
 struct audio_frame;
 
+struct vidcap_mode {
+        int mode_num;
+
+        enum {
+                Frame_size_dicreet,
+                Frame_size_stepwise,
+                Frame_size_cont,
+        } frame_size_type;
+
+        union {
+                struct {
+                        int width;
+                        int height;
+                } discreet;
+                struct {
+                        int min_width;
+                        int max_width;
+                        int min_height;
+                        int max_height;
+                        int step_width;
+                        int step_height;
+                } stepwise;
+        } frame_size;
+
+        enum {
+                Fps_discreet,
+                Fps_fraction,
+                Fps_step,
+                Fps_step_fraction,
+                Fps_range,
+                Fps_cont,
+        } fps_type;
+
+        union {
+                double val;
+
+                struct {
+                        double numerator;
+                        double denumerator;
+                } fraction;
+
+                struct {
+                        double min;
+                        double max;
+                        double step;
+                } step;
+
+                struct {
+                        double min_numerator;
+                        double min_denumerator;
+                        double max_numerator;
+                        double max_denumerator;
+                        double step_numerator;
+                        double step_denumerator;
+                } step_fraction;
+        } fps;
+
+        char format[128];
+};
+
 /** Defines video capture device */
 struct vidcap_type {
         const char              *name;        ///< short name (one word)
@@ -101,6 +161,7 @@ struct vidcap_type {
 
         int                      card_count;
         struct device_info      *cards;
+        struct vidcap_mode      **modes;
 };
 
 struct vidcap_params;

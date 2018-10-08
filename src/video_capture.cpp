@@ -121,6 +121,9 @@ void print_available_capturers()
                         printf("[cap] (%s:%s;%s)\n", vt->name, vt->cards[i].id, vt->cards[i].name);
                 }
 
+                free(vt->cards);
+                free(vt);
+
         }
 
         char buf[1024] = "";

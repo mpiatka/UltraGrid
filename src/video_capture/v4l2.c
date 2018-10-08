@@ -294,6 +294,83 @@ next_device:
         }
 }
 
+static int get_modes(int fd, struct vidcap_mode **modes){
+
+        struct v4l2_format fmt;
+        memset(&fmt, 0, sizeof(fmt));
+        fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        if(ioctl(fd, VIDIOC_G_FMT, &fmt) != 0) {
+                perror("[V4L2] Unable to get video formant");
+                return 0;
+        }
+
+
+        struct v4l2_fmtdesc format;
+        memset(&format, 0, sizeof(format));
+        format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        format.index = 0;
+
+        int count = 0;
+        while(ioctl(fd, VIDIOC_ENUM_FMT, &format) == 0) {
+                struct vidcap_mode *tmp = realloc(*modes, (count + 1) * sizeof(*modes));
+                if(!tmp) return count;
+                *modes = tmp;
+
+                strncpy(*modes[count].format, (char *) &format.pixelformat, 4);
+                *modes[count].format[4] = '\0';
+
+                struct v4l2_frmsizeenum size;
+                memset(&size, 0, sizeof(size));
+                size.pixel_format = format.pixelformat;
+
+                int res = ioctl(fd, VIDIOC_ENUM_FRAMESIZES, &size);
+
+                if(res == -1) {
+                        fprintf(stderr, "[V4L2] Unable to get frame size iterator.\n");
+                        goto next_device;
+                }
+
+                struct v4l2_frmivalenum frame_int;
+                memset(&frame_int, 0, sizeof(frame_int));
+                frame_int.index = 0;
+                frame_int.pixel_format = format.pixelformat;
+
+                switch (size.type) {
+                        case V4L2_FRMSIZE_TYPE_DISCRETE:
+                                while(ioctl(fd, VIDIOC_ENUM_FRAMESIZES, &size) == 0) {
+                                        printf("\t\t\t");
+                                        if(fmt.fmt.pix.width == size.discrete.width &&
+                                                        fmt.fmt.pix.height == size.discrete.height) {
+                                                printf("(*) ");
+                                        } else {
+                                                printf("    ");
+                                        }
+                                        printf("%ux%u\t",
+                                                        size.discrete.width, size.discrete.height);
+                                        frame_int.width = size.discrete.width;
+                                        frame_int.height = size.discrete.height;
+                                        frame_int.index = 0;
+                                        print_fps(fd, &frame_int);
+                                        printf("\n");
+                                        size.index++;
+                                }
+                                break;
+                        case V4L2_FRMSIZE_TYPE_CONTINUOUS:
+                                printf("\t\t\t%u-%ux%u-%u with steps %u vertically and %u horizontally\n",
+                                                size.stepwise.min_width, size.stepwise.max_width,
+                                                size.stepwise.min_height, size.stepwise.max_height,
+                                                size.stepwise.step_width, size.stepwise.step_height);
+                                break;
+                        case V4L2_FRMSIZE_TYPE_STEPWISE:
+                                printf("\t\t\tany\n");
+                                break;
+                }
+
+                count++;
+        }
+
+}
+
 static struct vidcap_type * vidcap_v4l2_probe(bool verbose)
 {
         struct vidcap_type*		vt;
@@ -324,6 +401,9 @@ static struct vidcap_type * vidcap_v4l2_probe(bool verbose)
                                         perror("[V4L2] Unable to query device capabilities");
                                 }
                                 snprintf(vt->cards[vt->card_count - 1].name, sizeof vt->cards[vt->card_count - 1].name, "V4L2 %s", capab.card);
+
+                                vt->modes = realloc(vt->modes, vt->card_count * sizeof(*vt->modes));
+                                vt->modes[vt->card_count - 1] = 
 
                                 close(fd);
                         }
