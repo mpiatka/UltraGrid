@@ -98,7 +98,7 @@ struct vidcap_mode {
         int mode_num;
 
         enum {
-                Frame_size_dicreet,
+                Frame_size_dicrete,
                 Frame_size_stepwise,
                 Frame_size_cont,
         } frame_size_type;
@@ -107,7 +107,7 @@ struct vidcap_mode {
                 struct {
                         int width;
                         int height;
-                } discreet;
+                } discrete;
                 struct {
                         int min_width;
                         int max_width;
@@ -119,36 +119,26 @@ struct vidcap_mode {
         } frame_size;
 
         enum {
-                Fps_discreet,
-                Fps_fraction,
-                Fps_step,
-                Fps_step_fraction,
-                Fps_range,
+                Fps_discrete,
+                Fps_stepwise,
                 Fps_cont,
         } fps_type;
 
         union {
-                double val;
 
                 struct {
-                        double numerator;
-                        double denumerator;
+                        int numerator;
+                        int denumerator;
                 } fraction;
 
                 struct {
-                        double min;
-                        double max;
-                        double step;
-                } step;
-
-                struct {
-                        double min_numerator;
-                        double min_denumerator;
-                        double max_numerator;
-                        double max_denumerator;
-                        double step_numerator;
-                        double step_denumerator;
-                } step_fraction;
+                        int min_numerator;
+                        int min_denominator;
+                        int max_numerator;
+                        int max_denominator;
+                        int step_numerator;
+                        int step_denominator;
+                } stepwise;
         } fps;
 
         char format[128];

@@ -294,6 +294,48 @@ next_device:
         }
 }
 
+static bool get_fps(int fd, struct v4l2_frmivalenum *param, struct vidcap_mode *mode) {
+        if(param->index != 0 && param->type != V4L2_FRMIVAL_TYPE_DISCRETE){
+                return false;
+        }
+
+        int res = ioctl(fd, VIDIOC_ENUM_FRAMEINTERVALS, param);
+
+        if(res == -1) {
+                fprintf(stderr, "[V4L2] Unable to get FPS.\n");
+                return false;
+        }
+
+        switch (param->type) {
+                case V4L2_FRMIVAL_TYPE_DISCRETE:
+                        mode.fps_type = Fps_discrete;
+                        mode.fps.discrete.numerator = param->discrete.numerator;
+                        mode.fps.discrete.denominator = param->discrete.denominator;
+                        param->index++;
+                        break;
+                case V4L2_FRMIVAL_TYPE_CONTINUOUS:
+                        mode.fps_type = Fps_cont;
+                        mode.fps.stepwise.min_numerator = param->stepwise.min.numerator;
+                        mode.fps.stepwise.min_denominator = param->stepwise.min.denominator;
+                        mode.fps.stepwise.max_numerator = param->stepwise.max.numerator;
+                        mode.fps.stepwise.max_denominator = param->stepwise.max.denominator;
+                        mode.fps.stepwise.step_numerator = param->stepwise.step.numerator;
+                        mode.fps.stepwise.step_denominator = param->stepwise.step.denominator;
+                        break;
+                case V4L2_FRMIVAL_TYPE_STEPWISE:
+                        mode.fps_type = Fps_stepwise;
+                        mode.fps.stepwise.min_numerator = param->stepwise.min.numerator;
+                        mode.fps.stepwise.min_denominator = param->stepwise.min.denominator;
+                        mode.fps.stepwise.max_numerator = param->stepwise.max.numerator;
+                        mode.fps.stepwise.max_denominator = param->stepwise.max.denominator;
+                        mode.fps.stepwise.step_numerator = param->stepwise.step.numerator;
+                        mode.fps.stepwise.step_denominator = param->stepwise.step.denominator;
+                        break;
+        }
+
+        return true;
+}
+
 static int get_modes(int fd, struct vidcap_mode **modes){
 
         struct v4l2_format fmt;
@@ -304,17 +346,16 @@ static int get_modes(int fd, struct vidcap_mode **modes){
                 return 0;
         }
 
-
         struct v4l2_fmtdesc format;
         memset(&format, 0, sizeof(format));
         format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         format.index = 0;
 
+        struct vidcap_mode mode;
+        mode.mode_num = -1;
+
         int count = 0;
         while(ioctl(fd, VIDIOC_ENUM_FMT, &format) == 0) {
-                struct vidcap_mode *tmp = realloc(*modes, (count + 1) * sizeof(*modes));
-                if(!tmp) return count;
-                *modes = tmp;
 
                 strncpy(*modes[count].format, (char *) &format.pixelformat, 4);
                 *modes[count].format[4] = '\0';
@@ -337,6 +378,7 @@ static int get_modes(int fd, struct vidcap_mode **modes){
 
                 switch (size.type) {
                         case V4L2_FRMSIZE_TYPE_DISCRETE:
+                                mode.frame_size_type = Frame_size_dicreet;
                                 while(ioctl(fd, VIDIOC_ENUM_FRAMESIZES, &size) == 0) {
                                         printf("\t\t\t");
                                         if(fmt.fmt.pix.width == size.discrete.width &&
@@ -345,28 +387,42 @@ static int get_modes(int fd, struct vidcap_mode **modes){
                                         } else {
                                                 printf("    ");
                                         }
-                                        printf("%ux%u\t",
-                                                        size.discrete.width, size.discrete.height);
                                         frame_int.width = size.discrete.width;
                                         frame_int.height = size.discrete.height;
                                         frame_int.index = 0;
-                                        print_fps(fd, &frame_int);
-                                        printf("\n");
+                                        mode.frame_size.discrete.width = size.discrete.width;
+                                        mode.frame_size.discrete.height = size.discrete.height;
+                                        while(get_fps(fd, &frame_int, &mode)){
+                                                struct vidcap_mode *tmp = realloc(*modes, (count + 1) * sizeof(*modes));
+                                                if(!tmp) return count;
+                                                *modes = tmp;
+
+                                                *modes[count++] = mode;
+                                        }
                                         size.index++;
                                 }
                                 break;
-                        case V4L2_FRMSIZE_TYPE_CONTINUOUS:
-                                printf("\t\t\t%u-%ux%u-%u with steps %u vertically and %u horizontally\n",
-                                                size.stepwise.min_width, size.stepwise.max_width,
-                                                size.stepwise.min_height, size.stepwise.max_height,
-                                                size.stepwise.step_width, size.stepwise.step_height);
-                                break;
                         case V4L2_FRMSIZE_TYPE_STEPWISE:
-                                printf("\t\t\tany\n");
+                        case V4L2_FRMSIZE_TYPE_CONTINUOUS:
+                                mode.frame_size_type = (size.type == V4L2_FRMIVAL_TYPE_STEPWISE) ? Frame_size_stepwise : Frame_size_cont;
+                                mode.frame_size.stepwise.min_width = size.stepwise.min_width;
+                                mode.frame_size.stepwise.min_height = size.stepwise.min_height;
+                                mode.frame_size.stepwise.max_width = size.stepwise.max_width;
+                                mode.frame_size.stepwise.max_height = size.stepwise.max_height;
+                                mode.frame_size.stepwise.step_width = size.stepwise.step_width;
+                                mode.frame_size.stepwise.step_height = size.stepwise.step_height;
+                                while(get_fps(fd, &frame_int, &mode)){
+                                        struct vidcap_mode *tmp = realloc(*modes, (count + 1) * sizeof(*modes));
+                                        if(!tmp) return count;
+                                        *modes = tmp;
+
+                                        *modes[count++] = mode;
+                                }
                                 break;
                 }
 
                 count++;
+                format.index++;
         }
 
 }
