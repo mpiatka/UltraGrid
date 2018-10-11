@@ -119,11 +119,17 @@ void print_available_capturers()
                 printf("[cap][capture] %s\n", item.first.c_str());
                 for (int i = 0; i < vt->card_count; ++i) {
                         printf("[cap] (%s:%s;%s)\n", vt->name, vt->cards[i].id, vt->cards[i].name);
+                        for(int j = 0; j < vt->cards[i].mode_count; j++){
+                                struct vidcap_mode *mode = &vt->modes[i][j];
+
+                                printf("[cap][mode] (%s:%s)", vt->name, vt->cards[i].id);
+                                printf(" %dx%d", mode->frame_size.discrete.width,
+                                                mode->frame_size.discrete.height);
+                                printf("\n");
+                        }
                 }
 
-                free(vt->cards);
-                free(vt);
-
+                vidcap_type_free(vt);
         }
 
         char buf[1024] = "";
