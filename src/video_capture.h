@@ -119,6 +119,7 @@ struct vidcap_mode {
         } frame_size;
 
         enum {
+                Fps_unknown,
                 Fps_discrete,
                 Fps_stepwise,
                 Fps_cont,
@@ -128,7 +129,7 @@ struct vidcap_mode {
 
                 struct {
                         int numerator;
-                        int denumerator;
+                        int denominator;
                 } fraction;
 
                 struct {
@@ -141,7 +142,8 @@ struct vidcap_mode {
                 } stepwise;
         } fps;
 
-        char format[128];
+        char format[32];
+        char format_desc[32];
 };
 
 /** Defines video capture device */
@@ -153,6 +155,8 @@ struct vidcap_type {
         struct device_info      *cards;
         struct vidcap_mode      **modes;
 };
+
+void vidcap_type_free(struct vidcap_type *);
 
 struct vidcap_params;
 
