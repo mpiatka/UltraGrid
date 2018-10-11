@@ -118,11 +118,59 @@ void print_available_capturers()
                 struct vidcap_type *vt = vci->probe(true);
                 for (int i = 0; i < vt->card_count; ++i) {
                         printf("[cap] (%s:%s;%s)\n", vt->name, vt->cards[i].id, vt->cards[i].name);
+                        for(int j = 0; j < vt->cards[i].mode_count; j++){
+                                struct vidcap_mode *mode = &vt->modes[i][j];
+
+                                printf("[cap][mode] (%s:%s)", vt->name, vt->cards[i].id);
+                                printf(" mode_num %d", mode->mode_num);
+                                printf(" format %s", mode->format);
+                                switch(mode->frame_size_type){
+                                        case vidcap_mode::Frame_size_dicrete:
+                                                printf(" discrete %dx%d", mode->frame_size.discrete.width,
+                                                                mode->frame_size.discrete.height);
+                                                break;
+                                        case vidcap_mode::Frame_size_stepwise:
+                                                printf(" stepwise %d - %d x %d - %d with steps %d %d",
+                                                                mode->frame_size.stepwise.min_width,
+                                                                mode->frame_size.stepwise.max_width,
+                                                                mode->frame_size.stepwise.min_height,
+                                                                mode->frame_size.stepwise.max_height,
+                                                                mode->frame_size.stepwise.step_width,
+                                                                mode->frame_size.stepwise.step_height);
+                                                break;
+                                        case vidcap_mode::Frame_size_cont:
+                                                printf(" continuous %d - %d x %d - %d",
+                                                                mode->frame_size.stepwise.min_width,
+                                                                mode->frame_size.stepwise.max_width,
+                                                                mode->frame_size.stepwise.min_height,
+                                                                mode->frame_size.stepwise.max_height);
+                                                break;
+                                }
+                                printf(" fps");
+                                switch(mode->fps_type){
+                                        case vidcap_mode::Fps_discrete:
+                                                printf(" discrete %lld/%d",
+                                                                mode->fps.fraction.numerator,
+                                                                mode->fps.fraction.denominator);
+                                                break;
+                                        case vidcap_mode::Fps_stepwise:
+                                                printf(" stepwise %lld/%d - %lld/%d with step %lld/%d",
+                                                                mode->fps.stepwise.min_numerator,
+                                                                mode->fps.stepwise.min_denominator,
+                                                                mode->fps.stepwise.max_numerator,
+                                                                mode->fps.stepwise.max_denominator,
+                                                                mode->fps.stepwise.step_numerator,
+                                                                mode->fps.stepwise.step_denominator);
+                                                break;
+                                        default:
+                                                printf(" unknown");
+                                                break;
+                                }
+                                printf("\n");
+                        }
                 }
 
-                free(vt->cards);
-                free(vt);
-
+                vidcap_type_free(vt);
         }
 
         char buf[1024] = "";

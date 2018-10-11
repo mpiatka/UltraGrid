@@ -128,16 +128,16 @@ struct vidcap_mode {
         union {
 
                 struct {
-                        int numerator;
+                        long long numerator;
                         int denominator;
                 } fraction;
 
                 struct {
-                        int min_numerator;
+                        long long min_numerator;
                         int min_denominator;
-                        int max_numerator;
+                        long long max_numerator;
                         int max_denominator;
-                        int step_numerator;
+                        long long step_numerator;
                         int step_denominator;
                 } stepwise;
         } fps;
