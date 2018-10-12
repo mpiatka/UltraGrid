@@ -300,6 +300,7 @@ error:
 static int get_modes(struct vidcap_dshow_state *s, struct vidcap_mode **modes){
 	int count = 0;
 
+	HRESULT res;
 	// bind the selected device to the capture filter
 	IBaseFilter *captureFilter;
 	res = s->moniker->BindToObject(NULL, NULL, IID_IBaseFilter, (void **) &captureFilter);
@@ -352,31 +353,33 @@ static int get_modes(struct vidcap_dshow_state *s, struct vidcap_mode **modes){
 			continue;
 		}
 
-		*modes[count].fps_type = Fps_discrete;
+		struct vidcap_mode *tmp = (struct vidcap_mode *) realloc(*modes, (count + 1) * sizeof(**modes));
+		if(!tmp) return count;
+		*modes = tmp;
+
+		struct vidcap_mode *mode = &(*modes)[count++];
+
+		mode->fps_type = vidcap_mode::Fps_discrete;
 
 		BITMAPINFOHEADER *bmiHeader;
 		if (mediaType->formattype == FORMAT_VideoInfo) {
 			VIDEOINFOHEADER *infoHeader = reinterpret_cast<VIDEOINFOHEADER*>(mediaType->pbFormat);
 			bmiHeader = &infoHeader->bmiHeader;
-			*modes[count].fps.discrete.numerator = infoHeader->AvgTimePerFrame;
-			*modes[count].fps.discrete.denominator = 10000000;
+			mode->fps.fraction.numerator = infoHeader->AvgTimePerFrame;
+			mode->fps.fraction.denominator = 10000000;
 		} else {
 			VIDEOINFOHEADER2 *infoHeader = reinterpret_cast<VIDEOINFOHEADER2*>(mediaType->pbFormat);
 			bmiHeader = &infoHeader->bmiHeader;
-			*modes[count].fps.discrete.numerator = infoHeader->AvgTimePerFrame;
-			*modes[count].fps.discrete.denominator = 10000000;
+			mode->fps.fraction.numerator = infoHeader->AvgTimePerFrame;
+			mode->fps.fraction.denominator = 10000000;
 		}
 
-		struct vidcap_mode *tmp = realloc(*modes, (count + 1) * sizeof(**modes));
-		if(!tmp) return count;
-		*modes = tmp;
+		mode->frame_size_type = vidcap_mode::Frame_size_dicrete;
+		mode->frame_size.discrete.width = bmiHeader->biWidth;
+		mode->frame_size.discrete.height = bmiHeader->biHeight;
 
-		*modes[count].frame_size_type = Frame_size_dicrete;
-		*modes[count].frame_size.discrete.width = bmiHeader->biWidth;
-		*modes[count].frame_size.discrete.width = bmiHeader->biHeight;
-
-		*modes[count].mode_num = i;
-		snprintf(*modes[count].format, sizeof(*modes[count].format), "%s", GetSubtypeName(&mediaType->subtype));
+		mode->mode_num = i;
+		snprintf(mode->format, sizeof(mode->format), "%s", GetSubtypeName(&mediaType->subtype));
 
 		DeleteMediaType(mediaType);
 
@@ -386,13 +389,15 @@ static int get_modes(struct vidcap_dshow_state *s, struct vidcap_mode **modes){
 	res = s ->filterGraph->RemoveFilter(captureFilter);
 	if (res != S_OK) {
 		fprintf(stderr, "[dshow] vidcap_dshow_help: Cannot remove capture filter from filter graph.\n");
-		continue;
+		return count;
 	}
 	captureFilter->Release();
 	s->moniker->Release();
 
-	printf("\n\n");
+	return count;
 }
+
+static struct vidcap_type * vidcap_dshow_probe(bool verbose);
 
 static void show_help(struct vidcap_dshow_state *s) {
 	printf("dshow grabber options:\n");
@@ -414,7 +419,7 @@ static void show_help(struct vidcap_dshow_state *s) {
 					mode->format,
 					mode->frame_size.discrete.width,
 					mode->frame_size.discrete.height,
-					(float) mode->fps.discrete.denominator / mode->fps.discrete.numerator);
+					(float) mode->fps.fraction.denominator / mode->fps.fraction.numerator);
 
 			putchar(j % 2 == 1 ? '\n' : '\t');
 		}
@@ -465,9 +470,9 @@ static struct vidcap_type * vidcap_dshow_probe(bool verbose)
                                 snprintf(vt->cards[n-1].id, sizeof vt->cards[n-1].id - 1, "%d", n);
                                 wcstombs(vt->cards[n-1].name, var.bstrVal, sizeof vt->cards[n-1].id - 1);
 
-                                vt->modes = (struct vidcap_mode *) realloc(vt->cards, n * sizeof(*vt->modes));
+                                vt->modes = (struct vidcap_mode **) realloc(vt->modes, n * sizeof(*vt->modes));
                                 vt->modes[n-1] = NULL;
-								vt->cards[n-1].mode_count = get_modes(s, &vt->modes[n-1]);
+				vt->cards[n-1].mode_count = get_modes(s, &vt->modes[n-1]);
 								
                                 // clean up structures
                                 VariantClear(&var);
