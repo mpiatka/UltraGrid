@@ -307,8 +307,7 @@ static int get_modes(int fd, struct vidcap_mode **modes){
         int count = 0;
         while(ioctl(fd, VIDIOC_ENUM_FMT, &format) == 0) {
 
-                strncpy(mode.format, (char *) &format.pixelformat, 4);
-                mode.format[4] = '\0';
+                snprintf(mode.format, sizeof(mode.format), "%4s", (char *) &format.pixelformat);
                 snprintf(mode.format_desc, sizeof(mode.format_desc), "%s", format.description);
 
                 struct v4l2_frmsizeenum size;
