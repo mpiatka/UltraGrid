@@ -297,127 +297,132 @@ error:
 	return false;
 }
 
+static int get_modes(struct vidcap_dshow_state *s, struct vidcap_mode **modes){
+	int count = 0;
+
+	HRESULT res;
+	// bind the selected device to the capture filter
+	IBaseFilter *captureFilter;
+	res = s->moniker->BindToObject(NULL, NULL, IID_IBaseFilter, (void **) &captureFilter);
+	if (res != S_OK) {
+		fprintf(stderr, "[dshow] vidcap_dshow_help: Cannot bind capture filter to device.\n");
+		ErrorDescription(res);
+		return count;
+	}
+
+	// add the capture filter to the filter graph
+	res = s->filterGraph->AddFilter(captureFilter, L"Capture filter");
+	if (res != S_OK) {
+		fprintf(stderr, "[dshow] vidcap_dshow_help: Cannot add capture filter to filter graph.\n");
+		return count;
+	}
+
+	// connect stream config interface to the capture filter
+	res = s->graphBuilder->FindInterface(&PIN_CATEGORY_CAPTURE, &MEDIATYPE_Video, captureFilter,
+			IID_IAMStreamConfig, (void **) &s->streamConfig);
+	if (res != S_OK) {
+		fprintf(stderr, "[dshow] vidcap_dshow_help: Cannot find interface for reading capture capabilites.\n");
+		return count;
+	}
+
+	int capCount, capSize;
+	// read number of capture device capabilities
+	res = s->streamConfig->GetNumberOfCapabilities(&capCount, &capSize);
+	if (res != S_OK) {
+		fprintf(stderr, "[dshow] vidcap_dshow_help: Cannot read number of capture capabilites.\n");
+		return count;
+	}
+	// check if the format of capture capabilities is the right one
+	if (capSize != sizeof(VIDEO_STREAM_CONFIG_CAPS)) {
+		fprintf(stderr, "[dshow] vidcap_dshow_help: Unknown format of capture capabilites.\n");
+		return count;
+	}
+
+	// iterate over all capabilities
+	for (int i = 0; i < capCount; i++) {
+		AM_MEDIA_TYPE *mediaType;
+		VIDEO_STREAM_CONFIG_CAPS streamCaps;
+
+		res = s->streamConfig->GetStreamCaps(i, &mediaType, (BYTE*) &streamCaps);
+		if (res != S_OK) {
+			fprintf(stderr, "[dshow] vidcap_dshow_help: Cannot read stream capabilities #%d.\n", i);
+			continue;
+		}
+		if (mediaType->formattype != FORMAT_VideoInfo && mediaType->formattype != FORMAT_VideoInfo2) {
+			fprintf(stderr, "[dshow] vidcap_dshow_help: Unsupported format type for capability #%d.\n", i);
+			continue;
+		}
+
+		struct vidcap_mode *tmp = (struct vidcap_mode *) realloc(*modes, (count + 1) * sizeof(**modes));
+		if(!tmp) return count;
+		*modes = tmp;
+
+		struct vidcap_mode *mode = &(*modes)[count++];
+
+		mode->fps_type = vidcap_mode::Fps_discrete;
+
+		BITMAPINFOHEADER *bmiHeader;
+		if (mediaType->formattype == FORMAT_VideoInfo) {
+			VIDEOINFOHEADER *infoHeader = reinterpret_cast<VIDEOINFOHEADER*>(mediaType->pbFormat);
+			bmiHeader = &infoHeader->bmiHeader;
+			mode->fps.fraction.numerator = infoHeader->AvgTimePerFrame;
+			mode->fps.fraction.denominator = 10000000;
+		} else {
+			VIDEOINFOHEADER2 *infoHeader = reinterpret_cast<VIDEOINFOHEADER2*>(mediaType->pbFormat);
+			bmiHeader = &infoHeader->bmiHeader;
+			mode->fps.fraction.numerator = infoHeader->AvgTimePerFrame;
+			mode->fps.fraction.denominator = 10000000;
+		}
+
+		mode->frame_size_type = vidcap_mode::Frame_size_dicrete;
+		mode->frame_size.discrete.width = bmiHeader->biWidth;
+		mode->frame_size.discrete.height = bmiHeader->biHeight;
+
+		mode->mode_num = i;
+		snprintf(mode->format, sizeof(mode->format), "%s", GetSubtypeName(&mediaType->subtype));
+
+		DeleteMediaType(mediaType);
+
+	}
+
+	s->streamConfig->Release();
+	res = s ->filterGraph->RemoveFilter(captureFilter);
+	if (res != S_OK) {
+		fprintf(stderr, "[dshow] vidcap_dshow_help: Cannot remove capture filter from filter graph.\n");
+		return count;
+	}
+	captureFilter->Release();
+	s->moniker->Release();
+
+	return count;
+}
+
+static struct vidcap_type * vidcap_dshow_probe(bool verbose);
+
 static void show_help(struct vidcap_dshow_state *s) {
 	printf("dshow grabber options:\n");
-	printf("\t-t dshow[:device=<DeviceNumber>][:mode=<ModeNumber>][:RGB]\n");
+	printf("\t-t dshow[:device=<DeviceNumber>][:mode=<ModeNumber>][:codec=RGB]\n");
 	printf("\t    Flag RGB forces use of RGB codec, otherwise native is used if possible.\n");
 	printf("\tor\n");
 	printf("\t-t dshow:[Device]<DeviceNumber>:RGB:<width>:<height>:<fps>\n\n");
 
-	if (!common_init(s)) return;
+	struct vidcap_type *vt = vidcap_dshow_probe(true);
 
-	HRESULT res;
-	int n = 0;
-	// Enumerate all capture devices
-	while ((res = s->videoInputEnumerator->Next(1, &s->moniker, NULL)) == S_OK) {
-                n++;
-		// Attach structure for reading basic device properties
-		IPropertyBag *properties;
-		res = s->moniker->BindToStorage(0, 0, IID_PPV_ARGS(&properties));
-		if (res != S_OK) {
-			fprintf(stderr, "[dshow] vidcap_dshow_help: Failed to read device properties.\n");
-			// Ignore the device
-			continue;
+	for(int i = 0; i < vt->card_count; i++){
+		printf("Device %s: %s\n", vt->cards[i].id, vt->cards[i].name);
+
+		for(int j = 0; j < vt->cards[i].mode_count; j++){
+			struct vidcap_mode *mode = &vt->modes[i][j];
+
+			printf("    Mode %2d: %s %dx%d @%0.2f",
+					mode->mode_num,
+					mode->format,
+					mode->frame_size.discrete.width,
+					mode->frame_size.discrete.height,
+					(float) mode->fps.fraction.denominator / mode->fps.fraction.numerator);
+
+			putchar(j % 2 == 1 ? '\n' : '\t');
 		}
-
-		// Read name of the device
-		VARIANT var;
-		VariantInit(&var);
-		res = properties->Read(L"FriendlyName", &var, NULL);
-		if (res != S_OK) {
-			fprintf(stderr, "[dshow] vidcap_dshow_help: Failed to read device properties.\n");
-			VariantClear(&var);
-			// Ignore the device
-			continue;
-		}
-		printf("Device %d: %ls\n", n, var.bstrVal);
-
-		// clean up structures
-		VariantClear(&var);
-		properties->Release();
-
-		// bind the selected device to the capture filter
-		IBaseFilter *captureFilter;
-		res = s->moniker->BindToObject(NULL, NULL, IID_IBaseFilter, (void **) &captureFilter);
-		if (res != S_OK) {
-			fprintf(stderr, "[dshow] vidcap_dshow_help: Cannot bind capture filter to device.\n");
-			ErrorDescription(res);
-			continue;
-		}
-
-		// add the capture filter to the filter graph
-		res = s->filterGraph->AddFilter(captureFilter, L"Capture filter");
-		if (res != S_OK) {
-			fprintf(stderr, "[dshow] vidcap_dshow_help: Cannot add capture filter to filter graph.\n");
-			continue;
-		}
-
-		// connect stream config interface to the capture filter
-		res = s->graphBuilder->FindInterface(&PIN_CATEGORY_CAPTURE, &MEDIATYPE_Video, captureFilter,
-				IID_IAMStreamConfig, (void **) &s->streamConfig);
-		if (res != S_OK) {
-			fprintf(stderr, "[dshow] vidcap_dshow_help: Cannot find interface for reading capture capabilites.\n");
-			continue;
-		}
-
-		int capCount, capSize;
-		// read number of capture device capabilities
-		res = s->streamConfig->GetNumberOfCapabilities(&capCount, &capSize);
-		if (res != S_OK) {
-			fprintf(stderr, "[dshow] vidcap_dshow_help: Cannot read number of capture capabilites.\n");
-			continue;
-		}
-		// check if the format of capture capabilities is the right one
-		if (capSize != sizeof(VIDEO_STREAM_CONFIG_CAPS)) {
-			fprintf(stderr, "[dshow] vidcap_dshow_help: Unknown format of capture capabilites.\n");
-			continue;
-		}
-
-		// iterate over all capabilities
-		for (int i = 0; i < capCount; i++) {
-			AM_MEDIA_TYPE *mediaType;
-			VIDEO_STREAM_CONFIG_CAPS streamCaps;
-
-			res = s->streamConfig->GetStreamCaps(i, &mediaType, (BYTE*) &streamCaps);
-			if (res != S_OK) {
-				fprintf(stderr, "[dshow] vidcap_dshow_help: Cannot read stream capabilities #%d.\n", i);
-				continue;
-			}
-			if (mediaType->formattype != FORMAT_VideoInfo && mediaType->formattype != FORMAT_VideoInfo2) {
-				fprintf(stderr, "[dshow] vidcap_dshow_help: Unsupported format type for capability #%d.\n", i);
-				continue;
-			}
-                        BITMAPINFOHEADER *bmiHeader;
-                        char fps_string[128] = "";
-                        if (mediaType->formattype == FORMAT_VideoInfo) {
-                                VIDEOINFOHEADER *infoHeader = reinterpret_cast<VIDEOINFOHEADER*>(mediaType->pbFormat);
-                                bmiHeader = &infoHeader->bmiHeader;
-                                snprintf(fps_string, sizeof fps_string, "@%0.2f", 10000000.0/infoHeader->AvgTimePerFrame);
-                        } else {
-                                VIDEOINFOHEADER2 *infoHeader = reinterpret_cast<VIDEOINFOHEADER2*>(mediaType->pbFormat);
-                                bmiHeader = &infoHeader->bmiHeader;
-                                snprintf(fps_string, sizeof fps_string, "@%0.2f", 10000000.0/infoHeader->AvgTimePerFrame);
-                                // TODO: add also interlacing suffix
-                        }
-			printf("    Mode %2d: %s %ldx%ld %s", i, GetSubtypeName(&mediaType->subtype),
-				bmiHeader->biWidth,
-				bmiHeader->biHeight,
-				fps_string);
-
-			DeleteMediaType(mediaType);
-
-			putchar(i % 2 == 1 ? '\n' : '\t');
-		}
-
-		s->streamConfig->Release();
-		res = s ->filterGraph->RemoveFilter(captureFilter);
-		if (res != S_OK) {
-			fprintf(stderr, "[dshow] vidcap_dshow_help: Cannot remove capture filter from filter graph.\n");
-			continue;
-		}
-		captureFilter->Release();
-		s->moniker->Release();
-
 		printf("\n\n");
 	}
 }
@@ -465,6 +470,10 @@ static struct vidcap_type * vidcap_dshow_probe(bool verbose)
                                 snprintf(vt->cards[n-1].id, sizeof vt->cards[n-1].id - 1, "%d", n);
                                 wcstombs(vt->cards[n-1].name, var.bstrVal, sizeof vt->cards[n-1].id - 1);
 
+                                vt->modes = (struct vidcap_mode **) realloc(vt->modes, n * sizeof(*vt->modes));
+                                vt->modes[n-1] = NULL;
+				vt->cards[n-1].mode_count = get_modes(s, &vt->modes[n-1]);
+								
                                 // clean up structures
                                 VariantClear(&var);
                                 properties->Release();
