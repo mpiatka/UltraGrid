@@ -124,6 +124,7 @@ void print_available_capturers()
 
                                 printf("[cap][mode] (%s:%s)", vt->name, vt->cards[i].id);
                                 printf(" mode_num %d", mode->mode_num);
+                                printf(" format %s", mode->format);
                                 switch(mode->frame_size_type){
                                         case vidcap_mode::Frame_size_dicrete:
                                                 printf(" discrete %dx%d", mode->frame_size.discrete.width,
