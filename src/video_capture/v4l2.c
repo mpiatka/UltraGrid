@@ -340,7 +340,7 @@ static int get_modes(int fd, struct vidcap_mode **modes){
                                                 if(!tmp) return count;
                                                 *modes = tmp;
 
-                                                *modes[count++] = mode;
+                                                (*modes)[count++] = mode;
                                         }
                                         size.index++;
                                 }
@@ -359,7 +359,7 @@ static int get_modes(int fd, struct vidcap_mode **modes){
                                         if(!tmp) return count;
                                         *modes = tmp;
 
-                                        *modes[count++] = mode;
+                                        (*modes)[count++] = mode;
                                 }
                                 break;
                 }
