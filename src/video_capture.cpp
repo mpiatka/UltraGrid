@@ -162,6 +162,15 @@ void print_available_capturers()
                                                                 mode->fps.stepwise.step_numerator,
                                                                 mode->fps.stepwise.step_denominator);
                                                 break;
+                                        case vidcap_mode::Fps_cont:
+                                                printf(" continuous %lld/%d - %lld/%d with step %lld/%d",
+                                                                mode->fps.stepwise.min_numerator,
+                                                                mode->fps.stepwise.min_denominator,
+                                                                mode->fps.stepwise.max_numerator,
+                                                                mode->fps.stepwise.max_denominator,
+                                                                mode->fps.stepwise.step_numerator,
+                                                                mode->fps.stepwise.step_denominator);
+                                                break;
                                         default:
                                                 printf(" unknown");
                                                 break;

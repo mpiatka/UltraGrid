@@ -468,6 +468,50 @@ fromConnection:(AVCaptureConnection *)connection
 }
 @end
 
+static int get_modes(AVCaptureDevice *device, struct vidcap_mode **modes){
+        int count = 0;
+
+        int mode_num = 0;
+        for ( AVCaptureDeviceFormat *format in [device formats] ) {
+                CMVideoFormatDescriptionRef formatDesc = [format formatDescription];
+                FourCharCode fcc = CMFormatDescriptionGetMediaSubType(formatDesc);
+                CMVideoDimensions dim = CMVideoFormatDescriptionGetDimensions(formatDesc);
+                FourCharCode fcc_host = CFSwapInt32BigToHost(fcc);
+
+                struct vidcap_mode mode = {0};
+
+                mode.mode_num = mode_num++;
+                mode.frame_size_type = vidcap_mode::Frame_size_dicrete;
+                mode.frame_size.discrete.width = dim.width;
+                mode.frame_size.discrete.height = dim.height;
+
+                snprintf(mode.format, sizeof(mode.format), "%.4s", (const char *) &fcc_host);
+
+
+                for ( AVFrameRateRange *range in format.videoSupportedFrameRateRanges ) {
+                        if(CMTimeCompare(range.maxFrameDuration, range.minFrameDuration) == 0){
+                                mode.fps_type = vidcap_mode::Fps_discrete;
+                                mode.fps.fraction.numerator = range.maxFrameDuration.value;
+                                mode.fps.fraction.denominator = range.maxFrameDuration.timescale;
+                        } else {
+                                mode.fps_type = vidcap_mode::Fps_cont;
+                                mode.fps.stepwise.max_numerator = range.maxFrameDuration.value;
+                                mode.fps.stepwise.max_denominator = range.maxFrameDuration.timescale;
+                                mode.fps.stepwise.min_numerator = range.minFrameDuration.value;
+                                mode.fps.stepwise.min_denominator = range.minFrameDuration.timescale;
+                        }
+
+                        struct vidcap_mode *tmp = (struct vidcap_mode *) realloc(*modes, (count + 1) * sizeof(**modes));
+                        if(!tmp) return count;
+                        *modes = tmp;
+
+                        (*modes)[count++] = mode;
+                }
+        }
+
+        return count;
+}
+
 static struct vidcap_type *vidcap_avfoundation_probe(bool verbose)
 {
         struct vidcap_type *vt;
@@ -488,6 +532,11 @@ static struct vidcap_type *vidcap_avfoundation_probe(bool verbose)
                                                 "device=%d", i);
                                 snprintf(vt->cards[vt->card_count - 1].name, sizeof vt->cards[vt->card_count - 1].name,
                                                 "AV Foundation %s", [[device localizedName] UTF8String]);
+
+                                vt->modes = (struct vidcap_mode **) realloc(vt->modes, vt->card_count * sizeof(*vt->modes));
+                                vt->modes[vt->card_count - 1] = NULL;
+                                vt->cards[vt->card_count - 1].mode_count = get_modes(device, &vt->modes[vt->card_count - 1]);
+
                                 i++;
                         }
                 }
