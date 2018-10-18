@@ -189,7 +189,7 @@ static void show_help()
 
         struct vidcap_type *vt = vidcap_v4l2_probe(true);
         for (int i = 0; i < vt->card_count; ++i) {
-                printf("\t%sDevice %s (%s):\n",
+                printf("\t%sDevice %s (%s):",
                                 (i == 0 ? "(*) " : "    "),
                                 vt->cards[i].id, vt->cards[i].name);
 
@@ -211,15 +211,16 @@ static void show_help()
 
                 for(int j = 0; j < vt->cards[i].mode_count; j++) {
                         struct vidcap_mode *mode = &vt->modes[i][j];
-                        printf("\t\t");
-                        if(strncmp((char *) &fmt.fmt.pix.pixelformat, mode->format, FMT_STR_LEN) == 0) {
-                                printf("(*) ");
-                        } else {
-                                printf("    ");
-                        }
-
                         if(strncmp(fmt_str, mode->format, FMT_STR_LEN)){
-                                printf("Pixel format %4s (%s). Available frame sizes:\n",
+				printf("\n");
+				printf("\t\t");
+				if(strncmp((char *) &fmt.fmt.pix.pixelformat, mode->format, FMT_STR_LEN) == 0) {
+					printf("(*) ");
+				} else {
+					printf("    ");
+				}
+
+                                printf("Pixel format %4s (%s). Available frame sizes:",
                                                 mode->format, mode->format_desc);
                                 strncpy(fmt_str, mode->format, FMT_STR_LEN);
                                 prev_width = 0;
@@ -230,6 +231,7 @@ static void show_help()
                                 case Frame_size_dicrete:
                                         if(prev_width != mode->frame_size.discrete.width
                                                         || prev_height != mode->frame_size.discrete.height){
+                                                printf("\n");
                                                 printf("\t\t\t");
                                                 if(fmt.fmt.pix.width == mode->frame_size.discrete.width &&
                                                                 fmt.fmt.pix.height == mode->frame_size.discrete.height) {
@@ -240,12 +242,10 @@ static void show_help()
                                                 printf("%ux%u\t",
                                                                 mode->frame_size.discrete.width, mode->frame_size.discrete.height);
                                                 print_fps(mode);
-                                                printf("\n");
                                                 prev_width = mode->frame_size.discrete.width;
                                                 prev_height = mode->frame_size.discrete.height;
                                         } else {
                                                print_fps(mode); 
-                                               printf(" ");
                                         }
                                         break;
                                 case Frame_size_stepwise:
