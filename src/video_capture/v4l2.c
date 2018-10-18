@@ -185,6 +185,8 @@ static void show_help()
         printf("\t\t<bufcnt> - number of capture buffers to be used (default: %d)\n", DEFAULT_BUF_COUNT);
         printf("\t\t<tpf> or <fps> should be given as a single integer or a fraction\n");
 
+#define FMT_STR_LEN 4
+
         struct vidcap_type *vt = vidcap_v4l2_probe(true);
         for (int i = 0; i < vt->card_count; ++i) {
                 printf("\t%sDevice %s (%s):\n",
@@ -203,30 +205,48 @@ static void show_help()
                         goto next_device;
                 }
 
+                char fmt_str[FMT_STR_LEN] = {0};
+                int prev_width = 0;
+                int prev_height = 0;
+
                 for(int j = 0; j < vt->cards[i].mode_count; j++) {
                         struct vidcap_mode *mode = &vt->modes[i][j];
                         printf("\t\t");
-                        if(strncmp((char *) &fmt.fmt.pix.pixelformat, mode->format, 4) == 0) {
+                        if(strncmp((char *) &fmt.fmt.pix.pixelformat, mode->format, FMT_STR_LEN) == 0) {
                                 printf("(*) ");
                         } else {
                                 printf("    ");
                         }
-                        printf("Pixel format %4s (%s). Available frame sizes:\n",
-                                        mode->format, mode->format_desc);
+
+                        if(strncmp(fmt_str, mode->format, FMT_STR_LEN)){
+                                printf("Pixel format %4s (%s). Available frame sizes:\n",
+                                                mode->format, mode->format_desc);
+                                strncpy(fmt_str, mode->format, FMT_STR_LEN);
+                                prev_width = 0;
+                                prev_height = 0;
+                        }
 
                         switch (mode->frame_size_type) {
                                 case Frame_size_dicrete:
-                                        printf("\t\t\t");
-                                        if(fmt.fmt.pix.width == mode->frame_size.discrete.width &&
-                                                        fmt.fmt.pix.height == mode->frame_size.discrete.height) {
-                                                printf("(*) ");
+                                        if(prev_width != mode->frame_size.discrete.width
+                                                        || prev_height != mode->frame_size.discrete.height){
+                                                printf("\t\t\t");
+                                                if(fmt.fmt.pix.width == mode->frame_size.discrete.width &&
+                                                                fmt.fmt.pix.height == mode->frame_size.discrete.height) {
+                                                        printf("(*) ");
+                                                } else {
+                                                        printf("    ");
+                                                }
+                                                printf("%ux%u\t",
+                                                                mode->frame_size.discrete.width, mode->frame_size.discrete.height);
+                                                print_fps(mode);
+                                                printf("\n");
+                                                prev_width = mode->frame_size.discrete.width;
+                                                prev_height = mode->frame_size.discrete.height;
                                         } else {
-                                                printf("    ");
+                                               print_fps(mode); 
+                                               printf(" ");
                                         }
-                                        printf("%ux%u\t",
-                                                        mode->frame_size.discrete.width, mode->frame_size.discrete.height);
-                                        print_fps(mode);
-                                        printf("\n");
                                         break;
                                 case Frame_size_stepwise:
                                 case Frame_size_cont:
