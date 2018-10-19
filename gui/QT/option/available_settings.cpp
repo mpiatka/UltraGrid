@@ -1,5 +1,6 @@
 #include <QProcess>
 #include <QString>
+#include <QRegularExpression>
 #include <cstring>
 #include "available_settings.hpp"
 
@@ -70,51 +71,79 @@ void AvailableSettings::queryAll(const std::string &executable){
 	queryCap(lines, AUDIO_SRC, "[cap][audio_cap] ");
 	queryCap(lines, AUDIO_PLAYBACK, "[cap][audio_play] ");
 	
-	queryV4l2(executable);
+	queryV4l2(lines);
 
 	query(executable, AUDIO_COMPRESS);
 }
 
-void AvailableSettings::queryV4l2(const std::string &executable){
-	std::string cmd = " -t v4l2:help";
+static std::vector<VideoMode> getModes(const QStringList &lines, int start, QString dev){
+	std::vector<VideoMode> res;
 
-	QStringList lines = getProcessOutput(executable, cmd);
+	QRegularExpression mode_re("\\[cap\\]\\[mode\\] \\(" + dev + "\\) mode_num (-?\\d+) format (.*?) (.*) fps (.*)");
 
-	const QString dev_str = "Device /dev/video";
-	const int path_offset = strlen("Device ");
+	for(int i = start; i < lines.size(); i++){
+		const QString &line = lines.at(i);
+		QRegularExpressionMatch match = mode_re.match(line);
+		if(match.hasMatch()){
+			VideoMode mode;
+			mode.mode_num = match.captured(1).toInt();
+			mode.format = match.captured(2).toStdString();
+			std::string resolution = match.captured(3).toStdString();
+			std::string fps = match.captured(4).toStdString();
 
-	for(int i = 0; i < lines.count(); i++){
-		QString line = lines[i].trimmed();
-		int idx;
-		if((idx = line.indexOf(dev_str)) >= 0){
+			if(resolution.find("discrete") != std::string::npos){
+				mode.frame_size_type = VideoMode::Frame_size_dicrete;
+				sscanf(resolution.c_str(), "discrete %dx%d",
+						&mode.frame_size.discrete.width,
+						&mode.frame_size.discrete.height);
+			} else {
+				//TODO
+			}
+
+			if(fps.find("discrete") != std::string::npos){
+				mode.fps_type = VideoMode::Fps_discrete;
+				sscanf(fps.c_str(), "discrete %lld/%d",
+						&mode.fps.fraction.numerator,
+						&mode.fps.fraction.denominator);
+			} else {
+				//TODO
+			}
+
+			res.push_back(std::move(mode));
+		}
+	}
+
+	for(const auto &mode : res){
+		std::cout << dev.toStdString() << " mode " << mode.format << " " 
+			<< mode.frame_size.discrete.width << "x" << mode.frame_size.discrete.height
+			<< " " << mode.mode_num << " " << mode.fps.fraction.numerator
+			<< "/" << mode.fps.fraction.denominator << std::endl;
+	}
+
+	return res;
+}
+
+void AvailableSettings::queryV4l2(const QStringList &lines){
+	QRegularExpression dev_re("\\[cap\\] \\(v4l2:(.*);(.*)\\)");
+
+	for(int i = 0; i < lines.size(); i++){
+		const QString &line = lines.at(i);
+		QRegularExpressionMatch match = dev_re.match(line);
+		if(match.hasMatch()){
 			Webcam cam;
-			cam.config = "device=" + line.mid(idx + path_offset).split(' ')[0].toStdString();
-			QString name = line.mid(line.indexOf('(', idx));
-			name.chop(2);
-			cam.name = name.toStdString();
 			cam.type = "v4l2";
+			cam.id = match.captured(1).toStdString();
+			cam.name = match.captured(2).toStdString();
+
+			cam.modes = getModes(lines, i, "v4l2:" + QString::fromStdString(cam.id));
+
 			webcams.push_back(std::move(cam));
 		}
 	}
 
 	for(const auto cam : webcams){
-		std::cout << cam.name << ": " << cam.config << std::endl;
+		std::cout << cam.name << ": " << cam.id << std::endl;
 	}
-#if 0
-	const char *v4l2str = "[cap] (v4l2:";
-	const size_t capStrLen = strlen(v4l2str);
-
-	foreach ( QString line, lines ) {
-		if(line.startsWith(v4l2str)){
-			line.remove(0, capStrLen);
-			int pos = line.indexOf(';');
-			std::string path = line.mid(0, pos).toStdString();
-			std::string name = line.mid(pos).toStdString();
-			v4l2Devices.push_back({name, path});
-		}
-	}
-#endif
-
 }
 
 void AvailableSettings::queryCap(const QStringList &lines,
