@@ -96,8 +96,22 @@ static std::vector<VideoMode> getModes(const QStringList &lines, int start, QStr
 				sscanf(resolution.c_str(), "discrete %dx%d",
 						&mode.frame_size.discrete.width,
 						&mode.frame_size.discrete.height);
-			} else {
-				//TODO
+			} else if(resolution.find("stepwise") != std::string::npos) {
+				mode.frame_size_type = VideoMode::Frame_size_stepwise;
+				sscanf(resolution.c_str(), "stepwise %d - %d x %d - %d with steps %d %d",
+						&mode.frame_size.stepwise.min_width,
+						&mode.frame_size.stepwise.max_width,
+						&mode.frame_size.stepwise.min_height,
+						&mode.frame_size.stepwise.max_height,
+						&mode.frame_size.stepwise.step_height,
+						&mode.frame_size.stepwise.step_height);
+			} else if(resolution.find("continuous") != std::string::npos) {
+				mode.frame_size_type = VideoMode::Frame_size_cont;
+				sscanf(resolution.c_str(), "continuous %d - %d x %d - %d",
+						&mode.frame_size.stepwise.min_width,
+						&mode.frame_size.stepwise.max_width,
+						&mode.frame_size.stepwise.min_height,
+						&mode.frame_size.stepwise.max_height);
 			}
 
 			if(fps.find("discrete") != std::string::npos){
@@ -105,8 +119,24 @@ static std::vector<VideoMode> getModes(const QStringList &lines, int start, QStr
 				sscanf(fps.c_str(), "discrete %lld/%d",
 						&mode.fps.fraction.numerator,
 						&mode.fps.fraction.denominator);
-			} else {
-				//TODO
+			} else if(fps.find("stepwise") != std::string::npos) {
+				mode.fps_type = VideoMode::Fps_stepwise;
+				sscanf(fps.c_str(), "stepwise %lld/%d - %lld/%d with step %lld/%d",
+						&mode.fps.stepwise.min_numerator,
+						&mode.fps.stepwise.min_denominator,
+						&mode.fps.stepwise.max_numerator,
+						&mode.fps.stepwise.max_denominator,
+						&mode.fps.stepwise.step_numerator,
+						&mode.fps.stepwise.step_denominator);
+			} else if(fps.find("continuous") != std::string::npos) {
+				mode.fps_type = VideoMode::Fps_cont;
+				sscanf(fps.c_str(), "continuous %lld/%d - %lld/%d with step %lld/%d",
+						&mode.fps.stepwise.min_numerator,
+						&mode.fps.stepwise.min_denominator,
+						&mode.fps.stepwise.max_numerator,
+						&mode.fps.stepwise.max_denominator,
+						&mode.fps.stepwise.step_numerator,
+						&mode.fps.stepwise.step_denominator);
 			}
 
 			res.push_back(std::move(mode));
@@ -181,5 +211,9 @@ bool AvailableSettings::isAvailable(const std::string &name, SettingType type) c
 
 std::vector<std::string> AvailableSettings::getAvailableSettings(SettingType type) const{
 	return available[type];
+}
+
+std::vector<Webcam> AvailableSettings::getWebcams() const{
+	return webcams;
 }
 
