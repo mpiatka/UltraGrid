@@ -209,6 +209,21 @@ void SettingsUi::refreshVideoCompress(){
 	setItem(box, prevData);
 }
 
+static std::string getDeviceStr(const std::string &type, const std::string &id){
+	return type + ":device=" + id;
+}
+
+static void addWebcams(QComboBox *box, AvailableSettings *avail){
+	std::vector<Webcam> cams = avail->getWebcams();
+
+	for(const auto &cam : cams){
+		std::string dev = cam.type;
+
+		box->addItem(QString::fromStdString(cam.name),
+				QVariant(QString::fromStdString(getDeviceStr(cam.type, cam.id))));
+	}
+}
+
 void SettingsUi::refreshVideoSource(){
 	const std::vector<std::string> whiteList = {
 		"testcard",
@@ -222,6 +237,7 @@ void SettingsUi::refreshVideoSource(){
 	QVariant prevData = box->currentData();
 	box->clear();
 	populateComboBox(box, VIDEO_SRC, whiteList);
+	addWebcams(box, availableSettings);
 	setItem(box, prevData);
 }
 
@@ -369,6 +385,9 @@ void SettingsUi::videoSourceCallback(Option &opt, bool suboption){
 		initTestcardModes(mainWin->videoModeComboBox);
 	} else if (opt.getValue() == "screen"){
 		initScreenModes(mainWin->videoModeComboBox);
+	} else {
+		mainWin->videoModeComboBox->addItem("Default",
+				QVariant::fromValue(SettingItem()));
 	}
 }
 

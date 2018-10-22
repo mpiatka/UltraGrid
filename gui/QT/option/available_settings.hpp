@@ -83,6 +83,8 @@ public:
 	bool isAvailable(const std::string &name, SettingType type) const;
 	std::vector<std::string> getAvailableSettings(SettingType type) const;
 
+	std::vector<Webcam> getWebcams() const;
+
 private:
 	std::vector<std::string> available[SETTING_TYPE_COUNT];
 	std::vector<Webcam> webcams;
