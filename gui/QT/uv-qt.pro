@@ -43,6 +43,9 @@ HEADERS += window/ultragrid_window.hpp \
 	../../src/shared_mem_frame.hpp \
 	widget/vuMeterWidget.hpp \
 	window/settings_window.hpp \
+	option/widget_ui.hpp \
+	option/checkbox_ui.hpp \
+	option/lineedit_ui.hpp \
 
 FORMS += ui/ultragrid_window.ui \
 	ui/log_window.ui \
@@ -58,5 +61,8 @@ SOURCES += window/ultragrid_window.cpp \
 	window/log_window.cpp \
 	widget/vuMeterWidget.cpp \
 	window/settings_window.cpp \
+	option/widget_ui.cpp \
+	option/checkbox_ui.cpp \
+	option/lineedit_ui.cpp \
 	../../src/shared_mem_frame.cpp \
 	main.cpp

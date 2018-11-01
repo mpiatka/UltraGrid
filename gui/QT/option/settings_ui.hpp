@@ -3,11 +3,13 @@
 
 #include <QObject>
 #include <QString>
+#include <memory>
 
 #include "available_settings.hpp"
 #include "ui_ultragrid_window.h"
 #include "ui_settings.h"
 #include "settings.hpp"
+#include "checkbox_ui.hpp"
 
 class SettingsUi : public QObject{
 	Q_OBJECT
@@ -22,6 +24,8 @@ private:
 	Ui::Settings *settingsWin = nullptr;
 	Settings *settings = nullptr;
 	AvailableSettings *availableSettings = nullptr;
+
+	std::unique_ptr<CheckboxUi> fecCheckbox;
 
 
 	void populateComboBox(QComboBox *box,
