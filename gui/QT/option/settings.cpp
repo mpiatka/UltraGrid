@@ -105,6 +105,7 @@ const static struct{
 	{"testcard.fps", ":", "", false, "video.source", "testcard"},
 	{"testcard.format", ":", "", false, "video.source", "testcard"},
 	{"screen.fps", ":fps=", "", false, "video.source", "screen"},
+	{"v42l.conf", ":", "", false, "video.source", "v4l2"},
 	{"video.display", " -d ", "", false, "", ""},
 	{"gl.novsync", ":", "novsync", false, "video.display", "gl"},
 	{"video.compress", " -c ", "", false, "", ""},

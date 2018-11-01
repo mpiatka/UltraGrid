@@ -37,6 +37,8 @@ void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 	addCallbacks();
 	connect(mainWin->actionTest, SIGNAL(triggered()), this, SLOT(test()));
 
+	fecCheckbox = std::unique_ptr<CheckboxUi>(new CheckboxUi(ui->fECCheckBox, settings, "network.fec"));
+
 }
 
 void SettingsUi::refreshAll(){
@@ -55,8 +57,8 @@ void SettingsUi::connectSignals(){
 			this, std::bind(&SettingsUi::setBool, this, "advanced", _1));
 	connect(mainWin->networkDestinationEdit, &QLineEdit::textEdited,
 			this, std::bind(&SettingsUi::setString, this, "network.destination", _1));
-	connect(mainWin->fECCheckBox, &QCheckBox::clicked,
-			this, std::bind(&SettingsUi::setBool, this, "network.fec", _1));
+//	connect(mainWin->fECCheckBox, &QCheckBox::clicked,
+//			this, std::bind(&SettingsUi::setBool, this, "network.fec", _1));
 	connect(mainWin->actionUse_hw_acceleration, &QAction::triggered,
 			this, std::bind(&SettingsUi::setBool, this, "decode.hwaccel", _1));
 	connect(mainWin->actionRefresh, &QAction::triggered,
@@ -108,7 +110,7 @@ void SettingsUi::addCallbacks(){
 		CALLBACK("audio.source", &SettingsUi::audioSourceCallback),
 		CALLBACK("audio.playback", &SettingsUi::audioPlaybackCallback),
 		CALLBACK("audio.compress", &SettingsUi::audioCompressionCallback),
-		CALLBACK("network.fec", &SettingsUi::fecCallback),
+		//CALLBACK("network.fec", &SettingsUi::fecCallback),
 		{"advanced", std::bind(&SettingsUi::refreshAll, this)},
 	};
 #undef CALLBACK
@@ -376,6 +378,25 @@ void SettingsUi::videoCompressionCallback(Option &opt, bool){
 				));
 }
 
+#if 0
+static void initWebcamModes(QComboBox *box, const std::vector<Mode> &modes){
+	SettingItem item;
+	item.opts.push_back({"video.source.v4l2.conf", ""});
+
+	box->addItem("Default",
+			QVariant::fromValue(item));
+
+	for(const auto &rate : rates){
+		item.opts.clear();
+		item.name = std::to_string(rate) + " fps";
+		item.opts.push_back({"video.source.screen.fps", std::to_string(rate)});
+
+		box->addItem(QString::fromStdString(item.name),
+				QVariant::fromValue(item));
+	}
+}
+#endif
+
 void SettingsUi::videoSourceCallback(Option &opt, bool suboption){
 	if(suboption)
 		return;
@@ -385,6 +406,17 @@ void SettingsUi::videoSourceCallback(Option &opt, bool suboption){
 		initTestcardModes(mainWin->videoModeComboBox);
 	} else if (opt.getValue() == "screen"){
 		initScreenModes(mainWin->videoModeComboBox);
+	} else if(opt.getValue().find("v4l2") != std::string::npos){
+		/*
+		std::string dev = opt.getValue().substr(5);
+		std::vector<Webcam> cams = availableSettings->getWebcams();
+		for(const auto &cam : cams){
+			if(cam.id == dev){
+				initWebcamModes(mainWin->videoModeComboBox, cam.modes);
+				break;
+			}
+		}
+		*/
 	} else {
 		mainWin->videoModeComboBox->addItem("Default",
 				QVariant::fromValue(SettingItem()));
