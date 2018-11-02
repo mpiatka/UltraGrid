@@ -14,11 +14,20 @@ void WidgetUi::setOpt(const std::string &opt){
     registerCallback();
 }
 
-void WidgetUi::registerCallback(){
-    settings->getOption(opt).addOnChangeCallback(
+void WidgetUi::registerCallback(const std::string &option){
+    if(option == "" || registeredCallbacks.find(option) != registeredCallbacks.end())
+        return;
+
+    settings->getOption(option).addOnChangeCallback(
             std::bind(
                 &WidgetUi::optChangeCallback,
                 this,
                 std::placeholders::_1,
                 std::placeholders::_2));
+
+    registeredCallbacks.insert(option);
+}
+
+void WidgetUi::registerCallback(){
+    registerCallback(opt);
 }
