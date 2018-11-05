@@ -13,6 +13,7 @@ struct SettingValue{
 struct SettingItem{
 	std::string name;
 	std::vector<SettingValue> opts;
+	std::vector<SettingValue> conditions;
 };
 
 Q_DECLARE_METATYPE(SettingItem);
@@ -26,6 +27,8 @@ public:
             const std::string &opt,
             std::function<std::vector<SettingItem>()> itemBuilder);
 
+    void refresh() override;
+
 private:
     QComboBox *box;
     std::function<std::vector<SettingItem>()> itemBuilder;
@@ -34,7 +37,6 @@ private:
     void updateUiState() override;
 
     void addItem(const SettingItem &item);
-    void refresh() override;
 
 	void optChangeCallback(Option &opt, bool suboption) override;
 
