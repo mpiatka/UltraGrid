@@ -8,6 +8,7 @@ ComboBoxUi::ComboBoxUi(QComboBox *box,
     box(box),
     itemBuilder(itemBuilder)
 {
+    refresh();
     updateUiState();
     registerCallback();
     connectSignals();
