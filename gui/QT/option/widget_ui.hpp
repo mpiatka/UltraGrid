@@ -13,6 +13,8 @@ public:
 
     void setOpt(const std::string &opt);
 
+    virtual void refresh() {  }
+
 protected:
     Settings *settings;
     std::string opt;
@@ -21,7 +23,6 @@ protected:
     void registerCallback();
     void registerCallback(const std::string &option);
 
-    virtual void refresh() {  }
     virtual void connectSignals() = 0;
     virtual void updateUiState() = 0;
 	virtual void optChangeCallback(Option &opt, bool suboption) = 0;

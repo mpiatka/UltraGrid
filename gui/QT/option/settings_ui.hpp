@@ -10,6 +10,8 @@
 #include "ui_settings.h"
 #include "settings.hpp"
 #include "checkbox_ui.hpp"
+#include "combobox_ui.hpp"
+#include "audio_opts.hpp"
 
 class SettingsUi : public QObject{
 	Q_OBJECT
@@ -25,7 +27,7 @@ private:
 	Settings *settings = nullptr;
 	AvailableSettings *availableSettings = nullptr;
 
-	std::unique_ptr<CheckboxUi> fecCheckbox;
+	std::vector<std::unique_ptr<WidgetUi>> uiControls;
 
 
 	void populateComboBox(QComboBox *box,

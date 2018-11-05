@@ -37,8 +37,18 @@ void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 	addCallbacks();
 	connect(mainWin->actionTest, SIGNAL(triggered()), this, SLOT(test()));
 
-	fecCheckbox = std::unique_ptr<CheckboxUi>(new CheckboxUi(ui->fECCheckBox, settings, "network.fec"));
+	uiControls.emplace_back(new CheckboxUi(ui->fECCheckBox, settings, "network.fec"));
 
+	uiControls.emplace_back(
+			new ComboBoxUi(ui->audioCompressionComboBox,
+				settings,
+				"audio.compress",
+				std::bind(getAudioCompress, availableSettings))
+			);
+
+	for(auto &i : uiControls){
+		connect(i.get(), &WidgetUi::changed, this, &SettingsUi::changed);
+	}
 }
 
 void SettingsUi::refreshAll(){
@@ -47,7 +57,11 @@ void SettingsUi::refreshAll(){
 	refreshVideoDisplay();
 	refreshAudioSource();
 	refreshAudioPlayback();
-	refreshAudioCompression();
+	//refreshAudioCompression();
+	
+	for(auto &i : uiControls){
+		i->refresh();
+	}
 }
 
 void SettingsUi::connectSignals(){
@@ -88,8 +102,8 @@ void SettingsUi::connectSignals(){
 	connect(mainWin->audioPlaybackComboBox, QOverload<int>::of(&QComboBox::activated),
 			this, std::bind(&SettingsUi::setComboBox, this, mainWin->audioPlaybackComboBox, "audio.playback", _1));
 
-	connect(mainWin->audioCompressionComboBox, QOverload<int>::of(&QComboBox::activated),
-			this, std::bind(&SettingsUi::setComboBox, this, mainWin->audioCompressionComboBox, "audio.compress", _1));
+//	connect(mainWin->audioCompressionComboBox, QOverload<int>::of(&QComboBox::activated),
+//			this, std::bind(&SettingsUi::setComboBox, this, mainWin->audioCompressionComboBox, "audio.compress", _1));
 	connect(mainWin->audioBitrateEdit, &QLineEdit::textEdited,
 			this, std::bind(&SettingsUi::setString, this, "audio.compress.bitrate", _1));
 }
@@ -109,7 +123,7 @@ void SettingsUi::addCallbacks(){
 		{"video.display", std::bind(&SettingsUi::refreshAudioPlayback, this)},
 		CALLBACK("audio.source", &SettingsUi::audioSourceCallback),
 		CALLBACK("audio.playback", &SettingsUi::audioPlaybackCallback),
-		CALLBACK("audio.compress", &SettingsUi::audioCompressionCallback),
+		//CALLBACK("audio.compress", &SettingsUi::audioCompressionCallback),
 		//CALLBACK("network.fec", &SettingsUi::fecCallback),
 		{"advanced", std::bind(&SettingsUi::refreshAll, this)},
 	};
@@ -165,18 +179,6 @@ static std::string getBitrateOpt(Settings *settings){
 void SettingsUi::test(){
 	printf("%s\n", settings->getLaunchParams().c_str());
 }
-
-struct SettingValue{
-	std::string opt;
-	std::string val;
-};
-
-struct SettingItem{
-	std::string name;
-	std::vector<SettingValue> opts;
-};
-
-Q_DECLARE_METATYPE(SettingItem);
 
 static std::string getResolutionStr(int w, int h, char separator){
 	return std::to_string(w) + separator + std::to_string(h);
