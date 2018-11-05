@@ -50,6 +50,7 @@ HEADERS += window/ultragrid_window.hpp \
 	option/checkbox_ui.hpp \
 	option/lineedit_ui.hpp \
 	option/combobox_ui.hpp \
+	option/audio_opts.hpp \
 
 FORMS += ui/ultragrid_window.ui \
 	ui/log_window.ui \
@@ -69,5 +70,6 @@ SOURCES += window/ultragrid_window.cpp \
 	option/checkbox_ui.cpp \
 	option/lineedit_ui.cpp \
 	option/combobox_ui.cpp \
+	option/audio_opts.cpp \
 	../../src/shared_mem_frame.cpp \
 	main.cpp

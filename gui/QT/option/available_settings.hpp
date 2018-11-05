@@ -3,6 +3,7 @@
 
 #include <string>
 #include <vector>
+#include <QStringList>
 
 enum SettingType{
 	VIDEO_SRC = 0,
