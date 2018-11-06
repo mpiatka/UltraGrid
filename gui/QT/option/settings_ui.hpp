@@ -48,7 +48,6 @@ private:
 
 	void audioSourceCallback(Option &opt, bool suboption);
 	void audioPlaybackCallback(Option &opt, bool suboption);
-	void audioCompressionCallback(Option &opt, bool suboption);
 
 	void fecCallback(Option &opt, bool suboption);
 

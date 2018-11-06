@@ -3,10 +3,17 @@
 
 #include <vector>
 #include "available_settings.hpp"
+#include "settings.hpp"
 
 struct SettingItem;
 
+namespace Ui{
+    class UltragridWindow;
+};
+
+std::vector<SettingItem> getAudioSrc(AvailableSettings *availSettings);
 std::vector<SettingItem> getAudioCompress(AvailableSettings *availSettings);
 
+void audioCompressionCallback(Ui::UltragridWindow *win, Option &opt, bool suboption);
 
 #endif
