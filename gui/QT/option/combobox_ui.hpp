@@ -13,7 +13,9 @@ struct SettingValue{
 struct SettingItem{
 	std::string name;
 	std::vector<SettingValue> opts;
-	std::vector<SettingValue> conditions;
+
+    //conditions in conjunctive normal form
+	std::vector<std::vector<SettingValue>> conditions;
 };
 
 Q_DECLARE_METATYPE(SettingItem);

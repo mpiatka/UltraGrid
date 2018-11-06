@@ -39,11 +39,35 @@ void ComboBoxUi::refresh(){
     updateUiState();
 }
 
+static bool conditionsSatisfied(
+        const std::vector<std::vector<SettingValue>> &conds,
+        Settings *settings)
+{
+    for(const auto &condGroup : conds){
+        bool orRes = false;
+        for(const auto &itemCond : condGroup){
+            if(itemCond.val == settings->getOption(itemCond.opt).getValue()){
+                orRes = true;
+                break;
+            }
+        }
+        if(!orRes){
+            return false;
+        }
+    }
+
+    return true;
+}
+
 void ComboBoxUi::selectOption(){
     int i;
-    bool found;
+    bool found = false;
     for(i = 0; i < box->count(); i++){
         const SettingItem &item = box->itemData(i).value<SettingItem>();
+
+        if(!conditionsSatisfied(item.conditions, settings)){
+            continue;
+        }
 
         found = true;
         for(const auto &itemOpt : item.opts){
