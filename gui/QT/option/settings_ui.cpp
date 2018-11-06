@@ -124,6 +124,7 @@ void SettingsUi::addCallbacks(){
 		CALLBACK("audio.source", &SettingsUi::audioSourceCallback),
 		CALLBACK("audio.playback", &SettingsUi::audioPlaybackCallback),
 		//CALLBACK("audio.compress", &SettingsUi::audioCompressionCallback),
+		{"audio.compress", std::bind(audioCompressionCallback, mainWin, _1, _2)},
 		//CALLBACK("network.fec", &SettingsUi::fecCallback),
 		{"advanced", std::bind(&SettingsUi::refreshAll, this)},
 	};
@@ -440,24 +441,6 @@ void SettingsUi::audioPlaybackCallback(Option &opt, bool){
 void SettingsUi::fecCallback(Option &opt, bool){
 	mainWin->fECCheckBox->setChecked(opt.isEnabled());
 	settingsWin->fecGroupBox->setChecked(opt.isEnabled());
-}
-
-void SettingsUi::audioCompressionCallback(Option &opt, bool suboption){
-	if(suboption)
-		return;
-
-	static const std::vector<std::string> losslessCodecs = {
-		"FLAC",
-		"u-law",
-		"A-law",
-		"PCM"
-	};
-
-	bool enableBitrate = !vecContains(losslessCodecs, opt.getValue());
-
-	settings->getOption("audio.compress.bitrate").setEnabled(enableBitrate);
-	mainWin->audioBitrateEdit->setEnabled(enableBitrate);
-	mainWin->audioBitrateLabel->setEnabled(enableBitrate);
 }
 
 void SettingsUi::setVideoCompression(int idx){
