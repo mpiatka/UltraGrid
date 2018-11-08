@@ -45,7 +45,7 @@ private:
     void connectSignals() override;
     void updateUiState() override;
 
-    void addItem(const SettingItem &item);
+    void updateUiItems();
 
 	void optChangeCallback(Option &opt, bool suboption) override;
 
