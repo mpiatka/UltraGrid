@@ -10,12 +10,17 @@ struct SettingValue{
 	std::string val;
 };
 
+struct ConditionItem{
+    SettingValue value;
+    bool negation;
+};
+
 struct SettingItem{
 	std::string name;
 	std::vector<SettingValue> opts;
 
     //conditions in conjunctive normal form
-	std::vector<std::vector<SettingValue>> conditions;
+	std::vector<std::vector<ConditionItem>> conditions;
 };
 
 Q_DECLARE_METATYPE(SettingItem);
@@ -34,6 +39,8 @@ public:
 private:
     QComboBox *box;
     std::function<std::vector<SettingItem>()> itemBuilder;
+
+    std::vector<SettingItem> items;
 
     void connectSignals() override;
     void updateUiState() override;

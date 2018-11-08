@@ -37,6 +37,20 @@ const char * const sdiAudio[] = {
     "embedded"
 };
 
+static std::vector<std::vector<ConditionItem>> getSdiCond(const std::string &opt){
+    std::vector<std::vector<ConditionItem>> res;
+
+    std::vector<ConditionItem> clause;
+
+    for(const auto &i : sdiAudioCards){
+        clause.push_back({{opt, i}, false});
+    }
+
+    res.push_back(std::move(clause));
+
+    return res;
+}
+
 std::vector<SettingItem> getAudioSrc(AvailableSettings *availSettings){
     const std::string optStr = "audio.source";
     std::vector<SettingItem> res;
@@ -50,21 +64,16 @@ std::vector<SettingItem> getAudioSrc(AvailableSettings *availSettings){
         SettingItem item;
         item.name = i;
         item.opts.push_back({optStr, i});
+        for(const auto &sdi : sdiAudio){
+            if(std::strcmp(sdi, i.c_str()) == 0){
+                item.conditions = getSdiCond("video.source");
+                break;
+            }
+        }
         res.push_back(std::move(item));
     }
 
     return res;
-	box->addItem("none", QVariant(""));
-
-	std::string vid = settings->getOption("video.source").getValue();
-
-	for(const auto &i : availableSettings->getAvailableSettings(AUDIO_SRC)){
-		if(!settings->isAdvancedMode() && vecContains(sdiAudio, i) && !vecContains(sdiAudioCards, vid))
-			continue;
-		box->addItem(QString::fromStdString(i),
-				QVariant(QString::fromStdString(i)));
-	}
-	setItem(box, prevData);
 }
 
 void audioCompressionCallback(Ui::UltragridWindow *win, Option &opt, bool suboption){
