@@ -14,7 +14,7 @@ public:
 	using Callback = std::function<void(Option &, bool)>;
 
 	Option(Settings *settings,
-			const std::string &name,
+			const std::string &name = "",
 			const std::string &param = "",
 			const std::string &defaultValue = "",
 			bool enabled = true) :
@@ -24,8 +24,6 @@ public:
 		defaultValue(defaultValue),
 		enabled(enabled),
 		settings(settings)	{  }
-
-	Option(Settings *settings) : settings(settings) {  }
 
 	virtual ~Option() {  }
 
