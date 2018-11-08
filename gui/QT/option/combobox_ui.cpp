@@ -9,7 +9,6 @@ ComboBoxUi::ComboBoxUi(QComboBox *box,
     itemBuilder(itemBuilder)
 {
     refresh();
-    updateUiState();
     registerCallback();
     connectSignals();
 }
@@ -19,24 +18,17 @@ void ComboBoxUi::connectSignals(){
 			this, &ComboBoxUi::itemSelected);
 }
 
-void ComboBoxUi::addItem(const SettingItem &item){
-		box->addItem(QString::fromStdString(item.name),
-				QVariant::fromValue(item));
-
-        for(const auto &option : item.opts){
-            registerCallback(option.opt);
-        }
-}
-
 void ComboBoxUi::refresh(){
-    std::vector<SettingItem> newItems = itemBuilder();
+    items = itemBuilder();
 
-    box->clear();
-    for(const auto &item : newItems){
-        addItem(item);
+    for(const auto &item : items){
+        for(const auto &opt : item.opts){
+            registerCallback(opt.opt);
+        }
     }
 
-    updateUiState();
+    updateUiItems();
+    selectOption();
 }
 
 static bool conditionsSatisfied(
@@ -70,10 +62,6 @@ void ComboBoxUi::selectOption(){
     for(i = 0; i < box->count(); i++){
         const SettingItem &item = box->itemData(i).value<SettingItem>();
 
-        if(!conditionsSatisfied(item.conditions, settings)){
-            continue;
-        }
-
         found = true;
         for(const auto &itemOpt : item.opts){
             if(itemOpt.val != settings->getOption(itemOpt.opt).getValue()){
@@ -94,11 +82,25 @@ void ComboBoxUi::selectOption(){
 }
 
 void ComboBoxUi::optChangeCallback(Option &opt, bool suboption){
+    if(opt.getName() != this->opt)
+        updateUiItems();
+
     selectOption();
 }
 
 void ComboBoxUi::updateUiState(){
     selectOption();
+}
+
+void ComboBoxUi::updateUiItems(){
+    box->clear();
+
+    for(const auto &i : items){
+        if(conditionsSatisfied(i.conditions, settings)){
+            box->addItem(QString::fromStdString(i.name),
+                    QVariant::fromValue(i));
+        }
+    }
 }
 
 void ComboBoxUi::itemSelected(int index){
