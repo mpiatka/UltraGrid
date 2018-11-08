@@ -40,13 +40,18 @@ void ComboBoxUi::refresh(){
 }
 
 static bool conditionsSatisfied(
-        const std::vector<std::vector<SettingValue>> &conds,
+        const std::vector<std::vector<ConditionItem>> &conds,
         Settings *settings)
 {
-    for(const auto &condGroup : conds){
+    for(const auto &condClause : conds){
         bool orRes = false;
-        for(const auto &itemCond : condGroup){
-            if(itemCond.val == settings->getOption(itemCond.opt).getValue()){
+        for(const auto &condItem : condClause){
+            bool val = condItem.value.val == settings->getOption(condItem.value.opt).getValue();
+
+            //negate result if negation is true
+            val = val != condItem.negation;
+
+            if(val){
                 orRes = true;
                 break;
             }
@@ -83,6 +88,8 @@ void ComboBoxUi::selectOption(){
 
     if(found){
         box->setCurrentIndex(i);
+    } else {
+        itemSelected(0);
     }
 }
 

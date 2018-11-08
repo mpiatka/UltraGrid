@@ -15,13 +15,14 @@ public:
 
     virtual void refresh() {  }
 
+    void registerCallback(const std::string &option);
+
 protected:
     Settings *settings;
     std::string opt;
     std::set<std::string> registeredCallbacks;
 
     void registerCallback();
-    void registerCallback(const std::string &option);
 
     virtual void connectSignals() = 0;
     virtual void updateUiState() = 0;

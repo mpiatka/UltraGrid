@@ -46,6 +46,15 @@ void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 				std::bind(getAudioCompress, availableSettings))
 			);
 
+	ComboBoxUi *audioSrc = new ComboBoxUi(ui->audioSourceComboBox,
+				settings,
+				"audio.source",
+				std::bind(getAudioSrc, availableSettings));
+
+	audioSrc->registerCallback("video.source");
+
+	uiControls.emplace_back(audioSrc);
+
 	for(auto &i : uiControls){
 		connect(i.get(), &WidgetUi::changed, this, &SettingsUi::changed);
 	}
@@ -55,7 +64,7 @@ void SettingsUi::refreshAll(){
 	refreshVideoCompress();
 	refreshVideoSource();
 	refreshVideoDisplay();
-	refreshAudioSource();
+//	refreshAudioSource();
 	refreshAudioPlayback();
 	//refreshAudioCompression();
 	
@@ -94,8 +103,8 @@ void SettingsUi::connectSignals(){
 			this, std::bind(&SettingsUi::setComboBox, this, mainWin->videoDisplayComboBox, "video.display", _1));
 
 	//Audio
-	connect(mainWin->audioSourceComboBox, QOverload<int>::of(&QComboBox::activated),
-			this, std::bind(&SettingsUi::setComboBox, this, mainWin->audioSourceComboBox, "audio.source", _1));
+//	connect(mainWin->audioSourceComboBox, QOverload<int>::of(&QComboBox::activated),
+//			this, std::bind(&SettingsUi::setComboBox, this, mainWin->audioSourceComboBox, "audio.source", _1));
 	connect(mainWin->audioChannelsSpinBox, QOverload<const QString &>::of(&QSpinBox::valueChanged),
 			this, std::bind(&SettingsUi::setString, this, "audio.source.channels", _1));
 
@@ -118,10 +127,10 @@ void SettingsUi::addCallbacks(){
 	} callbacks[] = {
 		CALLBACK("video.compress", &SettingsUi::videoCompressionCallback),
 		CALLBACK("video.source", &SettingsUi::videoSourceCallback),
-		{"video.source", std::bind(&SettingsUi::refreshAudioSource, this)},
+		//{"video.source", std::bind(&SettingsUi::refreshAudioSource, this)},
 		CALLBACK("video.display", &SettingsUi::videoDisplayCallback),
 		{"video.display", std::bind(&SettingsUi::refreshAudioPlayback, this)},
-		CALLBACK("audio.source", &SettingsUi::audioSourceCallback),
+		//CALLBACK("audio.source", &SettingsUi::audioSourceCallback),
 		CALLBACK("audio.playback", &SettingsUi::audioPlaybackCallback),
 		//CALLBACK("audio.compress", &SettingsUi::audioCompressionCallback),
 		{"audio.compress", std::bind(audioCompressionCallback, mainWin, _1, _2)},
