@@ -11,7 +11,9 @@
 #include "settings.hpp"
 #include "checkbox_ui.hpp"
 #include "combobox_ui.hpp"
+#include "lineedit_ui.hpp"
 #include "audio_opts.hpp"
+#include "video_opts.hpp"
 
 class SettingsUi : public QObject{
 	Q_OBJECT
@@ -42,7 +44,7 @@ private:
 	void refreshAudioPlayback();
 	void refreshAudioCompression();
 
-	void videoCompressionCallback(Option &opt, bool suboption); 
+	void jpegLabelCallback(Option &opt, bool suboption); 
 	void videoSourceCallback(Option &opt, bool suboption); 
 	void videoDisplayCallback(Option &opt, bool suboption); 
 

@@ -125,7 +125,7 @@ const static struct{
 	{"network.fec", " -f ", "none", false, "", ""},
 	{"network.fec.auto", "", "", true, "", ""},
 	{"decode.hwaccel", " --param ", "use-hw-accel", false, "", ""},
-	{"advanced", "", "", false, "", ""},
+	{"advanced", "", "f", false, "", ""},
 	{"preview.display", "", "", true, "", ""},
 };
 
@@ -239,7 +239,7 @@ Option& Settings::addOption(std::string name,
 }
 
 bool Settings::isAdvancedMode(){
-	return getOption("advanced").isEnabled();
+	return getOption("advanced").getValue() == "t";
 }
 
 
