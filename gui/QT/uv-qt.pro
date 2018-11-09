@@ -51,6 +51,7 @@ HEADERS += window/ultragrid_window.hpp \
 	option/lineedit_ui.hpp \
 	option/combobox_ui.hpp \
 	option/audio_opts.hpp \
+	option/video_opts.hpp \
 
 FORMS += ui/ultragrid_window.ui \
 	ui/log_window.ui \
@@ -71,5 +72,6 @@ SOURCES += window/ultragrid_window.cpp \
 	option/lineedit_ui.cpp \
 	option/combobox_ui.cpp \
 	option/audio_opts.cpp \
+	option/video_opts.cpp \
 	../../src/shared_mem_frame.cpp \
 	main.cpp

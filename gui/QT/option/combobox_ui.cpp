@@ -82,6 +82,9 @@ void ComboBoxUi::selectOption(){
 }
 
 void ComboBoxUi::optChangeCallback(Option &opt, bool suboption){
+    if(suboption)
+        return;
+
     if(opt.getName() != this->opt)
         updateUiItems();
 

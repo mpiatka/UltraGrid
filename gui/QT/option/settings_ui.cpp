@@ -47,13 +47,45 @@ void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 			);
 
 	ComboBoxUi *audioSrc = new ComboBoxUi(ui->audioSourceComboBox,
-				settings,
-				"audio.source",
-				std::bind(getAudioSrc, availableSettings));
+			settings,
+			"audio.source",
+			std::bind(getAudioSrc, availableSettings));
 
 	audioSrc->registerCallback("video.source");
 
 	uiControls.emplace_back(audioSrc);
+
+	uiControls.emplace_back(
+			new ComboBoxUi(ui->videoSourceComboBox,
+				settings,
+				"video.source",
+				std::bind(getVideoSrc, availableSettings))
+			);
+
+	LineEditUi *videoBitrate = new LineEditUi(ui->videoBitrateEdit,
+			settings,
+			"");
+
+	uiControls.emplace_back(videoBitrate);
+
+	using namespace std::placeholders;
+	settings->getOption("video.compress").addOnChangeCallback(
+			std::bind(videoCompressBitrateCallback, videoBitrate, _1, _2)
+			);
+
+	uiControls.emplace_back(
+			new ComboBoxUi(ui->videoCompressionComboBox,
+				settings,
+				"video.compress",
+				std::bind(getVideoCompress, availableSettings))
+			);
+
+	uiControls.emplace_back(
+			new ComboBoxUi(ui->videoModeComboBox,
+				settings,
+				"",
+				std::bind(getVideoModes, availableSettings))
+			);
 
 	for(auto &i : uiControls){
 		connect(i.get(), &WidgetUi::changed, this, &SettingsUi::changed);
@@ -61,8 +93,8 @@ void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 }
 
 void SettingsUi::refreshAll(){
-	refreshVideoCompress();
-	refreshVideoSource();
+//	refreshVideoCompress();
+//	refreshVideoSource();
 	refreshVideoDisplay();
 //	refreshAudioSource();
 	refreshAudioPlayback();
@@ -88,16 +120,16 @@ void SettingsUi::connectSignals(){
 			this, &SettingsUi::refreshAll);
 
 	//Video
-	connect(mainWin->videoCompressionComboBox,
-			QOverload<int>::of(&QComboBox::activated),
-			this, &SettingsUi::setVideoCompression);
-	connect(mainWin->videoBitrateEdit, SIGNAL(textEdited(const QString&)),
-			this, SLOT(setVideoBitrate(const QString &)));
+//	connect(mainWin->videoCompressionComboBox,
+//			QOverload<int>::of(&QComboBox::activated),
+//			this, &SettingsUi::setVideoCompression);
+//	connect(mainWin->videoBitrateEdit, SIGNAL(textEdited(const QString&)),
+//			this, SLOT(setVideoBitrate(const QString &)));
 
-	connect(mainWin->videoSourceComboBox, QOverload<int>::of(&QComboBox::activated),
-			this, std::bind(&SettingsUi::setComboBox, this, mainWin->videoSourceComboBox, "video.source", _1));
-	connect(mainWin->videoModeComboBox, SIGNAL(activated(int)),
-			this, SLOT(setVideoSourceMode(int)));
+//	connect(mainWin->videoSourceComboBox, QOverload<int>::of(&QComboBox::activated),
+//			this, std::bind(&SettingsUi::setComboBox, this, mainWin->videoSourceComboBox, "video.source", _1));
+//	connect(mainWin->videoModeComboBox, SIGNAL(activated(int)),
+//			this, SLOT(setVideoSourceMode(int)));
 
 	connect(mainWin->videoDisplayComboBox, QOverload<int>::of(&QComboBox::activated),
 			this, std::bind(&SettingsUi::setComboBox, this, mainWin->videoDisplayComboBox, "video.display", _1));
@@ -125,8 +157,8 @@ void SettingsUi::addCallbacks(){
 		const char *opt;
 		std::function<void(Option &, bool)> callback;
 	} callbacks[] = {
-		CALLBACK("video.compress", &SettingsUi::videoCompressionCallback),
-		CALLBACK("video.source", &SettingsUi::videoSourceCallback),
+		CALLBACK("video.compress", &SettingsUi::jpegLabelCallback),
+//		CALLBACK("video.source", &SettingsUi::videoSourceCallback),
 		//{"video.source", std::bind(&SettingsUi::refreshAudioSource, this)},
 		CALLBACK("video.display", &SettingsUi::videoDisplayCallback),
 		{"video.display", std::bind(&SettingsUi::refreshAudioPlayback, this)},
@@ -376,18 +408,23 @@ void SettingsUi::refreshAudioCompression(){
 	setItem(box, prevData);
 }
 
-void SettingsUi::videoCompressionCallback(Option &opt, bool){
+void SettingsUi::jpegLabelCallback(Option &opt, bool suboption){
+	if(suboption)
+		return;
+
+	mainWin->videoBitrateLabel->setEnabled(true);
+	mainWin->videoBitrateEdit->setEnabled(true);
+
 	const std::string &val = opt.getValue();
-	mainWin->videoCompressionComboBox->setCurrentText(QString::fromStdString(val));
 	if(val == "jpeg"){
 		mainWin->videoBitrateLabel->setText(QString("Jpeg quality"));
 	} else {
 		mainWin->videoBitrateLabel->setText(QString("Bitrate"));
+		if(val == ""){
+			mainWin->videoBitrateLabel->setEnabled(false);
+			mainWin->videoBitrateEdit->setEnabled(false);
+		}
 	}
-
-	mainWin->videoBitrateEdit->setText(QString::fromStdString(
-				settings->getOption(getBitrateOpt(settings)).getValue()
-				));
 }
 
 #if 0
@@ -497,6 +534,7 @@ void SettingsUi::setString(const std::string &opt, const QString &str){
 
 void SettingsUi::setBool(const std::string &opt, bool b){
 	settings->getOption(opt).setEnabled(b);
+	settings->getOption(opt).setValue(b ? "t" : "f");
 	emit changed();
 }
 
