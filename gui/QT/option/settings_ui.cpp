@@ -40,22 +40,6 @@ void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 	uiControls.emplace_back(new CheckboxUi(ui->fECCheckBox, settings, "network.fec"));
 
 	uiControls.emplace_back(
-			new ComboBoxUi(ui->audioCompressionComboBox,
-				settings,
-				"audio.compress",
-				std::bind(getAudioCompress, availableSettings))
-			);
-
-	ComboBoxUi *audioSrc = new ComboBoxUi(ui->audioSourceComboBox,
-			settings,
-			"audio.source",
-			std::bind(getAudioSrc, availableSettings));
-
-	audioSrc->registerCallback("video.source");
-
-	uiControls.emplace_back(audioSrc);
-
-	uiControls.emplace_back(
 			new ComboBoxUi(ui->videoSourceComboBox,
 				settings,
 				"video.source",
@@ -65,9 +49,7 @@ void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 	LineEditUi *videoBitrate = new LineEditUi(ui->videoBitrateEdit,
 			settings,
 			"");
-
 	uiControls.emplace_back(videoBitrate);
-
 	using namespace std::placeholders;
 	settings->getOption("video.compress").addOnChangeCallback(
 			std::bind(videoCompressBitrateCallback, videoBitrate, _1, _2)
@@ -81,11 +63,39 @@ void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 			);
 
 	uiControls.emplace_back(
-			new ComboBoxUi(ui->videoModeComboBox,
+			new ComboBoxUi(ui->videoDisplayComboBox,
+				settings,
+				"video.display",
+				std::bind(getVideoDisplay, availableSettings))
+			);
+
+	ComboBoxUi *videoModeCombo = new ComboBoxUi(ui->videoModeComboBox,
 				settings,
 				"",
-				std::bind(getVideoModes, availableSettings))
+				std::bind(getVideoModes, availableSettings));
+	videoModeCombo->registerCallback("video.source");
+	uiControls.emplace_back(videoModeCombo);
+
+	uiControls.emplace_back(
+			new ComboBoxUi(ui->audioCompressionComboBox,
+				settings,
+				"audio.compress",
+				std::bind(getAudioCompress, availableSettings))
 			);
+
+	ComboBoxUi *audioSrc = new ComboBoxUi(ui->audioSourceComboBox,
+			settings,
+			"audio.source",
+			std::bind(getAudioSrc, availableSettings));
+	audioSrc->registerCallback("video.source");
+	uiControls.emplace_back(audioSrc);
+
+	ComboBoxUi *audioPlayback = new ComboBoxUi(ui->audioPlaybackComboBox,
+			settings,
+			"audio.playback",
+			std::bind(getAudioPlayback, availableSettings));
+	audioPlayback->registerCallback("video.display");
+	uiControls.emplace_back(audioPlayback);
 
 	for(auto &i : uiControls){
 		connect(i.get(), &WidgetUi::changed, this, &SettingsUi::changed);
@@ -95,9 +105,9 @@ void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 void SettingsUi::refreshAll(){
 //	refreshVideoCompress();
 //	refreshVideoSource();
-	refreshVideoDisplay();
+//	refreshVideoDisplay();
 //	refreshAudioSource();
-	refreshAudioPlayback();
+//	refreshAudioPlayback();
 	//refreshAudioCompression();
 	
 	for(auto &i : uiControls){
@@ -131,8 +141,8 @@ void SettingsUi::connectSignals(){
 //	connect(mainWin->videoModeComboBox, SIGNAL(activated(int)),
 //			this, SLOT(setVideoSourceMode(int)));
 
-	connect(mainWin->videoDisplayComboBox, QOverload<int>::of(&QComboBox::activated),
-			this, std::bind(&SettingsUi::setComboBox, this, mainWin->videoDisplayComboBox, "video.display", _1));
+//	connect(mainWin->videoDisplayComboBox, QOverload<int>::of(&QComboBox::activated),
+//			this, std::bind(&SettingsUi::setComboBox, this, mainWin->videoDisplayComboBox, "video.display", _1));
 
 	//Audio
 //	connect(mainWin->audioSourceComboBox, QOverload<int>::of(&QComboBox::activated),
@@ -140,8 +150,8 @@ void SettingsUi::connectSignals(){
 	connect(mainWin->audioChannelsSpinBox, QOverload<const QString &>::of(&QSpinBox::valueChanged),
 			this, std::bind(&SettingsUi::setString, this, "audio.source.channels", _1));
 
-	connect(mainWin->audioPlaybackComboBox, QOverload<int>::of(&QComboBox::activated),
-			this, std::bind(&SettingsUi::setComboBox, this, mainWin->audioPlaybackComboBox, "audio.playback", _1));
+//	connect(mainWin->audioPlaybackComboBox, QOverload<int>::of(&QComboBox::activated),
+//			this, std::bind(&SettingsUi::setComboBox, this, mainWin->audioPlaybackComboBox, "audio.playback", _1));
 
 //	connect(mainWin->audioCompressionComboBox, QOverload<int>::of(&QComboBox::activated),
 //			this, std::bind(&SettingsUi::setComboBox, this, mainWin->audioCompressionComboBox, "audio.compress", _1));
@@ -160,10 +170,10 @@ void SettingsUi::addCallbacks(){
 		CALLBACK("video.compress", &SettingsUi::jpegLabelCallback),
 //		CALLBACK("video.source", &SettingsUi::videoSourceCallback),
 		//{"video.source", std::bind(&SettingsUi::refreshAudioSource, this)},
-		CALLBACK("video.display", &SettingsUi::videoDisplayCallback),
-		{"video.display", std::bind(&SettingsUi::refreshAudioPlayback, this)},
+//		CALLBACK("video.display", &SettingsUi::videoDisplayCallback),
+//		{"video.display", std::bind(&SettingsUi::refreshAudioPlayback, this)},
 		//CALLBACK("audio.source", &SettingsUi::audioSourceCallback),
-		CALLBACK("audio.playback", &SettingsUi::audioPlaybackCallback),
+//		CALLBACK("audio.playback", &SettingsUi::audioPlaybackCallback),
 		//CALLBACK("audio.compress", &SettingsUi::audioCompressionCallback),
 		{"audio.compress", std::bind(audioCompressionCallback, mainWin, _1, _2)},
 		//CALLBACK("network.fec", &SettingsUi::fecCallback),
@@ -287,62 +297,6 @@ void SettingsUi::refreshVideoSource(){
 	setItem(box, prevData);
 }
 
-static void initTestcardModes(QComboBox *box){
-	static const struct{
-		int w;
-		int h;
-	} resolutions[] = {
-		{1280, 720},
-		{1920, 1080},
-		{3840, 2160},
-	};
-
-	static int const rates[] = {24, 30, 60};
-
-	SettingItem item;
-	item.name = "Default";
-	item.opts.push_back({"video.source.testcard.width", ""});
-	item.opts.push_back({"video.source.testcard.height", ""});
-	item.opts.push_back({"video.source.testcard.fps", ""});
-	item.opts.push_back({"video.source.testcard.format", ""});
-	box->addItem(QString::fromStdString(item.name),
-			QVariant::fromValue(item));
-
-	for(const auto &res : resolutions){
-		for(const auto &rate : rates){
-			item.opts.clear();
-			item.name = getResolutionStr(res.w, res.h, 'x');
-			item.name += ", " + std::to_string(rate) + " fps";
-			item.opts.push_back({"video.source.testcard.width", std::to_string(res.w)});
-			item.opts.push_back({"video.source.testcard.height", std::to_string(res.h)});
-			item.opts.push_back({"video.source.testcard.fps", std::to_string(rate)});
-			item.opts.push_back({"video.source.testcard.format", "UYVY"});
-
-			box->addItem(QString::fromStdString(item.name),
-					QVariant::fromValue(item));
-		}
-	}
-}
-
-static void initScreenModes(QComboBox *box){
-	static int const rates[] = {24, 30, 60};
-
-	SettingItem item;
-	item.opts.push_back({"video.source.screen.fps", ""});
-
-	box->addItem("Default",
-			QVariant::fromValue(item));
-
-	for(const auto &rate : rates){
-		item.opts.clear();
-		item.name = std::to_string(rate) + " fps";
-		item.opts.push_back({"video.source.screen.fps", std::to_string(rate)});
-
-		box->addItem(QString::fromStdString(item.name),
-				QVariant::fromValue(item));
-	}
-}
-
 void SettingsUi::refreshVideoDisplay(){
 	const std::vector<std::string> whiteList = {
 		"gl",
@@ -445,32 +399,6 @@ static void initWebcamModes(QComboBox *box, const std::vector<Mode> &modes){
 	}
 }
 #endif
-
-void SettingsUi::videoSourceCallback(Option &opt, bool suboption){
-	if(suboption)
-		return;
-
-	mainWin->videoModeComboBox->clear();
-	if(opt.getValue() == "testcard"){
-		initTestcardModes(mainWin->videoModeComboBox);
-	} else if (opt.getValue() == "screen"){
-		initScreenModes(mainWin->videoModeComboBox);
-	} else if(opt.getValue().find("v4l2") != std::string::npos){
-		/*
-		std::string dev = opt.getValue().substr(5);
-		std::vector<Webcam> cams = availableSettings->getWebcams();
-		for(const auto &cam : cams){
-			if(cam.id == dev){
-				initWebcamModes(mainWin->videoModeComboBox, cam.modes);
-				break;
-			}
-		}
-		*/
-	} else {
-		mainWin->videoModeComboBox->addItem("Default",
-				QVariant::fromValue(SettingItem()));
-	}
-}
 
 void SettingsUi::videoDisplayCallback(Option &opt, bool){
 	

@@ -6,7 +6,8 @@ ComboBoxUi::ComboBoxUi(QComboBox *box,
         std::function<std::vector<SettingItem>()> itemBuilder) :
     WidgetUi(settings, opt),
     box(box),
-    itemBuilder(itemBuilder)
+    itemBuilder(itemBuilder),
+    ignoreCallback(false)
 {
     refresh();
     registerCallback();
@@ -82,7 +83,7 @@ void ComboBoxUi::selectOption(){
 }
 
 void ComboBoxUi::optChangeCallback(Option &opt, bool suboption){
-    if(suboption)
+    if(suboption || ignoreCallback)
         return;
 
     if(opt.getName() != this->opt)
@@ -109,9 +110,11 @@ void ComboBoxUi::updateUiItems(){
 void ComboBoxUi::itemSelected(int index){
 	const SettingItem &item = box->itemData(index).value<SettingItem>();
 
+    ignoreCallback = true;
 	for(const auto &option : item.opts){
 		settings->getOption(option.opt).setValue(option.val);
 	}
+    ignoreCallback = false;
 
     emit changed();
 }

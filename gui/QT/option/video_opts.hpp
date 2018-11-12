@@ -10,6 +10,7 @@ struct SettingItem;
 class LineEditUi;
 
 std::vector<SettingItem> getVideoSrc(AvailableSettings *availSettings);
+std::vector<SettingItem> getVideoDisplay(AvailableSettings *availSettings);
 std::vector<SettingItem> getVideoModes(AvailableSettings *availSettings);
 std::vector<SettingItem> getVideoCompress(AvailableSettings *availSettings);
 
