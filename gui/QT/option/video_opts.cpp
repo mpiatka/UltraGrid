@@ -56,12 +56,17 @@ static void getTestcardModes(std::vector<SettingItem> &result){
 
 	static int const rates[] = {24, 30, 60};
 
+    const std::vector<std::vector<ConditionItem>> condition = {
+        {{{"video.source", "testcard"}, false}}
+    };
+
 	SettingItem item;
 	item.name = "Default";
 	item.opts.push_back({"video.source.testcard.width", ""});
 	item.opts.push_back({"video.source.testcard.height", ""});
 	item.opts.push_back({"video.source.testcard.fps", ""});
 	item.opts.push_back({"video.source.testcard.format", ""});
+    item.conditions = condition;
     result.push_back(std::move(item));
 
 	for(const auto &res : resolutions){
@@ -73,18 +78,70 @@ static void getTestcardModes(std::vector<SettingItem> &result){
 			item.opts.push_back({"video.source.testcard.height", std::to_string(res.h)});
 			item.opts.push_back({"video.source.testcard.fps", std::to_string(rate)});
 			item.opts.push_back({"video.source.testcard.format", "UYVY"});
+            item.conditions = condition;
 
             result.push_back(std::move(item));
 		}
 	}
 }
 
+static void getScreenModes(std::vector<SettingItem> &result){
+	static int const rates[] = {24, 30, 60};
 
+    const std::vector<std::vector<ConditionItem>> condition = {
+        {{{"video.source", "screen"}, false}}
+    };
+
+	SettingItem item;
+	item.name = "Default";
+	item.opts.push_back({"video.source.screen.fps", ""});
+    item.conditions = condition;
+
+    result.push_back(std::move(item));
+
+	for(const auto &rate : rates){
+		item.opts.clear();
+		item.name = std::to_string(rate) + " fps";
+		item.opts.push_back({"video.source.screen.fps", std::to_string(rate)});
+        item.conditions = condition;
+
+        result.push_back(std::move(item));
+	}
+}
 
 std::vector<SettingItem> getVideoModes(AvailableSettings *availSettings){
     std::vector<SettingItem> res;
 
     getTestcardModes(res);
+    getScreenModes(res);
+
+    return res;
+}
+
+std::vector<SettingItem> getVideoDisplay(AvailableSettings *availSettings){
+	const char * const whiteList[] = {
+		"gl",
+		"sdl",
+		"decklink",
+		"aja",
+		"dvs"
+	};
+
+    const std::string optStr = "video.display";
+
+    std::vector<SettingItem> res;
+
+    SettingItem defaultItem;
+    defaultItem.name = "None";
+    defaultItem.opts.push_back({optStr, ""});
+    res.push_back(std::move(defaultItem));
+
+    for(const auto &i : whiteList){
+        SettingItem item;
+        item.name = i;
+        item.opts.push_back({optStr, i});
+        res.push_back(std::move(item));
+    }
 
     return res;
 }

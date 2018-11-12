@@ -45,7 +45,6 @@ private:
 	void refreshAudioCompression();
 
 	void jpegLabelCallback(Option &opt, bool suboption); 
-	void videoSourceCallback(Option &opt, bool suboption); 
 	void videoDisplayCallback(Option &opt, bool suboption); 
 
 	void audioSourceCallback(Option &opt, bool suboption);

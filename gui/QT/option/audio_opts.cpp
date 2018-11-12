@@ -51,6 +51,31 @@ static std::vector<std::vector<ConditionItem>> getSdiCond(const std::string &opt
     return res;
 }
 
+std::vector<SettingItem> getAudioPlayback(AvailableSettings *availSettings){
+    const std::string optStr = "audio.playback";
+    std::vector<SettingItem> res;
+
+    SettingItem defaultItem;
+    defaultItem.name = "None";
+    defaultItem.opts.push_back({optStr, ""});
+    res.push_back(std::move(defaultItem));
+
+    for(const auto &i : availSettings->getAvailableSettings(AUDIO_PLAYBACK)){
+        SettingItem item;
+        item.name = i;
+        item.opts.push_back({optStr, i});
+        for(const auto &sdi : sdiAudio){
+            if(std::strcmp(sdi, i.c_str()) == 0){
+                item.conditions = getSdiCond("video.display");
+                break;
+            }
+        }
+        res.push_back(std::move(item));
+    }
+
+    return res;
+}
+
 std::vector<SettingItem> getAudioSrc(AvailableSettings *availSettings){
     const std::string optStr = "audio.source";
     std::vector<SettingItem> res;
