@@ -39,6 +39,7 @@ public:
 private:
     QComboBox *box;
     std::function<std::vector<SettingItem>()> itemBuilder;
+    bool ignoreCallback;
 
     std::vector<SettingItem> items;
 
