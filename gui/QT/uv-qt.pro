@@ -47,7 +47,9 @@ HEADERS += window/ultragrid_window.hpp \
 	widget/vuMeterWidget.hpp \
 	window/settings_window.hpp \
 	option/widget_ui.hpp \
+	option/checkable_ui.hpp \
 	option/checkbox_ui.hpp \
+	option/actionCheckable_ui.hpp \
 	option/lineedit_ui.hpp \
 	option/combobox_ui.hpp \
 	option/audio_opts.hpp \
@@ -68,7 +70,9 @@ SOURCES += window/ultragrid_window.cpp \
 	widget/vuMeterWidget.cpp \
 	window/settings_window.cpp \
 	option/widget_ui.cpp \
+	option/checkable_ui.cpp \
 	option/checkbox_ui.cpp \
+	option/actionCheckable_ui.cpp \
 	option/lineedit_ui.cpp \
 	option/combobox_ui.cpp \
 	option/audio_opts.cpp \
