@@ -1,20 +1,20 @@
-#ifndef CHECKBOX_UI_HPP
-#define CHECKBOX_UI_HPP
+#ifndef ACTIONCHECKABLE_UI_HPP
+#define ACTIONCHECKABLE_UI_HPP
 
-#include <QAbstractButton>
+#include <QAction>
 #include <string>
 
 #include "checkable_ui.hpp"
 #include "settings.hpp"
 
-class CheckboxUi : public CheckableUi{
+class ActionCheckableUi : public CheckableUi{
     Q_OBJECT
 
 public:
-    CheckboxUi(QAbstractButton *box, Settings *settings, const std::string &opt);
+    ActionCheckableUi(QAction *action, Settings *settings, const std::string &opt);
 
 protected:
-    QAbstractButton *checkbox;
+    QAction *action;
 
     void connectSignals() override;
     void updateUiState(bool checked) override;

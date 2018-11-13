@@ -11,6 +11,8 @@ Q_OBJECT
 public:
     WidgetUi(Settings *settings, const std::string &opt);
 
+    virtual ~WidgetUi() {  }
+
     void setOpt(const std::string &opt);
 
     virtual void refresh() {  }

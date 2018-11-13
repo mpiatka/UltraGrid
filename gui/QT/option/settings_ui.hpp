@@ -10,6 +10,7 @@
 #include "ui_settings.h"
 #include "settings.hpp"
 #include "checkbox_ui.hpp"
+#include "actionCheckable_ui.hpp"
 #include "combobox_ui.hpp"
 #include "lineedit_ui.hpp"
 #include "audio_opts.hpp"

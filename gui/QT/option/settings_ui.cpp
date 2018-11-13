@@ -38,6 +38,10 @@ void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 	connect(mainWin->actionTest, SIGNAL(triggered()), this, SLOT(test()));
 
 	uiControls.emplace_back(new CheckboxUi(ui->fECCheckBox, settings, "network.fec"));
+	uiControls.emplace_back(new ActionCheckableUi(ui->actionAdvanced, settings, "advanced"));
+	uiControls.emplace_back(new ActionCheckableUi(ui->actionUse_hw_acceleration,
+				settings,
+				"decode.hwaccel"));
 
 	uiControls.emplace_back(
 			new ComboBoxUi(ui->videoSourceComboBox,
@@ -118,14 +122,14 @@ void SettingsUi::refreshAll(){
 void SettingsUi::connectSignals(){
 	using namespace std::placeholders;
 	//Window
-	connect(mainWin->actionAdvanced, &QAction::triggered,
-			this, std::bind(&SettingsUi::setBool, this, "advanced", _1));
+//	connect(mainWin->actionAdvanced, &QAction::triggered,
+//			this, std::bind(&SettingsUi::setBool, this, "advanced", _1));
 	connect(mainWin->networkDestinationEdit, &QLineEdit::textEdited,
 			this, std::bind(&SettingsUi::setString, this, "network.destination", _1));
 //	connect(mainWin->fECCheckBox, &QCheckBox::clicked,
 //			this, std::bind(&SettingsUi::setBool, this, "network.fec", _1));
-	connect(mainWin->actionUse_hw_acceleration, &QAction::triggered,
-			this, std::bind(&SettingsUi::setBool, this, "decode.hwaccel", _1));
+//	connect(mainWin->actionUse_hw_acceleration, &QAction::triggered,
+//			this, std::bind(&SettingsUi::setBool, this, "decode.hwaccel", _1));
 	connect(mainWin->actionRefresh, &QAction::triggered,
 			this, &SettingsUi::refreshAll);
 

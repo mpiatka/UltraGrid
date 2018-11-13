@@ -53,6 +53,11 @@ protected:
 
 	bool enabled;
 
+	enum {
+		StringOpt,
+		BoolOpt
+	} type;
+
 	void changed();
 	void suboptionChanged(Option &opt, bool suboption);
 
