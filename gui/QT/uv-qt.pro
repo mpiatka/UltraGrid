@@ -46,8 +46,10 @@ HEADERS += window/ultragrid_window.hpp \
 	option/widget_ui.hpp \
 	option/checkable_ui.hpp \
 	option/checkbox_ui.hpp \
+	option/textOpt_ui.hpp \
 	option/actionCheckable_ui.hpp \
 	option/lineedit_ui.hpp \
+	option/spinbox_ui.hpp \
 	option/combobox_ui.hpp \
 	option/audio_opts.hpp \
 	option/video_opts.hpp \
@@ -70,7 +72,9 @@ SOURCES += window/ultragrid_window.cpp \
 	option/checkable_ui.cpp \
 	option/checkbox_ui.cpp \
 	option/actionCheckable_ui.cpp \
+	option/textOpt_ui.cpp \
 	option/lineedit_ui.cpp \
+	option/spinbox_ui.cpp \
 	option/combobox_ui.cpp \
 	option/audio_opts.cpp \
 	option/video_opts.cpp \
