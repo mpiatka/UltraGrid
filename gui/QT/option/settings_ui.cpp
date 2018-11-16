@@ -8,6 +8,12 @@ void SettingsUi::init(Settings *settings, AvailableSettings *availableSettings){
 	this->availableSettings = availableSettings;
 }
 
+void SettingsUi::addControl(WidgetUi *widget){
+	uiControls.emplace_back(widget);
+
+	connect(widget, &WidgetUi::changed, this, &SettingsUi::changed);
+}
+
 void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 	mainWin = ui;
 
@@ -18,16 +24,17 @@ void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 	addCallbacks();
 	connect(mainWin->actionTest, SIGNAL(triggered()), this, SLOT(test()));
 
-	uiControls.emplace_back(new CheckboxUi(ui->fECCheckBox, settings, "network.fec"));
-	uiControls.emplace_back(
+	addControl(new CheckboxUi(ui->fECCheckBox, settings, "network.fec"));
+	addControl(new CheckboxUi(ui->previewCheckBox, settings, "preview.display"));
+	addControl(
 			new LineEditUi(ui->networkDestinationEdit, settings, "network.destination")
 			);
-	uiControls.emplace_back(new ActionCheckableUi(ui->actionAdvanced, settings, "advanced"));
-	uiControls.emplace_back(new ActionCheckableUi(ui->actionUse_hw_acceleration,
+	addControl(new ActionCheckableUi(ui->actionAdvanced, settings, "advanced"));
+	addControl(new ActionCheckableUi(ui->actionUse_hw_acceleration,
 				settings,
 				"decode.hwaccel"));
 
-	uiControls.emplace_back(
+	addControl(
 			new ComboBoxUi(ui->videoSourceComboBox,
 				settings,
 				"video.source",
@@ -37,20 +44,20 @@ void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 	LineEditUi *videoBitrate = new LineEditUi(ui->videoBitrateEdit,
 			settings,
 			"");
-	uiControls.emplace_back(videoBitrate);
+	addControl(videoBitrate);
 	using namespace std::placeholders;
 	settings->getOption("video.compress").addOnChangeCallback(
 			std::bind(videoCompressBitrateCallback, videoBitrate, _1, _2)
 			);
 
-	uiControls.emplace_back(
+	addControl(
 			new ComboBoxUi(ui->videoCompressionComboBox,
 				settings,
 				"video.compress",
 				std::bind(getVideoCompress, availableSettings))
 			);
 
-	uiControls.emplace_back(
+	addControl(
 			new ComboBoxUi(ui->videoDisplayComboBox,
 				settings,
 				"video.display",
@@ -62,9 +69,9 @@ void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 				"",
 				std::bind(getVideoModes, availableSettings));
 	videoModeCombo->registerCallback("video.source");
-	uiControls.emplace_back(videoModeCombo);
+	addControl(videoModeCombo);
 
-	uiControls.emplace_back(
+	addControl(
 			new ComboBoxUi(ui->audioCompressionComboBox,
 				settings,
 				"audio.compress",
@@ -76,30 +83,26 @@ void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 			"audio.source",
 			std::bind(getAudioSrc, availableSettings));
 	audioSrc->registerCallback("video.source");
-	uiControls.emplace_back(audioSrc);
+	addControl(audioSrc);
 
 	ComboBoxUi *audioPlayback = new ComboBoxUi(ui->audioPlaybackComboBox,
 			settings,
 			"audio.playback",
 			std::bind(getAudioPlayback, availableSettings));
 	audioPlayback->registerCallback("video.display");
-	uiControls.emplace_back(audioPlayback);
+	addControl(audioPlayback);
 
-	uiControls.emplace_back(new LineEditUi(ui->audioBitrateEdit,
+	addControl(new LineEditUi(ui->audioBitrateEdit,
 				settings,
 				"audio.compress.bitrate"));
 
-	uiControls.emplace_back(new SpinBoxUi(ui->audioChannelsSpinBox,
+	addControl(new SpinBoxUi(ui->audioChannelsSpinBox,
 				settings,
 				"audio.source.channels"));
 
-	uiControls.emplace_back(new LineEditUi(ui->portLineEdit,
+	addControl(new LineEditUi(ui->portLineEdit,
 				settings,
 				"network.port"));
-
-	for(auto &i : uiControls){
-		connect(i.get(), &WidgetUi::changed, this, &SettingsUi::changed);
-	}
 }
 
 void SettingsUi::refreshAll(){
@@ -206,4 +209,8 @@ void SettingsUi::initSettingsWin(Ui::Settings *ui){
 	connect(ui->fecAutoCheck, &QCheckBox::clicked,
 			this, std::bind(&SettingsUi::setBool, this, "network.fec.auto", _1));
 #endif
+
+	addControl(new LineEditUi(ui->basePort,
+			settings,
+			"network.port"));
 }
