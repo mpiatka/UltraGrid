@@ -122,6 +122,7 @@ const static struct{
 	{"bitrate", ":bitrate=", "", false, "audio.compress", ""},
 	{"network.destination", " ", "", false, "", ""},
 	{"network.port", " -P ", "5004", false, "", ""},
+	{"network.control_port", " --control-port ", "8888", true, "", ""},
 	{"network.fec", " -f ", "none", false, "", ""},
 	{"network.fec.auto", "", "", true, "", ""},
 	{"decode.hwaccel", " --param ", "use-hw-accel", false, "", ""},
@@ -157,16 +158,29 @@ Settings::Settings() : dummy(this){
 
 std::string Settings::getLaunchParams() const{
 	std::string out;
+
+	if(getOption("preview.display").isEnabled()){
+		out += "--capture-filter preview";
+	}
+
 	out += getOption("video.source").getLaunchOption();
 	out += getOption("video.compress").getLaunchOption();
 	const auto &dispOpt = getOption("video.display");
-	if(dispOpt.isEnabled() && getOption("preview.display").isEnabled()){
-		out += dispOpt.getParam();
-		out += "multiplier:" + dispOpt.getValue() + dispOpt.getSubVals();
-		out += "#preview";
+	if(dispOpt.isEnabled()){
+		if(getOption("preview.display").isEnabled()){
+			out += dispOpt.getParam();
+			out += "multiplier:" + dispOpt.getValue() + dispOpt.getSubVals();
+			out += "#preview";
+		} else {
+			out += getOption("video.display").getLaunchOption();
+		}
 	} else {
-		out += getOption("video.display").getLaunchOption();
+		if(getOption("preview.display").isEnabled()){
+			out += dispOpt.getParam();
+			out += "preview";
+		}
 	}
+
 	out += getOption("audio.source").getLaunchOption();
 	out += getOption("audio.source.channels").getLaunchOption();
 	out += getOption("audio.compress").getLaunchOption();
@@ -179,7 +193,17 @@ std::string Settings::getLaunchParams() const{
 }
 
 std::string Settings::getPreviewParams() const{
-	return "";
+	std::string out;
+
+	out += " --capture-filter preview";
+	out += getOption("video.source").getLaunchOption();
+	out += " -d preview";
+	out += getOption("audio.source").getLaunchOption();
+	out += getOption("audio.source.channels").getLaunchOption();
+	out += " -r dummy";
+	out += getOption("network.control_port").getLaunchOption();
+
+	return out;
 }
 
 Option& Settings::getOption(const std::string &opt){

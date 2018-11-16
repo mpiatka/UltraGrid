@@ -41,6 +41,8 @@ private:
 	void connectSignals();
 	void addCallbacks();
 
+	void addControl(WidgetUi *widget);
+
 private slots:
 	void refreshAll();
 
