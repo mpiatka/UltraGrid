@@ -187,13 +187,7 @@ void UltragridWindow::startPreview(){
 		stopPreview();
 
 	QString command(ultragridExecutable);
-	command += " ";
-	QString source = "";
-	command += "--capture-filter preview ";
-	command += source;
-	//command += audioSrcOption->getLaunchParam();
-	//TODO better control port handling
-	command += "-d preview -r dummy --control-port 8888";
+	command += QString::fromStdString(settings.getPreviewParams());
 	/*
 	if(sourceOption->getCurrentValue() != "none"){
 		//We prevent video from network overriding local sources
@@ -202,6 +196,7 @@ void UltragridWindow::startPreview(){
 	}
 	*/
 
+	log.write("Preview: " + command + "\n\n");
 	previewProcess.start(command);
 }
 
