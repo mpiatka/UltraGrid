@@ -14,42 +14,9 @@ UltragridWindow::UltragridWindow(QWidget *parent): QMainWindow(parent){
 
 	ultragridExecutable = "\"" + UltragridWindow::findUltragridExecutable() + "\"";
 
-	connectSignals();
-
 #ifndef __linux
 	ui.actionUse_hw_acceleration->setVisible(false);
 #endif
-
-	//sourceOption = new VideoSourceOption(&ui, ultragridExecutable);
-	//opts.emplace_back(sourceOption);
-
-	//displayOption = new VideoDisplayOption(&ui, ultragridExecutable);
-	//opts.emplace_back(displayOption);
-
-	//opts.emplace_back(new VideoCompressOption(&ui,
-	//			ultragridExecutable));
-
-	//audioSrcOption = new AudioSourceOption(&ui,
-	//		sourceOption,
-	//		ultragridExecutable);
-	//opts.emplace_back(audioSrcOption);
-
-	//opts.emplace_back(new AudioPlaybackOption(&ui,
-	//			displayOption,
-	//			ultragridExecutable));
-
-	//opts.emplace_back(new AudioCompressOption(&ui,
-	//			ultragridExecutable));
-
-	//opts.emplace_back(new FecOption(&ui));
-	//opts.emplace_back(new ArgumentOption(&ui));
-
-	for(auto &opt : opts){
-		connect(opt.get(), SIGNAL(changed()), this, SLOT(setArgs()));
-	}
-
-
-	connect(&settingsWindow, SIGNAL(changed()), this, SLOT(setArgs()));
 
 	previewTimer.setSingleShot(true);
 	connect(&previewTimer, SIGNAL(timeout()), this, SLOT(startPreview()));
@@ -61,23 +28,19 @@ UltragridWindow::UltragridWindow(QWidget *parent): QMainWindow(parent){
 
 	availableSettings.queryAll(ultragridExecutable.toStdString());
 
-	queryOpts();
-
 	settingsUi.init(&settings, &availableSettings);
 	settingsUi.initMainWin(&ui);
 	settingsWindow.init(&settingsUi, &settings);
 
-	connect(&settingsUi, SIGNAL(changed()), this, SLOT(setArgs()));
-
 	checkPreview();
-
 	startPreview();
+
+	connectSignals();
 
 	ui.displayPreview->setKey("ultragrid_preview_display");
 	ui.displayPreview->start();
 	ui.capturePreview->setKey("ultragrid_preview_capture");
 	ui.capturePreview->start();
-
 }
 
 void UltragridWindow::setupPreviewCallbacks(){
@@ -214,27 +177,9 @@ void UltragridWindow::editArgs(const QString &text){
 }
 
 void UltragridWindow::setArgs(){
-	launchArgs = "";
-
-	log.write("set args\n");
-
-	for(auto &opt : opts){
-		launchArgs += opt->getLaunchParam();
-	}
-
-	//launchArgs += settingsWindow.getPortArgs();
-
-	launchArgs += ui.networkDestinationEdit->text();
-
-	ui.arguments->setText(QString::fromStdString(settings.getLaunchParams()));
-}
-
-void UltragridWindow::queryOpts(){
-	for(auto &opt : opts){
-		opt->queryAvailOpts();
-	}
-
-	setArgs();
+	QString args = QString::fromStdString(settings.getLaunchParams());
+	log.write("set args: " + args + "\n");
+	ui.arguments->setText(args);
 }
 
 void UltragridWindow::closeEvent(QCloseEvent *e){
@@ -272,18 +217,14 @@ void UltragridWindow::connectSignals(){
 
 	connect(ui.arguments, SIGNAL(textChanged(const QString &)), this, SLOT(editArgs(const QString &)));
 	connect(ui.editCheckBox, SIGNAL(toggled(bool)), this, SLOT(setArgs()));
-	connect(ui.actionRefresh, SIGNAL(triggered()), this, SLOT(queryOpts()));
+	//connect(ui.actionRefresh, SIGNAL(triggered()), this, SLOT(queryOpts()));
 	//connect(ui.actionAdvanced, SIGNAL(toggled(bool)), this, SLOT(setAdvanced(bool)));
 	connect(ui.actionShow_Terminal, SIGNAL(triggered()), this, SLOT(showLog()));
 	connect(ui.actionSettings, SIGNAL(triggered()), this, SLOT(showSettings()));
 	connect(ui.previewCheckBox, SIGNAL(toggled(bool)), this, SLOT(enablePreview(bool)));
-}
 
-void UltragridWindow::setAdvanced(bool adv){
-	for(auto &opt : opts){
-		opt->setAdvanced(adv);
-	}
-	queryOpts();
+	connect(&settingsWindow, SIGNAL(changed()), this, SLOT(setArgs()));
+	connect(&settingsUi, SIGNAL(changed()), this, SLOT(setArgs()));
 }
 
 void UltragridWindow::showLog(){
