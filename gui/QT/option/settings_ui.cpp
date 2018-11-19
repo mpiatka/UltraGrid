@@ -25,7 +25,7 @@ void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 	connect(mainWin->actionTest, SIGNAL(triggered()), this, SLOT(test()));
 
 	addControl(new CheckboxUi(ui->fECCheckBox, settings, "network.fec"));
-	addControl(new CheckboxUi(ui->previewCheckBox, settings, "preview.display"));
+	addControl(new CheckboxUi(ui->previewCheckBox, settings, "preview"));
 	addControl(
 			new LineEditUi(ui->networkDestinationEdit, settings, "network.destination")
 			);
