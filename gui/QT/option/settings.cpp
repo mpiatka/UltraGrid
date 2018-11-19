@@ -32,6 +32,10 @@ std::string Option::getSubVals() const{
 }
 
 std::string Option::getLaunchOption() const{
+	if(type == OptType::BoolOpt){
+		return enabled ? param : "";
+	}
+
 	if(!enabled || value.empty())
 		return "";
 
@@ -55,7 +59,12 @@ void Option::suboptionChanged(Option &opt, bool){
 
 void Option::setValue(const std::string &val, bool suppressCallback){
 	value = val;
-	enabled = !val.empty();
+
+	if(type == OptType::BoolOpt){
+		enabled = val == "t";
+	} else {
+		enabled = !val.empty();
+	}
 
 	if(!suppressCallback)
 		changed();
@@ -93,41 +102,42 @@ static void test_callback(Option &opt, bool){
 
 const static struct{
 	const char *name;
+	Option::OptType type;
 	const char *param;
 	const char *defaultVal;
 	bool enabled;
 	const char *parent;
 	const char *limit;
 } optionList[] = {
-	{"video.source", " -t ", "", false, "", ""},
-	{"testcard.width", ":", "", false, "video.source", "testcard"},
-	{"testcard.height", ":", "", false, "video.source", "testcard"},
-	{"testcard.fps", ":", "", false, "video.source", "testcard"},
-	{"testcard.format", ":", "", false, "video.source", "testcard"},
-	{"screen.fps", ":fps=", "", false, "video.source", "screen"},
-	{"v42l.conf", ":", "", false, "video.source", "v4l2"},
-	{"video.display", " -d ", "", false, "", ""},
-	{"gl.novsync", ":", "novsync", false, "video.display", "gl"},
-	{"video.compress", " -c ", "", false, "", ""},
-	{"libavcodec.codec", ":codec=", "", false, "video.compress", "libavcodec"},
-	{"H.264.bitrate", ":bitrate=", "", false, "video.compress.libavcodec.codec", "H.264"},
-	{"H.265.bitrate", ":bitrate=", "", false, "video.compress.libavcodec.codec", "H.265"},
-	{"MJPEG.bitrate", ":bitrate=", "", false, "video.compress.libavcodec.codec", "MJPEG"},
-	{"VP8.bitrate", ":bitrate=", "", false, "video.compress.libavcodec.codec", "VP8"},
-	{"jpeg.quality", ":", "", false, "video.compress", "jpeg"},
-	{"audio.source", " -s ", "", false, "", ""},
-	{"audio.source.channels", " --audio-capture-format channels=", "", false, "", ""},
-	{"audio.playback", " -r ", "", false, "", ""},
-	{"audio.compress", " --audio-codec ", "", false, "", ""},
-	{"bitrate", ":bitrate=", "", false, "audio.compress", ""},
-	{"network.destination", " ", "", false, "", ""},
-	{"network.port", " -P ", "5004", false, "", ""},
-	{"network.control_port", " --control-port ", "8888", true, "", ""},
-	{"network.fec", " -f ", "none", false, "", ""},
-	{"network.fec.auto", "", "", true, "", ""},
-	{"decode.hwaccel", " --param ", "use-hw-accel", false, "", ""},
-	{"advanced", "", "f", false, "", ""},
-	{"preview.display", "", "", true, "", ""},
+	{"video.source", Option::StringOpt, " -t ", "", false, "", ""},
+	{"testcard.width", Option::StringOpt, ":", "", false, "video.source", "testcard"},
+	{"testcard.height", Option::StringOpt, ":", "", false, "video.source", "testcard"},
+	{"testcard.fps", Option::StringOpt, ":", "", false, "video.source", "testcard"},
+	{"testcard.format", Option::StringOpt, ":", "", false, "video.source", "testcard"},
+	{"screen.fps", Option::StringOpt, ":fps=", "", false, "video.source", "screen"},
+	{"v42l.conf", Option::StringOpt, ":", "", false, "video.source", "v4l2"},
+	{"video.display", Option::StringOpt, " -d ", "", false, "", ""},
+	{"gl.novsync", Option::BoolOpt, ":novsync", "f", false, "video.display", "gl"},
+	{"video.compress", Option::StringOpt, " -c ", "", false, "", ""},
+	{"libavcodec.codec", Option::StringOpt, ":codec=", "", false, "video.compress", "libavcodec"},
+	{"H.264.bitrate", Option::StringOpt, ":bitrate=", "", false, "video.compress.libavcodec.codec", "H.264"},
+	{"H.265.bitrate", Option::StringOpt, ":bitrate=", "", false, "video.compress.libavcodec.codec", "H.265"},
+	{"MJPEG.bitrate", Option::StringOpt, ":bitrate=", "", false, "video.compress.libavcodec.codec", "MJPEG"},
+	{"VP8.bitrate", Option::StringOpt, ":bitrate=", "", false, "video.compress.libavcodec.codec", "VP8"},
+	{"jpeg.quality", Option::StringOpt, ":", "", false, "video.compress", "jpeg"},
+	{"audio.source", Option::StringOpt, " -s ", "", false, "", ""},
+	{"audio.source.channels", Option::StringOpt, " --audio-capture-format channels=", "", false, "", ""},
+	{"audio.playback", Option::StringOpt, " -r ", "", false, "", ""},
+	{"audio.compress", Option::StringOpt, " --audio-codec ", "", false, "", ""},
+	{"bitrate", Option::StringOpt, ":bitrate=", "", false, "audio.compress", ""},
+	{"network.destination", Option::StringOpt, " ", "", false, "", ""},
+	{"network.port", Option::StringOpt, " -P ", "5004", false, "", ""},
+	{"network.control_port", Option::StringOpt, " --control-port ", "8888", true, "", ""},
+	{"network.fec", Option::StringOpt, " -f ", "none", false, "", ""},
+	{"network.fec.auto", Option::BoolOpt, "", "t", true, "", ""},
+	{"decode.hwaccel", Option::BoolOpt, " --param use-hw-accel", "f", false, "", ""},
+	{"advanced", Option::BoolOpt, "", "f", false, "", ""},
+	{"preview", Option::BoolOpt, "", "t", true, "", ""},
 };
 
 const struct {
@@ -140,6 +150,7 @@ const struct {
 Settings::Settings() : dummy(this){
 	for(const auto &i : optionList){
 		auto &opt = addOption(i.name,
+				i.type,
 				i.param,
 				i.defaultVal,
 				i.enabled,
@@ -159,7 +170,7 @@ Settings::Settings() : dummy(this){
 std::string Settings::getLaunchParams() const{
 	std::string out;
 
-	if(getOption("preview.display").isEnabled()){
+	if(getOption("preview").isEnabled()){
 		out += "--capture-filter preview";
 	}
 
@@ -167,7 +178,7 @@ std::string Settings::getLaunchParams() const{
 	out += getOption("video.compress").getLaunchOption();
 	const auto &dispOpt = getOption("video.display");
 	if(dispOpt.isEnabled()){
-		if(getOption("preview.display").isEnabled()){
+		if(getOption("preview").isEnabled()){
 			out += dispOpt.getParam();
 			out += "multiplier:" + dispOpt.getValue() + dispOpt.getSubVals();
 			out += "#preview";
@@ -175,7 +186,7 @@ std::string Settings::getLaunchParams() const{
 			out += getOption("video.display").getLaunchOption();
 		}
 	} else {
-		if(getOption("preview.display").isEnabled()){
+		if(getOption("preview").isEnabled()){
 			out += dispOpt.getParam();
 			out += "preview";
 		}
@@ -229,6 +240,7 @@ const Option& Settings::getOption(const std::string &opt) const{
 }
 
 Option& Settings::addOption(std::string name,
+		Option::OptType type,
 		const std::string &param,
 		const std::string &value,
 		bool enabled,
@@ -251,6 +263,7 @@ Option& Settings::addOption(std::string name,
 	}
 
 	opt->setParam(param);
+	opt->setType(type);
 	opt->setValue(value);
 	opt->setDefaultValue(value);
 	opt->setEnabled(enabled);
