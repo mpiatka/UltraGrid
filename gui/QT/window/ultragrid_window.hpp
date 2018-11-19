@@ -42,12 +42,6 @@ private:
 	LogWindow log;
 	SettingsWindow settingsWindow;
 
-	std::vector<std::unique_ptr<UltragridOption>> opts;
-	VideoSourceOption *sourceOption;
-	VideoDisplayOption *displayOption;
-
-	AudioSourceOption *audioSrcOption;
-
 	Settings settings;
 	SettingsUi settingsUi;
 
@@ -67,8 +61,6 @@ public slots:
 	void stopPreview();
 
 private slots:
-	void queryOpts();
-	void setAdvanced(bool);
 	void setStartBtnText(QProcess::ProcessState);
 	void processStateChanged(QProcess::ProcessState);
 	void enablePreview(bool);
