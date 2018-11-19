@@ -25,6 +25,9 @@ protected:
 
 private:
 	void checkPreview();
+	void setupPreviewCallbacks();
+
+	void connectSignals();
 
 	Ui::UltragridWindow ui;
 

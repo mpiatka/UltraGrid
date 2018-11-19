@@ -10,7 +10,7 @@ CheckableUi::CheckableUi(Settings *settings, const std::string &opt) :
 
 void CheckableUi::boxClicked(bool checked){
 	settings->getOption(opt).setValue(checked ? "t" : "f");
-	settings->getOption(opt).setEnabled(checked);
+	//settings->getOption(opt).setEnabled(checked);
 	emit changed();
 }
 
