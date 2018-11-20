@@ -25,6 +25,8 @@ public:
 	void initMainWin(Ui::UltragridWindow *ui);
 	void initSettingsWin(Ui::Settings *ui);
 
+	void refreshAll();
+
 private:
 	Ui::UltragridWindow *mainWin = nullptr;
 	Ui::Settings *settingsWin = nullptr;
@@ -44,7 +46,6 @@ private:
 	void addControl(WidgetUi *widget);
 
 private slots:
-	void refreshAll();
 
 	void test();
 
