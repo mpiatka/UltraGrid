@@ -64,6 +64,8 @@ private slots:
 	void setStartBtnText(QProcess::ProcessState);
 	void processStateChanged(QProcess::ProcessState);
 	void enablePreview(bool);
+
+	void refresh();
 };
 
 

@@ -36,10 +36,7 @@ void SettingsWindow::changeFecPage(){
 	if(ui.fecMultRadio->isChecked()){
 		ui.stackedWidget->setCurrentIndex(0);
 	} else if(ui.fecLdgmRadio->isChecked()){
-		if(settings->isAdvancedMode())
-			ui.stackedWidget->setCurrentIndex(2);
-		else
-			ui.stackedWidget->setCurrentIndex(1);
+		ui.stackedWidget->setCurrentIndex(2);
 	} else if(ui.fecRsRadio->isChecked()){
 		ui.stackedWidget->setCurrentIndex(3);
 	}

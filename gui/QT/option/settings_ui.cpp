@@ -112,8 +112,8 @@ void SettingsUi::refreshAll(){
 }
 
 void SettingsUi::connectSignals(){
-	connect(mainWin->actionRefresh, &QAction::triggered,
-			this, &SettingsUi::refreshAll);
+//	connect(mainWin->actionRefresh, &QAction::triggered,
+//			this, &SettingsUi::refreshAll);
 }
 
 void SettingsUi::addCallbacks(){
@@ -213,4 +213,37 @@ void SettingsUi::initSettingsWin(Ui::Settings *ui){
 	addControl(new LineEditUi(ui->basePort,
 			settings,
 			"network.port"));
+
+	addControl(new LineEditUi(ui->controlPort,
+			settings,
+			"network.control_port"));
+
+	addControl(new CheckboxUi(ui->fecAutoCheck,
+			settings,
+			"network.fec.auto"));
+
+	addControl(new SpinBoxUi(ui->multSpin,
+			settings,
+			"network.fec.mult.factor"));
+
+	addControl(new SpinBoxUi(ui->ldgmK,
+			settings,
+			"network.fec.ldgm.k"));
+
+	addControl(new SpinBoxUi(ui->ldgmM,
+			settings,
+			"network.fec.ldgm.m"));
+
+	addControl(new SpinBoxUi(ui->ldgmC,
+			settings,
+			"network.fec.ldgm.c"));
+
+	addControl(new SpinBoxUi(ui->rsK,
+			settings,
+			"network.fec.rs.k"));
+
+	addControl(new SpinBoxUi(ui->rsN,
+			settings,
+			"network.fec.rs.n"));
+
 }
