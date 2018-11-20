@@ -36,11 +36,19 @@ UltragridWindow::UltragridWindow(QWidget *parent): QMainWindow(parent){
 	startPreview();
 
 	connectSignals();
+	setupPreviewCallbacks();
+
+	setArgs();
 
 	ui.displayPreview->setKey("ultragrid_preview_display");
 	ui.displayPreview->start();
 	ui.capturePreview->setKey("ultragrid_preview_capture");
 	ui.capturePreview->start();
+}
+
+void UltragridWindow::refresh(){
+	availableSettings.queryAll(ultragridExecutable.toStdString());
+	settingsUi.refreshAll();
 }
 
 void UltragridWindow::setupPreviewCallbacks(){
@@ -222,6 +230,8 @@ void UltragridWindow::connectSignals(){
 	connect(ui.actionShow_Terminal, SIGNAL(triggered()), this, SLOT(showLog()));
 	connect(ui.actionSettings, SIGNAL(triggered()), this, SLOT(showSettings()));
 	connect(ui.previewCheckBox, SIGNAL(toggled(bool)), this, SLOT(enablePreview(bool)));
+
+	connect(ui.actionRefresh, SIGNAL(triggered()), this, SLOT(refresh()));
 
 	connect(&settingsWindow, SIGNAL(changed()), this, SLOT(setArgs()));
 	connect(&settingsUi, SIGNAL(changed()), this, SLOT(setArgs()));
