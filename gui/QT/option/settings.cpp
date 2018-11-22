@@ -134,6 +134,7 @@ const static struct{
 	{"network.port", Option::StringOpt, " -P ", "5004", false, "", ""},
 	{"network.control_port", Option::StringOpt, " --control-port ", "8888", true, "", ""},
 	{"network.fec", Option::StringOpt, " -f ", "", false, "", ""},
+	{"enabled", Option::BoolOpt, "", "f", false, "network.fec", ""},
 	{"mult.factor", Option::StringOpt, ":", "2", false, "network.fec", "mult"},
 	{"ldgm.k", Option::StringOpt, ":", "256", false, "network.fec", "lgdm"},
 	{"ldgm.m", Option::StringOpt, ":", "192", false, "network.fec", "lgdm"},

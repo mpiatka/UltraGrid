@@ -51,6 +51,8 @@ HEADERS += window/ultragrid_window.hpp \
 	option/lineedit_ui.hpp \
 	option/spinbox_ui.hpp \
 	option/combobox_ui.hpp \
+	option/groupBox_ui.hpp \
+	option/radioButton_ui.hpp \
 	option/audio_opts.hpp \
 	option/video_opts.hpp \
 
@@ -76,6 +78,8 @@ SOURCES += window/ultragrid_window.cpp \
 	option/lineedit_ui.cpp \
 	option/spinbox_ui.cpp \
 	option/combobox_ui.cpp \
+	option/groupBox_ui.cpp \
+	option/radioButton_ui.cpp \
 	option/audio_opts.cpp \
 	option/video_opts.cpp \
 	../../src/shared_mem_frame.cpp \
