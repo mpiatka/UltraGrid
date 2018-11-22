@@ -14,6 +14,8 @@
 #include "combobox_ui.hpp"
 #include "lineedit_ui.hpp"
 #include "spinbox_ui.hpp"
+#include "groupBox_ui.hpp"
+#include "radioButton_ui.hpp"
 #include "audio_opts.hpp"
 #include "video_opts.hpp"
 

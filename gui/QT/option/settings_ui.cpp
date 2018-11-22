@@ -24,7 +24,7 @@ void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 	addCallbacks();
 	connect(mainWin->actionTest, SIGNAL(triggered()), this, SLOT(test()));
 
-	addControl(new CheckboxUi(ui->fECCheckBox, settings, "network.fec"));
+	addControl(new CheckboxUi(ui->fECCheckBox, settings, "network.fec.enabled"));
 	addControl(new CheckboxUi(ui->previewCheckBox, settings, "preview"));
 	addControl(
 			new LineEditUi(ui->networkDestinationEdit, settings, "network.destination")
@@ -210,40 +210,19 @@ void SettingsUi::initSettingsWin(Ui::Settings *ui){
 			this, std::bind(&SettingsUi::setBool, this, "network.fec.auto", _1));
 #endif
 
-	addControl(new LineEditUi(ui->basePort,
-			settings,
-			"network.port"));
-
-	addControl(new LineEditUi(ui->controlPort,
-			settings,
-			"network.control_port"));
-
-	addControl(new CheckboxUi(ui->fecAutoCheck,
-			settings,
-			"network.fec.auto"));
-
-	addControl(new SpinBoxUi(ui->multSpin,
-			settings,
-			"network.fec.mult.factor"));
-
-	addControl(new SpinBoxUi(ui->ldgmK,
-			settings,
-			"network.fec.ldgm.k"));
-
-	addControl(new SpinBoxUi(ui->ldgmM,
-			settings,
-			"network.fec.ldgm.m"));
-
-	addControl(new SpinBoxUi(ui->ldgmC,
-			settings,
-			"network.fec.ldgm.c"));
-
-	addControl(new SpinBoxUi(ui->rsK,
-			settings,
-			"network.fec.rs.k"));
-
-	addControl(new SpinBoxUi(ui->rsN,
-			settings,
-			"network.fec.rs.n"));
+	addControl(new LineEditUi(ui->basePort, settings, "network.port"));
+	addControl(new LineEditUi(ui->controlPort, settings, "network.control_port"));
+	addControl(new CheckboxUi(ui->fecAutoCheck, settings, "network.fec.auto"));
+	addControl(new GroupBoxUi(ui->fecGroupBox, settings, "network.fec.enabled"));
+	addControl(new SpinBoxUi(ui->multSpin, settings, "network.fec.mult.factor"));
+	addControl(new SpinBoxUi(ui->ldgmK, settings, "network.fec.ldgm.k"));
+	addControl(new SpinBoxUi(ui->ldgmM, settings, "network.fec.ldgm.m"));
+	addControl(new SpinBoxUi(ui->ldgmC, settings, "network.fec.ldgm.c"));
+	addControl(new SpinBoxUi(ui->rsK, settings, "network.fec.rs.k"));
+	addControl(new SpinBoxUi(ui->rsN, settings, "network.fec.rs.n"));
+	addControl(new RadioButtonUi(ui->fecNoneRadio, "", settings, "network.fec"));
+	addControl(new RadioButtonUi(ui->fecMultRadio, "mult", settings, "network.fec"));
+	addControl(new RadioButtonUi(ui->fecLdgmRadio, "ldgm", settings, "network.fec"));
+	addControl(new RadioButtonUi(ui->fecRsRadio, "rs", settings, "network.fec"));
 
 }
