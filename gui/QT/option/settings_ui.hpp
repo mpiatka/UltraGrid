@@ -37,7 +37,6 @@ private:
 
 	std::vector<std::unique_ptr<WidgetUi>> uiControls;
 
-
 	void jpegLabelCallback(Option &opt, bool suboption); 
 
 	void fecCallback(Option &opt, bool suboption);
