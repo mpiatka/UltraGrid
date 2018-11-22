@@ -36,7 +36,7 @@ std::string Option::getLaunchOption() const{
 		return enabled ? param : "";
 	}
 
-	if(!enabled || value.empty())
+	if(!enabled || value.empty() || type == OptType::SilentOpt)
 		return "";
 
 	std::string out = param + value;
@@ -100,6 +100,21 @@ static void test_callback(Option &opt, bool){
 		<< " (" << opt.isEnabled() << ")" << std::endl;
 }
 
+static void fec_builder_callback(Option &opt, bool subopt){
+	if(!subopt)
+		return;
+
+	Settings *settings = opt.getSettings();
+	Option &fecOpt = settings->getOption("network.fec");
+
+	std::string type = settings->getOption("network.fec.type").getValue();
+
+	if(type == "mult"){
+		fecOpt.setValue("mult:" + settings->getOption("network.fec.mult.factor").getValue());
+	}
+
+}
+
 const static struct{
 	const char *name;
 	Option::OptType type;
@@ -134,13 +149,14 @@ const static struct{
 	{"network.port", Option::StringOpt, " -P ", "5004", false, "", ""},
 	{"network.control_port", Option::StringOpt, " --control-port ", "8888", true, "", ""},
 	{"network.fec", Option::StringOpt, " -f ", "", false, "", ""},
+	{"type", Option::SilentOpt, "", "", false, "network.fec", ""},
 	{"enabled", Option::BoolOpt, "", "f", false, "network.fec", ""},
-	{"mult.factor", Option::StringOpt, ":", "2", false, "network.fec", "mult"},
-	{"ldgm.k", Option::StringOpt, ":", "256", false, "network.fec", "lgdm"},
-	{"ldgm.m", Option::StringOpt, ":", "192", false, "network.fec", "lgdm"},
-	{"ldgm.c", Option::StringOpt, ":", "5", false, "network.fec", "lgdm"},
-	{"rs.k", Option::StringOpt, ":", "200", false, "network.fec", "rs"},
-	{"rs.n", Option::StringOpt, ":", "220", false, "network.fec", "rs"},
+	{"mult.factor", Option::SilentOpt, ":", "2", false, "network.fec", ""},
+	{"ldgm.k", Option::SilentOpt, ":", "256", false, "network.fec", ""},
+	{"ldgm.m", Option::SilentOpt, ":", "192", false, "network.fec", ""},
+	{"ldgm.c", Option::SilentOpt, ":", "5", false, "network.fec", ""},
+	{"rs.k", Option::SilentOpt, ":", "200", false, "network.fec", ""},
+	{"rs.n", Option::SilentOpt, "", "220", false, "network.fec", ""},
 	{"network.fec.auto", Option::BoolOpt, "", "t", true, "", ""},
 	{"decode.hwaccel", Option::BoolOpt, " --param use-hw-accel", "f", false, "", ""},
 	{"advanced", Option::BoolOpt, "", "f", false, "", ""},
@@ -151,7 +167,7 @@ const struct {
 	const char *name;
 	Option::Callback callback;
 } optionCallbacks[] = {
-
+	{"network.fec", fec_builder_callback}
 };
 
 Settings::Settings() : dummy(this){
