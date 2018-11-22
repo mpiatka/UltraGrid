@@ -14,7 +14,8 @@ public:
 	using Callback = std::function<void(Option &, bool)>;
 	enum OptType{
 		StringOpt,
-		BoolOpt
+		BoolOpt,
+		SilentOpt
 	};
 
 	Option(Settings *settings,
