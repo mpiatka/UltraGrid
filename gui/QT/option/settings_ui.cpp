@@ -100,9 +100,7 @@ void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 				settings,
 				"audio.source.channels"));
 
-	addControl(new LineEditUi(ui->portLineEdit,
-				settings,
-				"network.port"));
+	addControl(new LineEditUi(ui->portLineEdit, settings, "network.port"));
 }
 
 void SettingsUi::refreshAll(){
@@ -220,9 +218,9 @@ void SettingsUi::initSettingsWin(Ui::Settings *ui){
 	addControl(new SpinBoxUi(ui->ldgmC, settings, "network.fec.ldgm.c"));
 	addControl(new SpinBoxUi(ui->rsK, settings, "network.fec.rs.k"));
 	addControl(new SpinBoxUi(ui->rsN, settings, "network.fec.rs.n"));
-	addControl(new RadioButtonUi(ui->fecNoneRadio, "", settings, "network.fec"));
-	addControl(new RadioButtonUi(ui->fecMultRadio, "mult", settings, "network.fec"));
-	addControl(new RadioButtonUi(ui->fecLdgmRadio, "ldgm", settings, "network.fec"));
-	addControl(new RadioButtonUi(ui->fecRsRadio, "rs", settings, "network.fec"));
+	addControl(new RadioButtonUi(ui->fecNoneRadio, "", settings, "network.fec.type"));
+	addControl(new RadioButtonUi(ui->fecMultRadio, "mult", settings, "network.fec.type"));
+	addControl(new RadioButtonUi(ui->fecLdgmRadio, "ldgm", settings, "network.fec.type"));
+	addControl(new RadioButtonUi(ui->fecRsRadio, "rs", settings, "network.fec.type"));
 
 }
