@@ -303,6 +303,13 @@
              <item row="0" column="1">
               <widget class="QComboBox" name="audioCompressionComboBox"/>
              </item>
+             <item row="1" column="0">
+              <widget class="QLabel" name="audioBitrateLabel">
+               <property name="text">
+                <string>Bitrate</string>
+               </property>
+              </widget>
+             </item>
              <item row="1" column="1">
               <widget class="QLineEdit" name="audioBitrateEdit">
                <property name="sizePolicy">
@@ -310,13 +317,6 @@
                  <horstretch>0</horstretch>
                  <verstretch>0</verstretch>
                 </sizepolicy>
-               </property>
-              </widget>
-             </item>
-             <item row="1" column="0">
-              <widget class="QLabel" name="audioBitrateLabel">
-               <property name="text">
-                <string>Bitrate</string>
                </property>
               </widget>
              </item>
@@ -341,6 +341,9 @@
         <layout class="QVBoxLayout" name="verticalLayout_4">
          <item>
           <layout class="QFormLayout" name="formLayout_7">
+           <property name="fieldGrowthPolicy">
+            <enum>QFormLayout::AllNonFixedFieldsGrow</enum>
+           </property>
            <property name="formAlignment">
             <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
            </property>
@@ -361,16 +364,6 @@
              </property>
             </widget>
            </item>
-           <item row="2" column="0">
-            <widget class="QLabel" name="fECLabel">
-             <property name="text">
-              <string>FEC</string>
-             </property>
-            </widget>
-           </item>
-           <item row="2" column="1">
-            <widget class="QCheckBox" name="fECCheckBox"/>
-           </item>
            <item row="1" column="0">
             <widget class="QLabel" name="portLabel">
              <property name="text">
@@ -384,6 +377,30 @@
               <string>5004</string>
              </property>
             </widget>
+           </item>
+           <item row="3" column="0">
+            <widget class="QLabel" name="fECLabel">
+             <property name="text">
+              <string>FEC</string>
+             </property>
+            </widget>
+           </item>
+           <item row="3" column="1">
+            <layout class="QHBoxLayout" name="horizontalLayout_2">
+             <property name="topMargin">
+              <number>3</number>
+             </property>
+             <item>
+              <widget class="QCheckBox" name="fECCheckBox"/>
+             </item>
+             <item>
+              <widget class="QToolButton" name="fecToolBtn">
+               <property name="text">
+                <string>...</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
            </item>
           </layout>
          </item>
@@ -461,7 +478,7 @@
      <x>0</x>
      <y>0</y>
      <width>1018</width>
-     <height>22</height>
+     <height>27</height>
     </rect>
    </property>
    <property name="contextMenuPolicy">

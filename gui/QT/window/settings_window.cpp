@@ -42,3 +42,7 @@ void SettingsWindow::changeFecPage(){
 	}
 }
 
+void SettingsWindow::fecTab(){
+	ui.tabWidget->setCurrentIndex(0);
+}
+
