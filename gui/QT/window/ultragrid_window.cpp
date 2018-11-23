@@ -214,6 +214,8 @@ void UltragridWindow::closeEvent(QCloseEvent *e){
 	stopPreview();
 
 	log.close();
+	exit(0);
+	settingsWindow.close();
 }
 
 void UltragridWindow::connectSignals(){
@@ -235,6 +237,9 @@ void UltragridWindow::connectSignals(){
 
 	connect(&settingsWindow, SIGNAL(changed()), this, SLOT(setArgs()));
 	connect(&settingsUi, SIGNAL(changed()), this, SLOT(setArgs()));
+
+	connect(ui.fecToolBtn, SIGNAL(clicked()), this, SLOT(showSettings()));
+	connect(ui.fecToolBtn, SIGNAL(clicked()), &settingsWindow, SLOT(fecTab()));
 }
 
 void UltragridWindow::showLog(){
