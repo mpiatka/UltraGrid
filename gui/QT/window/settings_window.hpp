@@ -23,6 +23,7 @@ private:
 
 private slots:
 	void changeFecPage();
+	void fecTab();
 
 };
 #endif
