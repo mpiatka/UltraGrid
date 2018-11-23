@@ -109,10 +109,42 @@ static void fec_builder_callback(Option &opt, bool subopt){
 
 	std::string type = settings->getOption("network.fec.type").getValue();
 
-	if(type == "mult"){
+	if(type.empty()){
+		fecOpt.setValue("");
+	} else if(type == "mult"){
 		fecOpt.setValue("mult:" + settings->getOption("network.fec.mult.factor").getValue());
+	} else if(type == "rs"){
+		fecOpt.setValue("rs:"
+				+ settings->getOption("network.fec.rs.k").getValue()
+				+ ":" + settings->getOption("network.fec.rs.n").getValue());
+	} else if(type == "ldgm"){
+		fecOpt.setValue("ldgm:"
+				+ settings->getOption("network.fec.ldgm.k").getValue()
+				+ ":" + settings->getOption("network.fec.ldgm.m").getValue()
+				+ ":" + settings->getOption("network.fec.ldgm.c").getValue());
 	}
 
+
+}
+
+static void fec_auto_callback(Option &opt, bool subopt){
+	Settings *settings = opt.getSettings();
+
+	if(!settings->getOption("network.fec.auto").isEnabled())
+		return;
+
+	Option &fecOpt = settings->getOption("network.fec.type");
+
+	if(opt.getValue() == ""){
+		fecOpt.setValue("");
+	} else if(opt.getValue() == "jpeg"){
+		fecOpt.setValue("ldgm");
+	} else if(opt.getValue() == "libavcodec"
+			&& settings->getOption("video.compress.libavcodec.codec").getValue() == "MJPEG"){
+		fecOpt.setValue("ldgm");
+	} else {
+		fecOpt.setValue("rs");
+	}
 }
 
 const static struct{
@@ -167,7 +199,9 @@ const struct {
 	const char *name;
 	Option::Callback callback;
 } optionCallbacks[] = {
-	{"network.fec", fec_builder_callback}
+	{"network.fec", fec_builder_callback},
+	{"video.compress", fec_auto_callback},
+	{"network.fec.auto", fec_auto_callback},
 };
 
 Settings::Settings() : dummy(this){
@@ -219,6 +253,7 @@ std::string Settings::getLaunchParams() const{
 	out += getOption("audio.source.channels").getLaunchOption();
 	out += getOption("audio.compress").getLaunchOption();
 	out += getOption("audio.playback").getLaunchOption();
+	out += getOption("network.fec").getLaunchOption();
 	out += getOption("network.port").getLaunchOption();
 	out += getOption("network.control_port").getLaunchOption();
 	out += getOption("network.destination").getLaunchOption();
