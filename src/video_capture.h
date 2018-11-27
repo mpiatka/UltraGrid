@@ -85,6 +85,7 @@
 #define _VIDEO_CAPTURE_H_
 
 #include "types.h"
+#include "vidcap_mode.h"
 
 #define VIDEO_CAPTURE_ABI_VERSION 5
 
@@ -93,58 +94,6 @@ extern "C" {
 #endif // __cplusplus
 
 struct audio_frame;
-
-struct vidcap_mode {
-        int mode_num;
-
-        enum {
-                Frame_size_dicrete,
-                Frame_size_stepwise,
-                Frame_size_cont,
-        } frame_size_type;
-
-        union {
-                struct {
-                        int width;
-                        int height;
-                } discrete;
-                struct {
-                        int min_width;
-                        int max_width;
-                        int min_height;
-                        int max_height;
-                        int step_width;
-                        int step_height;
-                } stepwise;
-        } frame_size;
-
-        enum {
-                Fps_unknown,
-                Fps_discrete,
-                Fps_stepwise,
-                Fps_cont,
-        } fps_type;
-
-        union {
-
-                struct {
-                        long long numerator;
-                        int denominator;
-                } fraction;
-
-                struct {
-                        long long min_numerator;
-                        int min_denominator;
-                        long long max_numerator;
-                        int max_denominator;
-                        long long step_numerator;
-                        int step_denominator;
-                } stepwise;
-        } fps;
-
-        char format[32];
-        char format_desc[32];
-};
 
 /** Defines video capture device */
 struct vidcap_type {
