@@ -1,6 +1,9 @@
 #include <QProcess>
 #include <QString>
 #include <QRegularExpression>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
 #include <cstring>
 #include "available_settings.hpp"
 
@@ -71,108 +74,49 @@ void AvailableSettings::queryAll(const std::string &executable){
 	queryCap(lines, AUDIO_SRC, "[cap][audio_cap] ");
 	queryCap(lines, AUDIO_PLAYBACK, "[cap][audio_play] ");
 	
-	queryV4l2(lines);
+	queryCapturers(lines);
 
 	query(executable, AUDIO_COMPRESS);
 }
 
-static std::vector<VideoMode> getModes(const QStringList &lines, int start, QString dev){
-	std::vector<VideoMode> res;
+void AvailableSettings::queryCapturers(const QStringList &lines){
+	const char * const capStr = "[capability][capture][v1]";
+	size_t capStrLen = strlen(capStr);
 
-	QRegularExpression mode_re("\\[cap\\]\\[mode\\] \\(" + dev + "\\) mode_num (-?\\d+) format (.*?) (.*) fps (.*)");
+	foreach ( const QString &line, lines ) {
+		if(line.startsWith(capStr)){
+			QJsonDocument doc = QJsonDocument::fromJson(line.mid(capStrLen).toUtf8());
+			if(!doc.isObject())
+				return;
 
-	for(int i = start; i < lines.size(); i++){
-		const QString &line = lines.at(i);
-		QRegularExpressionMatch match = mode_re.match(line);
-		if(match.hasMatch()){
-			VideoMode mode;
-			mode.mode_num = match.captured(1).toInt();
-			mode.format = match.captured(2).toStdString();
-			std::string resolution = match.captured(3).toStdString();
-			std::string fps = match.captured(4).toStdString();
-
-			if(resolution.find("discrete") != std::string::npos){
-				mode.frame_size_type = VideoMode::Frame_size_dicrete;
-				sscanf(resolution.c_str(), "discrete %dx%d",
-						&mode.frame_size.discrete.width,
-						&mode.frame_size.discrete.height);
-			} else if(resolution.find("stepwise") != std::string::npos) {
-				mode.frame_size_type = VideoMode::Frame_size_stepwise;
-				sscanf(resolution.c_str(), "stepwise %d - %d x %d - %d with steps %d %d",
-						&mode.frame_size.stepwise.min_width,
-						&mode.frame_size.stepwise.max_width,
-						&mode.frame_size.stepwise.min_height,
-						&mode.frame_size.stepwise.max_height,
-						&mode.frame_size.stepwise.step_height,
-						&mode.frame_size.stepwise.step_height);
-			} else if(resolution.find("continuous") != std::string::npos) {
-				mode.frame_size_type = VideoMode::Frame_size_cont;
-				sscanf(resolution.c_str(), "continuous %d - %d x %d - %d",
-						&mode.frame_size.stepwise.min_width,
-						&mode.frame_size.stepwise.max_width,
-						&mode.frame_size.stepwise.min_height,
-						&mode.frame_size.stepwise.max_height);
+			Capturer cap = {0};
+			QJsonObject obj = doc.object();
+			if(obj.contains("name") && obj["name"].isString()){
+				cap.name = obj["name"].toString().toStdString();
+			}
+			if(obj.contains("type") && obj["type"].isString()){
+				cap.type = obj["type"].toString().toStdString();
+			}
+			if(obj.contains("device") && obj["device"].isString()){
+				cap.deviceOpt = obj["device"].toString().toStdString();
 			}
 
-			if(fps.find("discrete") != std::string::npos){
-				mode.fps_type = VideoMode::Fps_discrete;
-				sscanf(fps.c_str(), "discrete %lld/%d",
-						&mode.fps.fraction.numerator,
-						&mode.fps.fraction.denominator);
-			} else if(fps.find("stepwise") != std::string::npos) {
-				mode.fps_type = VideoMode::Fps_stepwise;
-				sscanf(fps.c_str(), "stepwise %lld/%d - %lld/%d with step %lld/%d",
-						&mode.fps.stepwise.min_numerator,
-						&mode.fps.stepwise.min_denominator,
-						&mode.fps.stepwise.max_numerator,
-						&mode.fps.stepwise.max_denominator,
-						&mode.fps.stepwise.step_numerator,
-						&mode.fps.stepwise.step_denominator);
-			} else if(fps.find("continuous") != std::string::npos) {
-				mode.fps_type = VideoMode::Fps_cont;
-				sscanf(fps.c_str(), "continuous %lld/%d - %lld/%d with step %lld/%d",
-						&mode.fps.stepwise.min_numerator,
-						&mode.fps.stepwise.min_denominator,
-						&mode.fps.stepwise.max_numerator,
-						&mode.fps.stepwise.max_denominator,
-						&mode.fps.stepwise.step_numerator,
-						&mode.fps.stepwise.step_denominator);
+			if(obj.contains("modes") && obj["modes"].isArray()){
+				for(const QJsonValue &val : obj["modes"].toArray()){
+					if(val.isObject()){
+						QJsonObject modeJson = val.toObject();
+
+						for(const QString &key : modeJson.keys()){
+							if(modeJson[key].isString()){
+								cap.modes.push_back(SettingVal{key.toStdString(),
+										modeJson[key].toString().toStdString()});
+							}
+						}
+					}
+				}
 			}
-
-			res.push_back(std::move(mode));
+			capturers.push_back(std::move(cap));
 		}
-	}
-
-	for(const auto &mode : res){
-		std::cout << dev.toStdString() << " mode " << mode.format << " " 
-			<< mode.frame_size.discrete.width << "x" << mode.frame_size.discrete.height
-			<< " " << mode.mode_num << " " << mode.fps.fraction.numerator
-			<< "/" << mode.fps.fraction.denominator << std::endl;
-	}
-
-	return res;
-}
-
-void AvailableSettings::queryV4l2(const QStringList &lines){
-	QRegularExpression dev_re("\\[cap\\] \\(v4l2:(.*);(.*)\\)");
-
-	for(int i = 0; i < lines.size(); i++){
-		const QString &line = lines.at(i);
-		QRegularExpressionMatch match = dev_re.match(line);
-		if(match.hasMatch()){
-			Webcam cam;
-			cam.type = "v4l2";
-			cam.id = match.captured(1).toStdString();
-			cam.name = match.captured(2).toStdString();
-
-			cam.modes = getModes(lines, i, "v4l2:" + QString::fromStdString(cam.id));
-
-			webcams.push_back(std::move(cam));
-		}
-	}
-
-	for(const auto cam : webcams){
-		std::cout << cam.name << ": " << cam.id << std::endl;
 	}
 }
 
@@ -213,7 +157,7 @@ std::vector<std::string> AvailableSettings::getAvailableSettings(SettingType typ
 	return available[type];
 }
 
-std::vector<Webcam> AvailableSettings::getWebcams() const{
-	return webcams;
+std::vector<Capturer> AvailableSettings::getCapturers() const{
+	return capturers;
 }
 
