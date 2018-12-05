@@ -77,6 +77,20 @@ void AvailableSettings::queryAll(const std::string &executable){
 	queryCapturers(lines);
 
 	query(executable, AUDIO_COMPRESS);
+
+#ifdef DEBUG
+	for(const auto &i : capturers){
+		std::cout << i.name << " : " << i.type
+			<< " : " << i.deviceOpt << std::endl;
+
+		for(const auto &j : i.modes){
+			std::cout << "\t" << j.name << std::endl;
+			for(const auto &k : j.opts){
+				std::cout << "\t\t" << k.opt << " : " << k.val << std::endl;
+			}
+		}
+	}
+#endif
 }
 
 void AvailableSettings::queryCapturers(const QStringList &lines){
@@ -89,7 +103,7 @@ void AvailableSettings::queryCapturers(const QStringList &lines){
 			if(!doc.isObject())
 				return;
 
-			Capturer cap = {0};
+			Capturer cap;
 			QJsonObject obj = doc.object();
 			if(obj.contains("name") && obj["name"].isString()){
 				cap.name = obj["name"].toString().toStdString();
@@ -106,11 +120,21 @@ void AvailableSettings::queryCapturers(const QStringList &lines){
 					if(val.isObject()){
 						QJsonObject modeJson = val.toObject();
 
-						for(const QString &key : modeJson.keys()){
-							if(modeJson[key].isString()){
-								cap.modes.push_back(SettingVal{key.toStdString(),
-										modeJson[key].toString().toStdString()});
+						CaptureMode mode;
+
+						if(modeJson.contains("name") && modeJson["name"].isString()){
+							mode.name = modeJson["name"].toString().toStdString();
+						}
+
+						if(modeJson.contains("opts") && modeJson["opts"].isObject()){
+							QJsonObject modeOpts = modeJson["opts"].toObject();
+							for(const QString &key : modeOpts.keys()){
+								if(modeOpts[key].isString()){
+									mode.opts.push_back(SettingVal{key.toStdString(),
+											modeOpts[key].toString().toStdString()});
+								}
 							}
+							cap.modes.push_back(std::move(mode));
 						}
 					}
 				}
