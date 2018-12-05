@@ -6,8 +6,8 @@
 
 std::vector<SettingItem> getVideoSrc(AvailableSettings *availSettings){
 	const char * const whiteList[] = {
-		"testcard",
-		"screen",
+//		"testcard",
+//		"screen",
 		"decklink",
 		"aja",
 		"dvs"
@@ -34,6 +34,14 @@ std::vector<SettingItem> getVideoSrc(AvailableSettings *availSettings){
         if(!whiteListed){
             item.conditions.push_back({{{"advanced", "t"}, false}});
         }
+        res.push_back(std::move(item));
+    }
+
+    for(const auto &i : availSettings->getCapturers()){
+        SettingItem item;
+        item.name = i.name;
+        item.opts.push_back({optStr, i.type});
+        item.opts.push_back({optStr + "." + i.type + ".device", i.deviceOpt});
         res.push_back(std::move(item));
     }
 
@@ -112,8 +120,22 @@ static void getScreenModes(std::vector<SettingItem> &result){
 std::vector<SettingItem> getVideoModes(AvailableSettings *availSettings){
     std::vector<SettingItem> res;
 
-    getTestcardModes(res);
-    getScreenModes(res);
+    //getTestcardModes(res);
+    //getScreenModes(res);
+    //
+
+    for(const auto &cap : availSettings->getCapturers()){
+        for(const auto &mode : cap.modes){
+            SettingItem item;
+            item.name = mode.name;
+            item.conditions.push_back({{{"video.source", cap.type}, false}});
+            for(const auto &opt : mode.opts){
+                item.opts.push_back(
+                        {"video.source." + cap.type + "." + opt.opt, opt.val});
+            }
+            res.push_back(std::move(item));
+        } 
+    }
 
     return res;
 }
