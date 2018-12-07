@@ -163,6 +163,7 @@ const static struct{
 	{"testcard.format", Option::StringOpt, ":", "", false, "video.source", "testcard"},
 	{"screen.fps", Option::StringOpt, ":fps=", "", false, "video.source", "screen"},
 	{"v42l.conf", Option::StringOpt, ":", "", false, "video.source", "v4l2"},
+	{"dshow.mode", Option::StringOpt, ":mode=", "", false, "video.source", "dshow"},
 	{"video.display", Option::StringOpt, " -d ", "", false, "", ""},
 	{"gl.novsync", Option::BoolOpt, ":novsync", "f", false, "video.display", "gl"},
 	{"video.compress", Option::StringOpt, " -c ", "", false, "", ""},
