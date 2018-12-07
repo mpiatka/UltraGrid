@@ -247,7 +247,7 @@ static bool common_init(struct vidcap_dshow_state *s) {
 	// Initialize COM library
 	// COINIT_APARTMENTTHREADED is used because we do not expect any other thread to work with the object
 	res = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-	if (res != S_OK) {
+	if (res != S_OK && res != S_FALSE) {
 		fprintf(stderr, "[dshow] vidcap_dshow_init: COM library initialization failed.\n");
 		ErrorDescription(res);
 		return false;
@@ -441,6 +441,7 @@ static struct vidcap_type * vidcap_dshow_probe(bool verbose)
 		return vt;
 	}
 	struct vidcap_dshow_state *s = (struct vidcap_dshow_state *) calloc(1, sizeof(struct vidcap_dshow_state));
+
 	if (!common_init(s)) return vt;
 	HRESULT res;
 	int n = 0;
