@@ -94,6 +94,8 @@ public:
 
 	bool isAdvancedMode();
 
+	const std::map<std::string, std::unique_ptr<Option>>& getOptionMap() const;
+
 private:
 
 	std::map<std::string, std::unique_ptr<Option>> options;

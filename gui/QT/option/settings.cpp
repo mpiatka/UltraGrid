@@ -304,6 +304,10 @@ const Option& Settings::getOption(const std::string &opt) const{
 	return *search->second;
 }
 
+const std::map<std::string, std::unique_ptr<Option>>& Settings::getOptionMap() const{
+	return options;
+}
+
 Option& Settings::addOption(std::string name,
 		Option::OptType type,
 		const std::string &param,
