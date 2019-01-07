@@ -348,4 +348,10 @@ bool Settings::isAdvancedMode(){
 	return getOption("advanced").getValue() == "t";
 }
 
+void Settings::changedAll(){
+	for(auto &i : options){
+		i.second->changed();
+	}
+}
+
 

@@ -54,6 +54,7 @@ public:
 	void addOnChangeCallback(Callback callback);
 
 	Settings *getSettings();
+	void changed();
 
 protected:
 	std::string name;
@@ -65,7 +66,6 @@ protected:
 
 	OptType type;
 
-	void changed();
 	void suboptionChanged(Option &opt, bool suboption);
 
 	std::vector<Callback> onChangeCallbacks;
@@ -95,6 +95,8 @@ public:
 	bool isAdvancedMode();
 
 	const std::map<std::string, std::unique_ptr<Option>>& getOptionMap() const;
+
+	void changedAll();
 
 private:
 

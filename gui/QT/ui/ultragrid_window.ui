@@ -478,7 +478,7 @@
      <x>0</x>
      <y>0</y>
      <width>1018</width>
-     <height>24</height>
+     <height>27</height>
     </rect>
    </property>
    <property name="contextMenuPolicy">
@@ -489,6 +489,7 @@
      <string>&amp;UltraGrid</string>
     </property>
     <addaction name="actionSave"/>
+    <addaction name="actionLoad"/>
     <addaction name="actionSettings"/>
     <addaction name="separator"/>
     <addaction name="actionQuit"/>
@@ -582,6 +583,11 @@
   <action name="actionSave">
    <property name="text">
     <string>Save</string>
+   </property>
+  </action>
+  <action name="actionLoad">
+   <property name="text">
+    <string>Load</string>
    </property>
   </action>
  </widget>
