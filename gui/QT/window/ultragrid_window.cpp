@@ -318,6 +318,7 @@ void UltragridWindow::loadSettings(){
 	}
 
 	settings.changedAll();
+	setArgs();
 }
 
 void UltragridWindow::setStartBtnText(QProcess::ProcessState s){
