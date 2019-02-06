@@ -158,10 +158,19 @@ std::vector<SettingItem> getVideoDisplay(AvailableSettings *availSettings){
     defaultItem.opts.push_back({optStr, ""});
     res.push_back(std::move(defaultItem));
 
-    for(const auto &i : whiteList){
+    for(const auto &i : availSettings->getAvailableSettings(VIDEO_DISPLAY)){
         SettingItem item;
         item.name = i;
         item.opts.push_back({optStr, i});
+        bool whiteListed = false;
+        for(const auto &white : whiteList){
+            if(std::strcmp(white, i.c_str()) == 0){
+                whiteListed = true;
+            }
+        }
+        if(!whiteListed){
+            item.conditions.push_back({{{"advanced", "t"}, false}});
+        }
         res.push_back(std::move(item));
     }
 
