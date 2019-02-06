@@ -76,6 +76,7 @@ void AvailableSettings::queryAll(const std::string &executable){
 	
 	queryCapturers(lines);
 
+	//TODO
 	query(executable, AUDIO_COMPRESS);
 
 #ifdef DEBUG
@@ -96,6 +97,8 @@ void AvailableSettings::queryAll(const std::string &executable){
 void AvailableSettings::queryCapturers(const QStringList &lines){
 	const char * const capStr = "[capability][capture][v1]";
 	size_t capStrLen = strlen(capStr);
+
+	capturers.clear();
 
 	foreach ( const QString &line, lines ) {
 		if(line.startsWith(capStr)){
@@ -148,6 +151,8 @@ void AvailableSettings::queryCap(const QStringList &lines,
 		SettingType type,
 		const char *capStr)
 {
+	available[type].clear();
+
 	size_t capStrLen = strlen(capStr);
 	foreach ( const QString &line, lines ) {
 		if(line.startsWith(capStr)){
