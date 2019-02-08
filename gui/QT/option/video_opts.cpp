@@ -218,6 +218,17 @@ std::vector<SettingItem> getVideoCompress(AvailableSettings *availSettings){
         }
         item.opts.push_back({optStr, value});
 
+        bool available = value.empty() ? true : false;
+        for(const auto &i : availSettings->getAvailableSettings(VIDEO_COMPRESS)){
+            if(value == i){
+                available = true;
+                break;
+            }
+        }
+        if(!available){
+            item.conditions.push_back({{{"advanced", "t"}, false}});
+        }
+
         res.push_back(std::move(item));
     }
 
