@@ -190,6 +190,7 @@ static const VideoCompressItem videoCodecs[] = {
 	{"MJPEG", "MJPEG", true},
 	{"VP8", "VP8", true},
 	{"Jpeg", "jpeg", false},
+	{"Cineform", "cineform", false},
 };
 
 static bool isLibavCodec(const std::string &str){
