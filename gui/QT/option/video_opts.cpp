@@ -6,9 +6,6 @@
 
 std::vector<SettingItem> getVideoSrc(AvailableSettings *availSettings){
 	const char * const whiteList[] = {
-//		"testcard",
-//		"screen",
-		"decklink",
 		"aja",
 		"dvs"
 	};
@@ -48,81 +45,8 @@ std::vector<SettingItem> getVideoSrc(AvailableSettings *availSettings){
     return res;
 }
 
-static std::string getResolutionStr(int w, int h, char separator){
-	return std::to_string(w) + separator + std::to_string(h);
-}
-
-static void getTestcardModes(std::vector<SettingItem> &result){
-	static const struct{
-		int w;
-		int h;
-	} resolutions[] = {
-		{1280, 720},
-		{1920, 1080},
-		{3840, 2160},
-	};
-
-	static int const rates[] = {24, 30, 60};
-
-    const std::vector<std::vector<ConditionItem>> condition = {
-        {{{"video.source", "testcard"}, false}}
-    };
-
-	SettingItem item;
-	item.name = "Default";
-	item.opts.push_back({"video.source.testcard.width", ""});
-	item.opts.push_back({"video.source.testcard.height", ""});
-	item.opts.push_back({"video.source.testcard.fps", ""});
-	item.opts.push_back({"video.source.testcard.format", ""});
-    item.conditions = condition;
-    result.push_back(std::move(item));
-
-	for(const auto &res : resolutions){
-		for(const auto &rate : rates){
-			item.opts.clear();
-			item.name = getResolutionStr(res.w, res.h, 'x');
-			item.name += ", " + std::to_string(rate) + " fps";
-			item.opts.push_back({"video.source.testcard.width", std::to_string(res.w)});
-			item.opts.push_back({"video.source.testcard.height", std::to_string(res.h)});
-			item.opts.push_back({"video.source.testcard.fps", std::to_string(rate)});
-			item.opts.push_back({"video.source.testcard.format", "UYVY"});
-            item.conditions = condition;
-
-            result.push_back(std::move(item));
-		}
-	}
-}
-
-static void getScreenModes(std::vector<SettingItem> &result){
-	static int const rates[] = {24, 30, 60};
-
-    const std::vector<std::vector<ConditionItem>> condition = {
-        {{{"video.source", "screen"}, false}}
-    };
-
-	SettingItem item;
-	item.name = "Default";
-	item.opts.push_back({"video.source.screen.fps", ""});
-    item.conditions = condition;
-
-    result.push_back(std::move(item));
-
-	for(const auto &rate : rates){
-		item.opts.clear();
-		item.name = std::to_string(rate) + " fps";
-		item.opts.push_back({"video.source.screen.fps", std::to_string(rate)});
-        item.conditions = condition;
-
-        result.push_back(std::move(item));
-	}
-}
-
 std::vector<SettingItem> getVideoModes(AvailableSettings *availSettings){
     std::vector<SettingItem> res;
-
-    //getTestcardModes(res);
-    //getScreenModes(res);
-    //
 
     for(const auto &cap : availSettings->getCapturers()){
         for(const auto &mode : cap.modes){
