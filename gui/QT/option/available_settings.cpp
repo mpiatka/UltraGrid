@@ -37,27 +37,20 @@ static QStringList getProcessOutput(const std::string& executable, const std::st
 static std::vector<std::string> getAvailOpts(const std::string &opt, const std::string &executable){
 	std::vector<std::string> out;
 
-	QProcess process;
-
-	std::string command = executable;
-
+	std::string command;
 	command += " ";
 	command += opt;
 	command += " help";
 
-	process.start(command.c_str());
+	QStringList lines = getProcessOutput(executable, command);
 
-	process.waitForFinished();
-	QByteArray output = process.readAllStandardOutput();
-	QList<QByteArray> lines = output.split('\n');
-
-	foreach ( const QByteArray &line, lines ) {
+	foreach ( const QString &line, lines ) {
 		if(line.size() > 0 && QChar(line[0]).isSpace()) {
-			QString opt = QString(line).trimmed();
+			QString opt = line.trimmed();
 			if(opt != "none"
 					&& !opt.startsWith("--")
 					&& !opt.contains("unavailable"))
-				out.push_back(QString(line).trimmed().toStdString());
+				out.push_back(line.trimmed().toStdString());
 		}
 	}
 
