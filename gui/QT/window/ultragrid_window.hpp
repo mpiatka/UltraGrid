@@ -6,7 +6,6 @@
 #include <memory>
 
 #include "ui_ultragrid_window.h"
-#include "ultragrid_option.hpp"
 #include "log_window.hpp"
 #include "settings_window.hpp"
 #include "available_settings.hpp"

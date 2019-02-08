@@ -35,11 +35,9 @@ PRE_TARGETDEPS += astat_lib
 
 # Input
 HEADERS += window/ultragrid_window.hpp \
-	option/ultragrid_option.hpp \
 	option/available_settings.hpp \
 	option/settings.hpp \
 	option/settings_ui.hpp \
-	util/v4l2.hpp \
 	widget/previewWidget.hpp \
 	window/log_window.hpp \
 	../../tools/astat.h \
@@ -64,11 +62,9 @@ FORMS += ui/ultragrid_window.ui \
 	ui/settings.ui
 
 SOURCES += window/ultragrid_window.cpp \
-	option/ultragrid_option.cpp \
 	option/available_settings.cpp \
 	option/settings.cpp \
 	option/settings_ui.cpp \
-	util/v4l2.cpp \
 	widget/previewWidget.cpp \
 	window/log_window.cpp \
 	widget/vuMeterWidget.cpp \
