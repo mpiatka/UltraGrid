@@ -173,6 +173,8 @@ const static struct{
 	{"avfoundation.device", Option::StringOpt, ":device=", "", false, "video.source", "avfoundation"},
 	{"avfoundation.mode", Option::StringOpt, ":mode=", "", false, "video.source", "avfoundation"},
 	{"avfoundation.fps", Option::StringOpt, ":fps=", "", false, "video.source", "avfoundation"},
+	{"decklink.modeOpt", Option::StringOpt, ":", "", false, "video.source", "decklink"},
+	{"decklink.device", Option::StringOpt, ":device=", "", false, "video.source", "decklink"},
 	{"video.display", Option::StringOpt, " -d ", "", false, "", ""},
 	{"gl.novsync", Option::BoolOpt, ":novsync", "f", false, "video.display", "gl"},
 	{"video.compress", Option::StringOpt, " -c ", "", false, "", ""},
