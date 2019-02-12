@@ -30,6 +30,7 @@ void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 			new LineEditUi(ui->networkDestinationEdit, settings, "network.destination")
 			);
 	addControl(new ActionCheckableUi(ui->actionAdvanced, settings, "advanced"));
+	addControl(new ActionCheckableUi(ui->actionVuMeter, settings, "vuMeter"));
 	addControl(new ActionCheckableUi(ui->actionUse_hw_acceleration,
 				settings,
 				"decode.hwaccel"));
@@ -114,6 +115,11 @@ void SettingsUi::connectSignals(){
 //			this, &SettingsUi::refreshAll);
 }
 
+void vuMeterCallback(Ui::UltragridWindow *win, Option &opt, bool suboption){
+	win->vuMeter->setVisible(opt.isEnabled());
+}
+
+
 void SettingsUi::addCallbacks(){
 	using namespace std::placeholders;
 
@@ -125,6 +131,7 @@ void SettingsUi::addCallbacks(){
 		CALLBACK("video.compress", &SettingsUi::jpegLabelCallback),
 		{"audio.compress", std::bind(audioCompressionCallback, mainWin, _1, _2)},
 		{"advanced", std::bind(&SettingsUi::refreshAll, this)},
+		{"vuMeter", std::bind(vuMeterCallback, mainWin, _1, _2)},
 	};
 #undef CALLBACK
 
@@ -136,6 +143,7 @@ void SettingsUi::addCallbacks(){
 void SettingsUi::test(){
 	printf("%s\n", settings->getLaunchParams().c_str());
 }
+
 
 #if 0
 static void addWebcams(QComboBox *box, AvailableSettings *avail){

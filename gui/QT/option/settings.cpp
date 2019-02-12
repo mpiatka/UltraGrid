@@ -205,6 +205,7 @@ const static struct{
 	{"decode.hwaccel", Option::BoolOpt, " --param use-hw-accel", "f", false, "", ""},
 	{"advanced", Option::BoolOpt, "", "f", false, "", ""},
 	{"preview", Option::BoolOpt, "", "t", true, "", ""},
+	{"vuMeter", Option::BoolOpt, "", "t", true, "", ""},
 };
 
 const struct {
