@@ -41,7 +41,6 @@ private:
 
 	void fecCallback(Option &opt, bool suboption);
 
-	void connectSignals();
 	void addCallbacks();
 
 	void addControl(WidgetUi *widget);
