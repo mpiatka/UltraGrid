@@ -166,7 +166,9 @@ void UltragridWindow::startPreview(){
 	}
 	*/
 
+#ifdef DEBUG
 	log.write("Preview: " + command + "\n\n");
+#endif
 	previewProcess.start(command);
 }
 
@@ -186,7 +188,9 @@ void UltragridWindow::editArgs(const QString &text){
 
 void UltragridWindow::setArgs(){
 	QString args = QString::fromStdString(settings.getLaunchParams());
+#ifdef DEBUG
 	log.write("set args: " + args + "\n");
+#endif
 	ui.arguments->setText(args);
 }
 
