@@ -20,7 +20,9 @@ void SettingsUi::initMainWin(Ui::UltragridWindow *ui){
 	refreshAll();
  
 	addCallbacks();
+#ifdef DEBUG
 	connect(mainWin->actionTest, SIGNAL(triggered()), this, SLOT(test()));
+#endif
 
 	addControl(new CheckboxUi(ui->fECCheckBox, settings, "network.fec.enabled"));
 	addControl(new CheckboxUi(ui->previewCheckBox, settings, "preview"));

@@ -478,7 +478,7 @@
      <x>0</x>
      <y>0</y>
      <width>1018</width>
-     <height>27</height>
+     <height>22</height>
     </rect>
    </property>
    <property name="contextMenuPolicy">
@@ -508,7 +508,6 @@
      <string>&amp;Help</string>
     </property>
     <addaction name="actionAbout_UltraGrid"/>
-    <addaction name="actionTest"/>
    </widget>
    <addaction name="menu_UltraGrid"/>
    <addaction name="menu_Tools"/>
