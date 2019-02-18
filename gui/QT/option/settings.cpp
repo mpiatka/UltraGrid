@@ -106,10 +106,11 @@ static void fec_builder_callback(Option &opt, bool subopt){
 
 	Settings *settings = opt.getSettings();
 	Option &fecOpt = settings->getOption("network.fec");
+	bool enabled = settings->getOption("network.fec.enabled").isEnabled();
 
 	std::string type = settings->getOption("network.fec.type").getValue();
 
-	if(type.empty()){
+	if(type.empty() || !enabled){
 		fecOpt.setValue("");
 	} else if(type == "mult"){
 		fecOpt.setValue("mult:" + settings->getOption("network.fec.mult.factor").getValue());
@@ -134,12 +135,13 @@ static void fec_auto_callback(Option &opt, bool subopt){
 		return;
 
 	Option &fecOpt = settings->getOption("network.fec.type");
+	const std::string &video_compress = settings->getOption("video.compress").getValue();
 
-	if(opt.getValue() == ""){
+	if(video_compress == ""){
 		fecOpt.setValue("");
-	} else if(opt.getValue() == "jpeg"){
+	} else if(video_compress == "jpeg"){
 		fecOpt.setValue("ldgm");
-	} else if(opt.getValue() == "libavcodec"
+	} else if(video_compress == "libavcodec"
 			&& settings->getOption("video.compress.libavcodec.codec").getValue() == "MJPEG"){
 		fecOpt.setValue("ldgm");
 	} else {
