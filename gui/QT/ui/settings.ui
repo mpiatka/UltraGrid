@@ -17,7 +17,7 @@
    <item>
     <widget class="QTabWidget" name="tabWidget">
      <property name="currentIndex">
-      <number>1</number>
+      <number>0</number>
      </property>
      <widget class="QWidget" name="Network">
       <property name="sizePolicy">
@@ -415,6 +415,9 @@
            <verstretch>0</verstretch>
           </sizepolicy>
          </property>
+         <property name="currentRow">
+          <number>0</number>
+         </property>
          <item>
           <property name="text">
            <string>Gl</string>
@@ -434,6 +437,9 @@
            <horstretch>3</horstretch>
            <verstretch>0</verstretch>
           </sizepolicy>
+         </property>
+         <property name="currentIndex">
+          <number>0</number>
          </property>
          <widget class="QWidget" name="glPage">
           <layout class="QFormLayout" name="formLayout_2">
@@ -466,7 +472,7 @@
             </widget>
            </item>
            <item row="4" column="0">
-            <widget class="QCheckBox" name="checkBox_2">
+            <widget class="QCheckBox" name="glNoVsync">
              <property name="text">
               <string>Disable vsync</string>
              </property>
@@ -475,19 +481,22 @@
           </layout>
          </widget>
          <widget class="QWidget" name="sdl_page">
-          <widget class="QCheckBox" name="checkBox">
-           <property name="geometry">
-            <rect>
-             <x>150</x>
-             <y>120</y>
-             <width>85</width>
-             <height>23</height>
-            </rect>
-           </property>
-           <property name="text">
-            <string>CheckBox</string>
-           </property>
-          </widget>
+          <layout class="QFormLayout" name="formLayout_3">
+           <item row="0" column="0">
+            <widget class="QCheckBox" name="sdlDeinterlace">
+             <property name="text">
+              <string>Deinterlace</string>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="0">
+            <widget class="QCheckBox" name="sdlFullscreen">
+             <property name="text">
+              <string>Fullscreen</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
          </widget>
         </widget>
        </item>
