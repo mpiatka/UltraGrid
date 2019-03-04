@@ -13,10 +13,6 @@ public:
 
 	void init(SettingsUi *settingsUi, Settings *s);
 
-signals:
-	void changed();
-
-
 private:
 	Ui::Settings ui;
 	Settings *settings;
