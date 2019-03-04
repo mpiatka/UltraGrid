@@ -122,7 +122,9 @@ static void fec_builder_callback(Option &opt, bool subopt){
 		fecOpt.setValue("ldgm:"
 				+ settings->getOption("network.fec.ldgm.k").getValue()
 				+ ":" + settings->getOption("network.fec.ldgm.m").getValue()
-				+ ":" + settings->getOption("network.fec.ldgm.c").getValue());
+				+ ":" + settings->getOption("network.fec.ldgm.c").getValue()
+				+ settings->getOption("network.fec.ldgm.device").getParam()
+				+ settings->getOption("network.fec.ldgm.device").getValue());
 	}
 
 
@@ -201,6 +203,7 @@ const static struct{
 	{"ldgm.k", Option::SilentOpt, ":", "256", false, "network.fec", ""},
 	{"ldgm.m", Option::SilentOpt, ":", "192", false, "network.fec", ""},
 	{"ldgm.c", Option::SilentOpt, ":", "5", false, "network.fec", ""},
+	{"ldgm.device", Option::SilentOpt, " --param ldgm-device=", "CPU", false, "network.fec", ""},
 	{"rs.k", Option::SilentOpt, ":", "200", false, "network.fec", ""},
 	{"rs.n", Option::SilentOpt, "", "220", false, "network.fec", ""},
 	{"network.fec.auto", Option::BoolOpt, "", "t", true, "", ""},
