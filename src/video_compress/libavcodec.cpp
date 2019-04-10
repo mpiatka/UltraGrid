@@ -982,10 +982,21 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
                         case RGBA:
                                 s->decoder = (decoder_t) vc_copylineRGBAtoUYVY;
                                 break;
+                        case R12L:
+                                if(s->selected_pixfmt == AV_PIX_FMT_GBRP12LE){
+                                        s->decoded_codec = R12L;
+                                        s->decoder = (decoder_t) memcpy;
+                                }
+                                break;
                         default:
-                                log_msg(LOG_LEVEL_ERROR, "[Libavcodec] Unable to find "
-                                                "appropriate pixel format.\n");
-                                return false;
+                                s->decoder = nullptr;
+                                break;
+                }
+
+                if(s->decoder == nullptr){
+                        log_msg(LOG_LEVEL_ERROR, "[Libavcodec] Unable to find "
+                                        "appropriate pixel format.\n");
+                        return false;
                 }
         }
 
@@ -1313,6 +1324,109 @@ static void v210_to_yuv444p10le(AVFrame *out_frame, unsigned char *in_data, int 
         }
 }
 
+#ifdef WORDS_BIGENDIAN
+#define BYTE_SWAP(x) (3 - x)
+#else
+#define BYTE_SWAP(x) x
+#endif
+
+static void r12l_to_gbrp12le(AVFrame *out_frame, unsigned char *in_data, int width, int height)
+{
+        for(int y = 0; y < height; y += 1) {
+                uint8_t *src = (uint8_t *) (in_data + y * vc_get_linesize(width, R12L));
+                uint8_t *dst_g = (uint8_t *) (out_frame->data[0] + out_frame->linesize[0] * y);
+                uint8_t *dst_b = (uint8_t *) (out_frame->data[1] + out_frame->linesize[1] * y);
+                uint8_t *dst_r = (uint8_t *) (out_frame->data[2] + out_frame->linesize[2] * y);
+
+                for(int x = 0; x < width / 8; ++x) {
+                        //0
+                        //R
+                        *dst_r++ = src[BYTE_SWAP(0)] << 4;
+                        *dst_r++ = (src[BYTE_SWAP(1)] << 4) | (src[BYTE_SWAP(0)] >> 4);
+                        //G
+                        *dst_g++ = src[BYTE_SWAP(1)] & 0xF0;
+                        *dst_g++ = src[BYTE_SWAP(2)];
+                        //B
+                        *dst_b++ = src[BYTE_SWAP(3)] << 4;
+                        *dst_b++ = (src[4 + BYTE_SWAP(0)] << 4) | (src[BYTE_SWAP(3)] >> 4);
+
+                        //1
+                        *dst_r++ = src[4 + BYTE_SWAP(0)] & 0xF0;
+                        *dst_r++ = src[4 + BYTE_SWAP(1)];
+
+                        *dst_g++ = src[4 + BYTE_SWAP(2)] << 4;
+                        *dst_g++ = (src[4 + BYTE_SWAP(3)] << 4) | (src[4 + BYTE_SWAP(2)] >> 4);
+
+                        *dst_b++ = src[4 + BYTE_SWAP(3)] & 0xF0;
+                        *dst_b++ = src[8 + BYTE_SWAP(0)];
+
+                        //2
+                        *dst_r++ = src[8 + BYTE_SWAP(1)] << 4;
+                        *dst_r++ = (src[8 + BYTE_SWAP(2)] << 4) | (src[8 + BYTE_SWAP(1)] >> 4);
+
+                        *dst_g++ = src[8 + BYTE_SWAP(2)] & 0xF0;
+                        *dst_g++ = src[8 + BYTE_SWAP(3)];
+
+                        *dst_b++ = src[12 + BYTE_SWAP(0)] << 4;
+                        *dst_b++ = (src[12 + BYTE_SWAP(1)] << 4) | (src[12 + BYTE_SWAP(0)] >> 4);
+
+                        //3
+                        *dst_r++ = src[12 + BYTE_SWAP(1)] & 0xF0;
+                        *dst_r++ = src[12 + BYTE_SWAP(2)];
+
+                        *dst_g++ = src[12 + BYTE_SWAP(3)] << 4;
+                        *dst_g++ = (src[16 + BYTE_SWAP(0)] << 4) | (src[12 + BYTE_SWAP(3)] >> 4);
+
+                        *dst_b++ = src[16 + BYTE_SWAP(0)] & 0xF0;
+                        *dst_b++ = src[16 + BYTE_SWAP(1)];
+
+                        //4
+                        *dst_r++ = src[16 + BYTE_SWAP(2)] << 4;
+                        *dst_r++ = (src[16 + BYTE_SWAP(3)] << 4) | (src[16 + BYTE_SWAP(2)] >> 4);
+
+                        *dst_g++ = src[16 + BYTE_SWAP(3)] & 0xF0;
+                        *dst_g++ = src[20 + BYTE_SWAP(0)];
+
+                        *dst_b++ = src[20 + BYTE_SWAP(1)] << 4;
+                        *dst_b++ = (src[20 + BYTE_SWAP(2)] << 4) | (src[20 + BYTE_SWAP(1)] >> 4);
+
+                        //5
+                        *dst_r++ = src[20 + BYTE_SWAP(2)] & 0xF0;
+                        *dst_r++ = src[20 + BYTE_SWAP(3)];
+
+                        *dst_g++ = src[24 + BYTE_SWAP(0)] << 4;
+                        *dst_g++ = (src[24 + BYTE_SWAP(1)] << 4) | (src[24 + BYTE_SWAP(0)] >> 4);
+
+                        *dst_b++ = src[24 + BYTE_SWAP(1)] & 0xF0;
+                        *dst_b++ = src[24 + BYTE_SWAP(2)];
+
+                        //6
+                        *dst_r++ = src[24 + BYTE_SWAP(3)] << 4;
+                        *dst_r++ = (src[28 + BYTE_SWAP(0)] << 4) | (src[24 + BYTE_SWAP(3)] >> 4);
+
+                        *dst_g++ = src[28 + BYTE_SWAP(0)] & 0xF0;
+                        *dst_g++ = src[28 + BYTE_SWAP(1)];
+
+                        *dst_b++ = src[28 + BYTE_SWAP(2)] << 4;
+                        *dst_b++ = (src[28 + BYTE_SWAP(3)] << 4) | (src[28 + BYTE_SWAP(2)] >> 4);
+
+                        //7
+                        *dst_r++ = src[28 + BYTE_SWAP(3)] & 0xF0;
+                        *dst_r++ = src[32 + BYTE_SWAP(0)];
+
+                        *dst_g++ = src[32 + BYTE_SWAP(1)] << 4;
+                        *dst_g++ = (src[32 + BYTE_SWAP(2)] << 4) | (src[32 + BYTE_SWAP(1)] >> 4);
+
+                        *dst_b++ = src[32 + BYTE_SWAP(2)] & 0xF0;
+                        *dst_b++ = src[32 + BYTE_SWAP(3)];
+
+                        src += 36;
+                }
+        }
+
+}
+
+
 static pixfmt_callback_t select_pixfmt_callback(AVPixelFormat fmt, codec_t src) {
         // no conversion needed
         if (ug_to_av_pixfmt_map.find(src) != ug_to_av_pixfmt_map.end()
@@ -1330,6 +1444,10 @@ static pixfmt_callback_t select_pixfmt_callback(AVPixelFormat fmt, codec_t src) 
                 } else {
                         abort();
                 }
+        }
+
+        if(src == R12L && fmt == AV_PIX_FMT_GBRP12LE){
+                return r12l_to_gbrp12le;
         }
 
         if (is422_8(fmt)) {

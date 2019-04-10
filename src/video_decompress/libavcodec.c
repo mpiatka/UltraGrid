@@ -438,6 +438,26 @@ static void rgb24_to_rgb(char *dst_buffer, AVFrame *frame,
         }
 }
 
+static void gbrp12le_to_rgb(char *dst_buffer, AVFrame *frame,
+                int width, int height, int pitch)
+{
+        for (int y = 0; y < height; ++y) {
+                uint8_t *src_g = frame->data[0] + y * frame->linesize[0];
+                uint8_t *src_b = frame->data[1] + y * frame->linesize[1];
+                uint8_t *src_r = frame->data[2] + y * frame->linesize[2];
+                uint8_t *dst = dst_buffer + y * pitch;
+                for (int x = 0; x < width; ++x) {
+                        *dst++ = src_r[1];
+                        *dst++ = src_g[1];
+                        *dst++ = src_b[1];
+                        src_r += 2;
+                        src_g += 2;
+                        src_b += 2;
+                }
+                          
+        }
+}
+
 static void yuv420p_to_yuv422(char *dst_buffer, AVFrame *in_frame,
                 int width, int height, int pitch)
 {
@@ -1152,6 +1172,8 @@ static const struct {
         {AV_PIX_FMT_RGB24, v210, not_implemented_conv},
         {AV_PIX_FMT_RGB24, UYVY, rgb24_to_uyvy},
         {AV_PIX_FMT_RGB24, RGB, rgb24_to_rgb},
+        // 12-bit GBR
+        {AV_PIX_FMT_GBRP12LE, RGB, gbrp12le_to_rgb},
 #ifdef HWACC_VDPAU
         // HW acceleration
         {AV_PIX_FMT_VDPAU, HW_VDPAU, av_vdpau_to_ug_vdpau},
@@ -1442,6 +1464,7 @@ static const struct decode_from_to *libavcodec_decompress_get_decoders() {
         const struct decode_from_to dec_static[] = {
                 { H264, UYVY, 500 },
                 { H265, UYVY, 500 },
+                { H265, RGB, 500 },
                 { JPEG, UYVY, 600 },
                 { MJPG, UYVY, 500 },
                 { J2K, RGB, 500 },
