@@ -458,6 +458,115 @@ static void gbrp12le_to_rgb(char *dst_buffer, AVFrame *frame,
         }
 }
 
+static void gbrp12le_to_r12l(char *dst_buffer, AVFrame *frame,
+                int width, int height, int pitch)
+{
+        for (int y = 0; y < height; ++y) {
+                uint8_t *src_g = frame->data[0] + y * frame->linesize[0];
+                uint8_t *src_b = frame->data[1] + y * frame->linesize[1];
+                uint8_t *src_r = frame->data[2] + y * frame->linesize[2];
+                uint8_t *dst = dst_buffer + y * pitch;
+                for(int i = 0; i < width / 8; i++){
+                        //0
+                        dst[BYTE_SWAP(0)] = src_r[0];
+                        dst[BYTE_SWAP(1)] = src_r[1] & 0xf;
+
+                        dst[BYTE_SWAP(1)] |= src_g[0] << 4;
+                        dst[BYTE_SWAP(2)] = src_g[1] << 4;
+                        dst[BYTE_SWAP(2)] |= src_g[0] >> 4;
+
+                        dst[BYTE_SWAP(3)] = src_b[0];
+                        dst[4 + BYTE_SWAP(0)] = src_b[1] & 0xf;
+
+                        //1
+                        dst[4 + BYTE_SWAP(0)] |= src_r[2] << 4;
+                        dst[4 + BYTE_SWAP(1)] = src_r[3] << 4;
+                        dst[4 + BYTE_SWAP(1)] |= src_r[2] >> 4;
+
+                        dst[4 + BYTE_SWAP(2)] = src_g[2];
+                        dst[4 + BYTE_SWAP(3)] = src_g[3] & 0xf;
+
+                        dst[4 + BYTE_SWAP(3)] |= src_b[2] << 4;
+                        dst[8 + BYTE_SWAP(0)] = src_b[3] << 4;
+                        dst[8 + BYTE_SWAP(0)] |= src_b[2] >> 4;
+
+                        //2
+                        dst[8 + BYTE_SWAP(1)] = src_r[4];
+                        dst[8 + BYTE_SWAP(2)] = src_r[5] & 0xf;
+
+                        dst[8 + BYTE_SWAP(2)] |= src_g[4] << 4;
+                        dst[8 + BYTE_SWAP(3)] = src_g[5] << 4;
+                        dst[8 + BYTE_SWAP(3)] |= src_g[4] >> 4;
+
+                        dst[12 + BYTE_SWAP(0)] = src_b[4];
+                        dst[12 + BYTE_SWAP(1)] = src_b[5] & 0xf;
+
+                        //3
+                        dst[12 + BYTE_SWAP(1)] |= src_r[6] << 4;
+                        dst[12 + BYTE_SWAP(2)] = src_r[7] << 4;
+                        dst[12 + BYTE_SWAP(2)] |= src_r[6] >> 4;
+
+                        dst[12 + BYTE_SWAP(3)] = src_g[6];
+                        dst[16 + BYTE_SWAP(0)] = src_g[7] & 0xf;
+
+                        dst[16 + BYTE_SWAP(0)] |= src_b[6] << 4;
+                        dst[16 + BYTE_SWAP(1)] = src_b[7] << 4;
+                        dst[16 + BYTE_SWAP(1)] |= src_b[6] >> 4;
+
+                        //4
+                        dst[16 + BYTE_SWAP(2)] = src_r[8];
+                        dst[16 + BYTE_SWAP(3)] = src_r[9] & 0xf;
+
+                        dst[16 + BYTE_SWAP(3)] |= src_g[8] << 4;
+                        dst[20 + BYTE_SWAP(0)] = src_g[9] << 4;
+                        dst[20 + BYTE_SWAP(0)] |= src_g[8] >> 4;
+
+                        dst[20 + BYTE_SWAP(1)] = src_b[8];
+                        dst[20 + BYTE_SWAP(2)] = src_b[9] & 0xf;
+
+                        //5
+                        dst[20 + BYTE_SWAP(2)] |= src_r[10] << 4;
+                        dst[20 + BYTE_SWAP(3)] = src_r[11] << 4;
+                        dst[20 + BYTE_SWAP(3)] |= src_r[10] >> 4;
+
+                        dst[24 + BYTE_SWAP(0)] = src_g[10];
+                        dst[24 + BYTE_SWAP(1)] = src_g[11] & 0xf;
+
+                        dst[24 + BYTE_SWAP(1)] |= src_b[10] << 4;
+                        dst[24 + BYTE_SWAP(2)] = src_b[11] << 4;
+                        dst[24 + BYTE_SWAP(2)] |= src_b[10] >> 4;
+
+                        //6
+                        dst[24 + BYTE_SWAP(3)] = src_r[12];
+                        dst[28 + BYTE_SWAP(0)] = src_r[13] & 0xf;
+
+                        dst[28 + BYTE_SWAP(0)] |= src_g[12] << 4;
+                        dst[28 + BYTE_SWAP(1)] = src_g[13] << 4;
+                        dst[28 + BYTE_SWAP(1)] |= src_g[12] >> 4;
+
+                        dst[28 + BYTE_SWAP(2)] = src_b[12];
+                        dst[28 + BYTE_SWAP(3)] = src_b[13] & 0xf;
+
+                        //7
+                        dst[28 + BYTE_SWAP(3)] |= src[0] & 0xF0;
+                        dst[32 + BYTE_SWAP(0)] = src[1];
+                        src += 2;
+
+                        dst[32 + BYTE_SWAP(1)] = src[0] >> 4;
+                        dst[32 + BYTE_SWAP(1)] |= src[1] << 4;
+                        dst[32 + BYTE_SWAP(2)] = src[1] >> 4;
+                        src += 2;
+
+                        dst[32 + BYTE_SWAP(2)] |= src[0] & 0xF0;
+                        dst[32 + BYTE_SWAP(3)] = src[1];
+                        src += 2;
+
+                        dst += 36;
+                        dst_len -= 36;
+                }
+        }
+}
+
 static void yuv420p_to_yuv422(char *dst_buffer, AVFrame *in_frame,
                 int width, int height, int pitch)
 {
@@ -1174,6 +1283,7 @@ static const struct {
         {AV_PIX_FMT_RGB24, RGB, rgb24_to_rgb},
         // 12-bit GBR
         {AV_PIX_FMT_GBRP12LE, RGB, gbrp12le_to_rgb},
+        {AV_PIX_FMT_GBRP12LE, R12L, gbrp12le_to_r12l},
 #ifdef HWACC_VDPAU
         // HW acceleration
         {AV_PIX_FMT_VDPAU, HW_VDPAU, av_vdpau_to_ug_vdpau},
@@ -1487,6 +1597,8 @@ static const struct decode_from_to *libavcodec_decompress_get_decoders() {
                                 (struct decode_from_to) {H264, v210, 400};
                         ret[sizeof dec_static / sizeof dec_static[0] + 1] =
                                 (struct decode_from_to) {H265, v210, 400};
+                        ret[sizeof dec_static / sizeof dec_static[0] + 2] =
+                                (struct decode_from_to) {H265, R12L, 400};
                 }
                 if (get_commandline_param("use-hw-accel")) {
                         ret[sizeof dec_static / sizeof dec_static[0]] =
