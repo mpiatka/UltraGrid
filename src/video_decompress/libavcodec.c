@@ -447,9 +447,9 @@ static void gbrp12le_to_rgb(char *dst_buffer, AVFrame *frame,
                 uint8_t *src_r = frame->data[2] + y * frame->linesize[2];
                 uint8_t *dst = dst_buffer + y * pitch;
                 for (int x = 0; x < width; ++x) {
-                        *dst++ = src_r[1];
-                        *dst++ = src_g[1];
-                        *dst++ = src_b[1];
+                        *dst++ = src_r[1] << 4 | src_r[0] >> 4;
+                        *dst++ = src_g[1] << 4 | src_g[0] >> 4;
+                        *dst++ = src_b[1] << 4 | src_b[0] >> 4;
                         src_r += 2;
                         src_g += 2;
                         src_b += 2;
