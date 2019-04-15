@@ -386,7 +386,8 @@ static int libavcodec_decompress_reconfigure(void *state, struct video_desc desc
         assert(out_codec == UYVY ||
                         out_codec == RGB ||
                         out_codec == v210 ||
-                        out_codec == HW_VDPAU);
+                        out_codec == HW_VDPAU ||
+                        out_codec == R12L);
 
         s->pitch = pitch;
         s->rshift = rshift;
@@ -1386,7 +1387,8 @@ static int change_pixfmt(AVFrame *frame, unsigned char *dst, int av_codec,
         assert(out_codec == UYVY ||
                         out_codec == RGB ||
                         out_codec == v210 ||
-                        out_codec == HW_VDPAU);
+                        out_codec == HW_VDPAU ||
+                        out_codec == R12L);
 
         void (*convert)(char *dst_buffer, AVFrame *in_frame, int width, int height, int pitch) = NULL;
         for (unsigned int i = 0; i < sizeof convert_funcs / sizeof convert_funcs[0]; ++i) {
