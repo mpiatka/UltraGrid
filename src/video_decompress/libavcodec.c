@@ -458,6 +458,12 @@ static void gbrp12le_to_rgb(char *dst_buffer, AVFrame *frame,
         }
 }
 
+#ifdef WORDS_BIGENDIAN
+#define BYTE_SWAP(x) (3 - x)
+#else
+#define BYTE_SWAP(x) x
+#endif
+
 static void gbrp12le_to_r12l(char *dst_buffer, AVFrame *frame,
                 int width, int height, int pitch)
 {
@@ -548,21 +554,21 @@ static void gbrp12le_to_r12l(char *dst_buffer, AVFrame *frame,
                         dst[28 + BYTE_SWAP(3)] = src_b[13] & 0xf;
 
                         //7
-                        dst[28 + BYTE_SWAP(3)] |= src[0] & 0xF0;
-                        dst[32 + BYTE_SWAP(0)] = src[1];
-                        src += 2;
+                        dst[28 + BYTE_SWAP(3)] |= src_r[14] << 4;
+                        dst[32 + BYTE_SWAP(0)] = src_r[15] << 4;
+                        dst[32 + BYTE_SWAP(0)] |= src_r[14] >> 4;
 
-                        dst[32 + BYTE_SWAP(1)] = src[0] >> 4;
-                        dst[32 + BYTE_SWAP(1)] |= src[1] << 4;
-                        dst[32 + BYTE_SWAP(2)] = src[1] >> 4;
-                        src += 2;
+                        dst[32 + BYTE_SWAP(1)] = src_g[14];
+                        dst[32 + BYTE_SWAP(2)] = src_g[15] & 0xf;
 
-                        dst[32 + BYTE_SWAP(2)] |= src[0] & 0xF0;
-                        dst[32 + BYTE_SWAP(3)] = src[1];
-                        src += 2;
+                        dst[32 + BYTE_SWAP(2)] |= src_b[14] << 4;
+                        dst[32 + BYTE_SWAP(3)] = src_b[15] << 4;
+                        dst[32 + BYTE_SWAP(3)] |= src_b[14] >> 4;
 
                         dst += 36;
-                        dst_len -= 36;
+                        src_r += 16;
+                        src_g += 16;
+                        src_b += 16;
                 }
         }
 }
