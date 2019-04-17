@@ -830,6 +830,12 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
                 requested_pix_fmts[total_pix_fmts++] = ug_to_av_pixfmt_map.find(desc.color_spec)->second;
         }
 
+        if (codec_is_a_rgb(desc.color_spec)){
+                if(get_bits_per_component(desc.color_spec) == 12){
+                        requested_pix_fmts[total_pix_fmts++] = AV_PIX_FMT_GBRP12LE;
+                }
+        }
+
         if (s->requested_subsampling == 0) {
                 // for interlaced formats, it is better to use either 422 or 444
                 if (desc.interlacing == INTERLACED_MERGED) {
