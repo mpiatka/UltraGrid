@@ -446,7 +446,7 @@ static void gbrp12le_to_rgb(char *dst_buffer, AVFrame *frame,
                 uint8_t *src_g = frame->data[0] + y * frame->linesize[0];
                 uint8_t *src_b = frame->data[1] + y * frame->linesize[1];
                 uint8_t *src_r = frame->data[2] + y * frame->linesize[2];
-                uint8_t *dst = dst_buffer + y * pitch;
+                uint8_t *dst = (uint8_t *) dst_buffer + y * pitch;
                 for (int x = 0; x < width; ++x) {
                         *dst++ = src_r[1] << 4 | src_r[0] >> 4;
                         *dst++ = src_g[1] << 4 | src_g[0] >> 4;
@@ -472,7 +472,7 @@ static void gbrp12le_to_r12l(char *dst_buffer, AVFrame *frame,
                 uint8_t *src_g = frame->data[0] + y * frame->linesize[0];
                 uint8_t *src_b = frame->data[1] + y * frame->linesize[1];
                 uint8_t *src_r = frame->data[2] + y * frame->linesize[2];
-                uint8_t *dst = dst_buffer + y * pitch;
+                uint8_t *dst = (uint8_t *) dst_buffer + y * pitch;
                 for(int i = 0; i < width / 8; i++){
                         //0
                         dst[BYTE_SWAP(0)] = src_r[0];
