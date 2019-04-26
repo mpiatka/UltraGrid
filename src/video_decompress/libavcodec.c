@@ -387,6 +387,7 @@ static int libavcodec_decompress_reconfigure(void *state, struct video_desc desc
                         out_codec == RGB ||
                         out_codec == v210 ||
                         out_codec == HW_VDPAU ||
+                        out_codec == R10k ||
                         out_codec == R12L);
 
         s->pitch = pitch;
@@ -451,6 +452,26 @@ static void gbrp12le_to_rgb(char *dst_buffer, AVFrame *frame,
                         *dst++ = src_r[1] << 4 | src_r[0] >> 4;
                         *dst++ = src_g[1] << 4 | src_g[0] >> 4;
                         *dst++ = src_b[1] << 4 | src_b[0] >> 4;
+                        src_r += 2;
+                        src_g += 2;
+                        src_b += 2;
+                }
+                          
+        }
+}
+
+static void gbrp10le_to_rgb(char *dst_buffer, AVFrame *frame,
+                int width, int height, int pitch)
+{
+        for (int y = 0; y < height; ++y) {
+                uint8_t *src_g = frame->data[0] + y * frame->linesize[0];
+                uint8_t *src_b = frame->data[1] + y * frame->linesize[1];
+                uint8_t *src_r = frame->data[2] + y * frame->linesize[2];
+                uint8_t *dst = (uint8_t *) dst_buffer + y * pitch;
+                for (int x = 0; x < width; ++x) {
+                        *dst++ = src_r[1] << 6 | src_r[0] >> 2;
+                        *dst++ = src_g[1] << 6 | src_g[0] >> 2;
+                        *dst++ = src_b[1] << 6 | src_b[0] >> 2;
                         src_r += 2;
                         src_g += 2;
                         src_b += 2;
@@ -570,6 +591,28 @@ static void gbrp12le_to_r12l(char *dst_buffer, AVFrame *frame,
                         src_r += 16;
                         src_g += 16;
                         src_b += 16;
+                }
+        }
+}
+
+static void gbrp10le_to_r10k(char *dst_buffer, AVFrame *frame,
+                int width, int height, int pitch)
+{
+        for (int y = 0; y < height; ++y) {
+                uint8_t *src_g = frame->data[0] + y * frame->linesize[0];
+                uint8_t *src_b = frame->data[1] + y * frame->linesize[1];
+                uint8_t *src_r = frame->data[2] + y * frame->linesize[2];
+                uint8_t *dst = (uint8_t *) dst_buffer + y * pitch;
+                for(int i = 0; i < width; i++){
+                        dst[0] = src_r[1] << 6 | src_r[0] >> 2;
+                        dst[1] = src_r[0] << 6 | src_g[1] << 4 | src_g[0] >> 4;
+                        dst[2] = src_g[0] << 4 | src_b[1] << 2 | src_b[0] >> 6;
+                        dst[3] = src_b[0] << 2 & 0xfc;
+
+                        dst += 4;
+                        src_r += 2;
+                        src_g += 2;
+                        src_b += 2;
                 }
         }
 }
@@ -1291,6 +1334,9 @@ static const struct {
         // 12-bit GBR
         {AV_PIX_FMT_GBRP12LE, RGB, gbrp12le_to_rgb},
         {AV_PIX_FMT_GBRP12LE, R12L, gbrp12le_to_r12l},
+        // 10-bit GBR
+        {AV_PIX_FMT_GBRP10LE, RGB, gbrp10le_to_rgb},
+        {AV_PIX_FMT_GBRP10LE, R10k, gbrp10le_to_r10k},
 #ifdef HWACC_VDPAU
         // HW acceleration
         {AV_PIX_FMT_VDPAU, HW_VDPAU, av_vdpau_to_ug_vdpau},
@@ -1388,6 +1434,7 @@ static int change_pixfmt(AVFrame *frame, unsigned char *dst, int av_codec,
                         out_codec == RGB ||
                         out_codec == v210 ||
                         out_codec == HW_VDPAU ||
+                        out_codec == R10k ||
                         out_codec == R12L);
 
         void (*convert)(char *dst_buffer, AVFrame *in_frame, int width, int height, int pitch) = NULL;
