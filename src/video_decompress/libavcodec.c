@@ -1654,6 +1654,8 @@ static const struct decode_from_to *libavcodec_decompress_get_decoders() {
                                 (struct decode_from_to) {H265, v210, 400};
                         ret[sizeof dec_static / sizeof dec_static[0] + 2] =
                                 (struct decode_from_to) {H265, R12L, 400};
+                        ret[sizeof dec_static / sizeof dec_static[0] + 2] =
+                                (struct decode_from_to) {H265, R10k, 400};
                 }
                 if (get_commandline_param("use-hw-accel")) {
                         ret[sizeof dec_static / sizeof dec_static[0]] =
