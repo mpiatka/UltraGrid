@@ -132,6 +132,7 @@ static void v210_to_yuv420p10le(AVFrame *out_frame, unsigned char *in_data, int 
 static void v210_to_yuv422p10le(AVFrame *out_frame, unsigned char *in_data, int width, int height);
 static void v210_to_yuv444p10le(AVFrame *out_frame, unsigned char *in_data, int width, int height);
 static void r12l_to_gbrp12le(AVFrame *out_frame, unsigned char *in_data, int width, int height);
+static void r10k_to_gbrp10le(AVFrame *out_frame, unsigned char *in_data, int width, int height);
 
 static unordered_map<codec_t, codec_params_t, hash<int>> codec_params = {
         { H264, codec_params_t{
@@ -774,6 +775,7 @@ static const struct {
         { UYVY, AV_PIX_FMT_YUV444P, to_yuv444p },
         { UYVY, AV_PIX_FMT_YUVJ444P, to_yuv444p },
         { R12L, AV_PIX_FMT_GBRP12LE, r12l_to_gbrp12le },
+        { R10k, AV_PIX_FMT_GBRP10LE, r10k_to_gbrp10le },
 };
 
 /**
@@ -1492,6 +1494,28 @@ static void r12l_to_gbrp12le(AVFrame *out_frame, unsigned char *in_data, int wid
                 }
         }
 
+}
+
+static void r10k_to_gbrp10le(AVFrame *out_frame, unsigned char *in_data, int width, int height){
+        for(int y = 0; y < height; y += 1) {
+                uint8_t *src = (uint8_t *) (in_data + y * vc_get_linesize(width, R10k));
+                uint8_t *dst_g = (uint8_t *) (out_frame->data[0] + out_frame->linesize[0] * y);
+                uint8_t *dst_b = (uint8_t *) (out_frame->data[1] + out_frame->linesize[1] * y);
+                uint8_t *dst_r = (uint8_t *) (out_frame->data[2] + out_frame->linesize[2] * y);
+
+                for(int x = 0; x < width; ++x, src += 4) {
+#if 1
+                        *dst_r++ = src[0] << 2 | src[1] >> 6;
+                        *dst_r++ = src[0] >> 6;
+
+                        *dst_g++ = src[1] << 4 | src[2] >> 4;
+                        *dst_g++ = src[1] >> 4 & 0x03;
+
+                        *dst_b++ = src[2] << 6 | src[3] >> 2;
+                        *dst_b++ = src[2] >> 2 & 0x03;
+#endif
+                }
+        }
 }
 
 
