@@ -45,6 +45,7 @@
 #endif
 
 #include <map>
+#include <vector>
 #include <string>
 #include <utility>
 
@@ -54,9 +55,9 @@ std::string bmd_hresult_to_string(HRESULT res);
 
 // Order of codecs is important because it is used as a preference list (upper
 // codecs are favored) returned by DISPLAY_PROPERTY_CODECS property (display)
-static std::map<codec_t, BMDPixelFormat> uv_to_bmd_codec_map = {
+static std::vector<std::pair<codec_t, BMDPixelFormat>> uv_to_bmd_codec_map = {
                   { R12L, bmdFormat12BitRGBLE },
-                  { R10k, bmdFormat10BitRGB },
+                  { R10k, bmdFormat10BitRGBX },
                   { v210, bmdFormat10BitYUV },
                   { RGBA, bmdFormat8BitBGRA },
                   { UYVY, bmdFormat8BitYUV },
@@ -86,6 +87,8 @@ IDeckLinkIterator *create_decklink_iterator(bool verbose = true, bool coinit = t
 void decklink_uninitialize();
 bool blackmagic_api_version_check();
 void print_decklink_version(void);
+
+bool decklink_set_duplex(IDeckLink *decklink, BMDDuplexMode duplex);
 
 #endif // defined BLACKMAGIC_COMMON_H
 

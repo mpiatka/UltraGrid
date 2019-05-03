@@ -42,6 +42,7 @@
 
 #ifdef HAVE_COREAUDIO
 
+#include <Availability.h>
 #include <AudioUnit/AudioUnit.h>
 #include <CoreAudio/AudioHardware.h>
 #include <pthread.h>
@@ -61,9 +62,10 @@
 #include "utils/ring_buffer.h"
 
 #define DISABLE_SPPEX_RESAMPLER 1
+#define MODULE_NAME "[CoreAudio] "
 
 struct state_ca_capture {
-#if OS_VERSION_MAJOR <= 9
+#ifndef __MAC_10_9
         ComponentInstance 
 #else
         AudioComponentInstance
@@ -229,6 +231,13 @@ error:
         fprintf(stderr, "[CoreAudio] error obtaining device list.\n");
 }
 
+#define CHECK_OK(cmd, msg, action_failed) do { int ret = cmd; if (!ret) {\
+        log_msg(LOG_LEVEL_WARNING, MODULE_NAME "%s\n", (msg));\
+        action_failed;\
+}\
+} while(0)
+#define NOOP ((void)0)
+
 static void * audio_cap_ca_init(const char *cfg)
 {
         if(cfg && strcmp(cfg, "help") == 0) {
@@ -238,7 +247,7 @@ static void * audio_cap_ca_init(const char *cfg)
         }
         struct state_ca_capture *s;
         OSErr ret = noErr;
-#if OS_VERSION_MAJOR <= 9
+#ifndef __MAC_10_9
         Component comp;
         ComponentDescription desc;
 #else
@@ -318,7 +327,7 @@ static void * audio_cap_ca_init(const char *cfg)
         desc.componentFlags = 0;
         desc.componentFlagsMask = 0;
 
-#if OS_VERSION_MAJOR > 9
+#ifdef __MAC_10_9
         comp = AudioComponentFindNext(NULL, &desc);
         if(!comp) {
                 fprintf(stderr, "Error finding AUHAL component.\n");
@@ -430,6 +439,13 @@ static void * audio_cap_ca_init(const char *cfg)
                         fprintf(stderr, "[CoreAudio] Error setting input callback.\n");
                         goto error;
                 }
+                uint32_t numFrames = 128;
+                if (get_commandline_param("audio-cap-frames")) {
+                        numFrames = atoi(get_commandline_param("audio-cap-frames"));
+                }
+                CHECK_OK(AudioUnitSetProperty(s->auHALComponentInstance, kAudioDevicePropertyBufferFrameSize,
+                                        kAudioUnitScope_Global, 0, &numFrames, sizeof(numFrames)),
+                                        "[CoreAudio] Error setting frames.", NOOP);
         }
 
         ret = AudioUnitInitialize(s->auHALComponentInstance);

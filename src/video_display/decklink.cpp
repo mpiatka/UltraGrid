@@ -68,6 +68,7 @@
 #include <queue>
 #include <string>
 #include <vector>
+#include <algorithm>
 
 #include "DeckLinkAPIVersion.h"
 
@@ -78,6 +79,8 @@
 static void print_output_modes(IDeckLink *);
 static void display_decklink_done(void *state);
 
+#define DEFAULT 0
+#define KEEP -1
 #define MAX_DEVICES 4
 
 // performs command, if failed, displays error and jumps to error label
@@ -262,10 +265,11 @@ class DeckLink3DFrame : public DeckLinkFrame, public IDeckLinkVideoFrame3DExtens
 #define DECKLINK_MAGIC 0x12de326b
 
 struct device_state {
-        PlaybackDelegate        *delegate;
-        IDeckLink               *deckLink;
-        IDeckLinkOutput         *deckLinkOutput;
-        IDeckLinkConfiguration*         deckLinkConfiguration;
+        PlaybackDelegate           *delegate;
+        IDeckLink                  *deckLink;
+        IDeckLinkOutput            *deckLinkOutput;
+        IDeckLinkConfiguration     *deckLinkConfiguration;
+        IDeckLinkProfileAttributes *deckLinkAttributes;
 };
 
 struct state_decklink {
@@ -295,9 +299,10 @@ struct state_decklink {
 
         BMDPixelFormat      pixelFormat;
 
-        uint32_t            link;
-        uint32_t            duplex; // 0 default, -1 don't change, other - value
+        uint32_t            link_req; // 0 default
+        uint32_t            duplex_req; // 0 default, -1 don't change, other - value
         char                level; // 0 - undefined, 'A' - level A, 'B' - level B
+        bool                quad_square_division_split = true;
 
         buffer_pool_t       buffer_pool;
 
@@ -316,13 +321,14 @@ static void show_help(bool full)
         HRESULT                         result;
 
         printf("Decklink (output) options:\n");
-        cout << style::bold << fg::red << "\t-d decklink[:device=<device(s)>]" << fg::reset << " [:timecode][:single-link|:dual-link|:quad-link][:LevelA|:LevelB][:3D[:HDMI3DPacking=<packing>]][:audio_level={line|mic}][:conversion=<fourcc>][:Use1080pNotPsF={true|false}][:[no-]low-latency][:half-duplex|full-duplex]\n" << style::reset;
+        cout << style::bold << fg::red << "\t-d decklink[:device=<device(s)>]" << fg::reset << "[:timecode][:single-link|:dual-link|:quad-link][:LevelA|:LevelB][:3D[:HDMI3DPacking=<packing>]][:audio_level={line|mic}][:conversion=<fourcc>][:Use1080pNotPsF={true|false}][:[no-]low-latency][:half-duplex|full-duplex][:quad-[no-]square]\n" << style::reset;
         cout << style::bold << "\t\t<device(s)>" << style::reset << " is coma-separated indices or names of output devices\n";
         cout << style::bold << "\t\tsingle-link/dual-link/quad-link" << style::reset << " specifies if the video output will be in a single-link (HD/3G/6G/12G), dual-link HD-SDI mode or quad-link HD/3G/6G/12G\n";
         cout << style::bold << "\t\tLevelA/LevelB" << style::reset << " specifies 3G-SDI output level\n";
         if (!full) {
                 cout << style::bold << "\t\tconversion" << style::reset << " - use '-d decklink:fullhelp' for list of conversions\n";
         } else {
+                cout << style::bold << "\t\t[no-]quad-square" << style::reset << " - set Quad-link SDI is output in Square Division Quad Split mode\n";
                 cout << "\t\toutput conversion can be:\n" <<
                                 style::bold << "\t\t\tnone" << style::reset << " - no conversion\n" <<
                                 style::bold << "\t\t\tltbx" << style::reset << " - down-converted letterbox SD\n" <<
@@ -355,7 +361,7 @@ static void show_help(bool full)
                 
                 // *** Print the model name of the DeckLink card
                 result = deckLink->GetDisplayName(&deviceNameString);
-                cout << "\ndevice: " << style::bold << numDevices << style::reset << ".) ";
+                cout << "\ndevice: " << style::bold << numDevices << style::reset << ") ";
                 if (result == S_OK) {
                         char *deviceNameCString = get_cstr_from_bmd_api_str(deviceNameString);
                         cout << style::bold << deviceNameCString << style::reset << "\n";
@@ -644,7 +650,7 @@ display_decklink_reconfigure_video(void *state, struct video_desc desc)
         struct state_decklink            *s = (struct state_decklink *)state;
 
         BMDDisplayMode                    displayMode;
-        BMDDisplayModeSupport             supported;
+        BMD_BOOL                          supported;
         HRESULT                           result;
 
         unique_lock<mutex> lk(s->reconfiguration_lock);
@@ -653,7 +659,9 @@ display_decklink_reconfigure_video(void *state, struct video_desc desc)
         
         s->vid_desc = desc;
 
-        auto it = uv_to_bmd_codec_map.find(desc.color_spec);
+        auto it = std::find_if(uv_to_bmd_codec_map.begin(),
+                        uv_to_bmd_codec_map.end(),
+                        [&desc](const std::pair<codec_t, BMDPixelFormat>& el){ return el.first == desc.color_spec; });
         if (it == uv_to_bmd_codec_map.end()) {
                 log_msg(LOG_LEVEL_ERROR, MOD_NAME "Unsupported pixel format!\n");
                 goto error;
@@ -689,6 +697,7 @@ display_decklink_reconfigure_video(void *state, struct video_desc desc)
 
         for (int i = 0; i < s->devices_cnt; ++i) {
                 BMDVideoOutputFlags outputFlags= bmdVideoOutputFlagDefault;
+                BMDSupportedVideoModeFlags supportedFlags = bmdSupportedVideoModeDefault;
 
                 displayMode = get_mode(s->state[i].deckLinkOutput, desc, &s->frameRateDuration,
                                 &s->frameRateScale);
@@ -703,12 +712,12 @@ display_decklink_reconfigure_video(void *state, struct video_desc desc)
 
                 if (s->stereo) {
                         outputFlags = (BMDVideoOutputFlags) (outputFlags | bmdVideoOutputDualStream3D);
+                        supportedFlags = (BMDSupportedVideoModeFlags) (outputFlags | bmdSupportedVideoModeDualStream3D);
                 }
 
-                EXIT_IF_FAILED(s->state[i].deckLinkOutput->DoesSupportVideoMode(displayMode,
-                                        s->pixelFormat, outputFlags, &supported, NULL),
+                EXIT_IF_FAILED(s->state[i].deckLinkOutput->DoesSupportVideoMode(bmdVideoConnectionUnspecified, displayMode, s->pixelFormat, supportedFlags, nullptr, &supported),
                                 "DoesSupportVideoMode");
-                if (supported == bmdDisplayModeNotSupported) {
+                if (!supported) {
                         log_msg(LOG_LEVEL_ERROR, MOD_NAME "Requested parameters "
                                         "combination not supported - %d * %dx%d@%f, timecode %s.\n",
                                         desc.tile_count, desc.width, desc.height, desc.fps,
@@ -719,6 +728,34 @@ display_decklink_reconfigure_video(void *state, struct video_desc desc)
                 BMD_BOOL subsampling_444 = codec_is_a_rgb(desc.color_spec); // we don't have pixfmt for 444 YCbCr
                 CALL_AND_CHECK(s->state[i].deckLinkConfiguration->SetFlag(bmdDeckLinkConfig444SDIVideoOutput, subsampling_444),
                                 "SDI subsampling");
+
+                uint32_t link = s->link_req;
+
+                if (s->link_req == DEFAULT) {
+                        if (desc.width != 7680) {
+                                link = bmdLinkConfigurationSingleLink;
+                                LOG(LOG_LEVEL_NOTICE) << MOD_NAME "Setting single link by default.\n";
+                        } else {
+                                link = bmdLinkConfigurationQuadLink;
+                                LOG(LOG_LEVEL_NOTICE) << MOD_NAME "Setting quad-link for 8K by default.\n";
+                        }
+                }
+                CALL_AND_CHECK(s->state[i].deckLinkConfiguration->SetInt(bmdDeckLinkConfigSDIOutputLinkConfiguration, link), "Unable set output SDI link mode");
+
+                if (link == bmdLinkConfigurationQuadLink && s->duplex_req == bmdDuplexFull) {
+                        LOG(LOG_LEVEL_WARNING) << MOD_NAME "Setting quad-link and full-duplex may not be supported!\n";
+                }
+
+                if (s->duplex_req == DEFAULT && link == bmdLinkConfigurationQuadLink) {
+                        LOG(LOG_LEVEL_WARNING) << MOD_NAME "Quad-link detected - setting half-duplex automatically, use 'no-half-duplex' to override.\n";
+                        decklink_set_duplex(s->state[i].deckLink, bmdDuplexHalf);
+                }
+
+                BMD_BOOL quad_link_supp;
+                if (s->state[i].deckLinkAttributes && s->state[i].deckLinkAttributes->GetFlag(BMDDeckLinkSupportsQuadLinkSDI, &quad_link_supp) == S_OK && quad_link_supp == BMD_TRUE) {
+                        CALL_AND_CHECK(s->state[i].deckLinkConfiguration->SetFlag(bmdDeckLinkConfigQuadLinkSDIVideoOutputSquareDivisionSplit, s->quad_square_division_split),
+                                        "Quad-link SDI Square Division Quad Split mode");
+                }
 
                 result = s->state[i].deckLinkOutput->EnableVideoOutput(displayMode, outputFlags);
                 if (FAILED(result)) {
@@ -766,8 +803,9 @@ error:
         return FALSE;
 }
 
-static void display_decklink_probe(struct device_info **available_cards, int *count)
+static void display_decklink_probe(struct device_info **available_cards, int *count, void (**deleter)(void *))
 {
+        UNUSED(deleter);
         IDeckLinkIterator*              deckLinkIterator;
         IDeckLink*                      deckLink;
 
@@ -845,7 +883,7 @@ static void *display_decklink_init(struct module *parent, const char *fmt, unsig
         BMDVideo3DPackingFormat HDMI3DPacking = (BMDVideo3DPackingFormat) 0;
         int audio_consumer_levels = -1;
         BMDVideoOutputConversionMode conversion_mode = bmdNoVideoOutputConversion;
-        bool use1080p_not_psf = true;
+        bool use1080psf = false;
 
         if (!blackmagic_api_version_check()) {
                 return NULL;
@@ -855,8 +893,8 @@ static void *display_decklink_init(struct module *parent, const char *fmt, unsig
         s->magic = DECKLINK_MAGIC;
         s->stereo = FALSE;
         s->emit_timecode = false;
-        s->duplex = 0;
-        s->link = 0;
+        s->duplex_req = 0;
+        s->link_req = 0;
         cardId[0] = "0";
         s->devices_cnt = 1;
         s->low_latency = true;
@@ -906,17 +944,17 @@ static void *display_decklink_init(struct module *parent, const char *fmt, unsig
                         } else if(strcasecmp(ptr, "timecode") == 0) {
                                 s->emit_timecode = true;
                         } else if(strcasecmp(ptr, "single-link") == 0) {
-                                s->link = bmdLinkConfigurationSingleLink;
+                                s->link_req = bmdLinkConfigurationSingleLink;
                         } else if(strcasecmp(ptr, "dual-link") == 0) {
-                                s->link = bmdLinkConfigurationDualLink;
+                                s->link_req = bmdLinkConfigurationDualLink;
                         } else if(strcasecmp(ptr, "quad-link") == 0) {
-                                s->link = bmdLinkConfigurationQuadLink;
+                                s->link_req = bmdLinkConfigurationQuadLink;
                         } else if(strcasecmp(ptr, "half-duplex") == 0) {
-                                s->duplex = bmdDuplexModeHalf;
+                                s->duplex_req = bmdDuplexHalf;
                         } else if(strcasecmp(ptr, "no-half-duplex") == 0) {
-                                s->duplex = -1;
+                                s->duplex_req = KEEP;
                         } else if(strcasecmp(ptr, "full-duplex") == 0) {
-                                s->duplex = bmdDuplexModeFull;
+                                s->duplex_req = bmdDuplexFull;
                         } else if(strcasecmp(ptr, "LevelA") == 0) {
                                 s->level = 'A';
                         } else if(strcasecmp(ptr, "LevelB") == 0) {
@@ -961,28 +999,20 @@ static void *display_decklink_init(struct module *parent, const char *fmt, unsig
 						strlen("Use1080pNotPsF=")) == 0) {
 				const char *levels = ptr + strlen("Use1080pNotPsF=");
 				if (strcasecmp(levels, "false") == 0) {
-					use1080p_not_psf = false;
+					use1080psf = true;
 				} else {
-					use1080p_not_psf = true;
+					use1080psf = false;
 				}
                         } else if (strcasecmp(ptr, "low-latency") == 0 || strcasecmp(ptr, "no-low-latency") == 0) {
                                 s->low_latency = strcasecmp(ptr, "low-latency") == 0;
+                        } else if (strcasecmp(ptr, "quad-square") == 0 || strcasecmp(ptr, "no-quad-square") == 0) {
+                                s->quad_square_division_split = strcasecmp(ptr, "quad-square") == 0;
                         } else {
                                 log_msg(LOG_LEVEL_ERROR, MOD_NAME "Warning: unknown options in config string.\n");
                                 delete s;
                                 return NULL;
                         }
                         ptr = strtok_r(NULL, ":", &save_ptr);
-                }
-        }
-
-        if (s->link == bmdLinkConfigurationQuadLink) {
-                if (s->duplex == bmdDuplexModeFull) {
-                        LOG(LOG_LEVEL_WARNING) << MOD_NAME "Setting quad-link and full-duplex may not be supported!\n";
-                }
-                if (s->duplex == 0) {
-                        LOG(LOG_LEVEL_WARNING) << MOD_NAME "Quad-link detected - setting half-duplex automatically, use 'no-half-duplex' to override.\n";
-                        s->duplex = bmdDuplexModeHalf;
                 }
         }
 
@@ -1084,12 +1114,17 @@ static void *display_decklink_init(struct module *parent, const char *fmt, unsig
         }
         
         for(int i = 0; i < s->devices_cnt; ++i) {
+                if (s->duplex_req != DEFAULT && s->duplex_req != (uint32_t) KEEP) {
+                        decklink_set_duplex(s->state[i].deckLink, (BMDDuplexMode) s->duplex_req);
+                }
+
 		// Get IDeckLinkAttributes object
-		IDeckLinkAttributes *deckLinkAttributes = NULL;
-		result = s->state[i].deckLink->QueryInterface(IID_IDeckLinkAttributes, (void**)&deckLinkAttributes);
+		IDeckLinkProfileAttributes *deckLinkAttributes = NULL;
+		result = s->state[i].deckLink->QueryInterface(IID_IDeckLinkProfileAttributes, (void**)&deckLinkAttributes);
 		if (result != S_OK) {
 			log_msg(LOG_LEVEL_WARNING, "Could not query device attributes.\n");
 		}
+                s->state[i].deckLinkAttributes = deckLinkAttributes;
 
                 // Obtain the audio/video output interface (IDeckLinkOutput)
                 if ((result = s->state[i].deckLink->QueryInterface(IID_IDeckLinkOutput, (void**)&s->state[i].deckLinkOutput)) != S_OK) {
@@ -1112,7 +1147,7 @@ static void *display_decklink_init(struct module *parent, const char *fmt, unsig
 			goto error;
 		}
 
-		result = deckLinkConfiguration->SetFlag(bmdDeckLinkConfigUse1080pNotPsF, use1080p_not_psf);
+		result = deckLinkConfiguration->SetFlag(bmdDeckLinkConfigOutput1080pAsPsF, use1080psf);
 		if (result != S_OK) {
 			log_msg(LOG_LEVEL_ERROR, MOD_NAME "Unable to set 1080p P/PsF mode.\n");
 		}
@@ -1136,20 +1171,6 @@ static void *display_decklink_init(struct module *parent, const char *fmt, unsig
                                         HDMI3DPacking);
                         if(res != S_OK) {
                                 log_msg(LOG_LEVEL_ERROR, MOD_NAME "Unable set 3D packing.\n");
-                        }
-                }
-
-                if(s->link != 0) {
-                        HRESULT res = deckLinkConfiguration->SetInt(bmdDeckLinkConfigSDIOutputLinkConfiguration, s->link);
-                        if(res != S_OK) {
-                                LOG(LOG_LEVEL_ERROR) << MOD_NAME "Unable set output SDI standard: " << bmd_hresult_to_string(res) << ".\n";
-                        }
-                }
-
-                if (s->duplex != 0 && s->duplex != (uint32_t) -1) {
-                        HRESULT res = deckLinkConfiguration->SetInt(bmdDeckLinkConfigDuplexMode, s->duplex);
-                        if(res != S_OK) {
-                                LOG(LOG_LEVEL_ERROR) << MOD_NAME "Unable set output SDI duplex mode: " << bmd_hresult_to_string(res) << ".\n";
                         }
                 }
 
@@ -1237,6 +1258,7 @@ static void display_decklink_run(void *state)
         UNUSED(state);
 }
 
+#define RELEASE_IF_NOT_NULL(x) if (x != nullptr) x->Release();
 static void display_decklink_done(void *state)
 {
         debug_msg("display_decklink_done\n"); /* TOREMOVE */
@@ -1260,17 +1282,10 @@ static void display_decklink_done(void *state)
                         }
                 }
 
-                if(s->state[i].deckLinkConfiguration != NULL) {
-                        s->state[i].deckLinkConfiguration->Release();
-                }
-
-                if(s->state[i].deckLinkOutput != NULL) {
-                        s->state[i].deckLinkOutput->Release();
-                }
-
-                if(s->state[i].deckLink != NULL) {
-                        s->state[i].deckLink->Release();
-                }
+                RELEASE_IF_NOT_NULL(s->state[i].deckLinkAttributes);
+                RELEASE_IF_NOT_NULL(s->state[i].deckLinkConfiguration);
+                RELEASE_IF_NOT_NULL(s->state[i].deckLinkOutput);
+                RELEASE_IF_NOT_NULL(s->state[i].deckLink);
 
                 if(s->state[i].delegate != NULL) {
                         delete s->state[i].delegate;
@@ -1662,7 +1677,7 @@ static void print_output_modes (IDeckLink* deckLink)
         }
 
         // List all supported output display modes
-        printf("display modes:\n");
+        printf("\tdisplay modes:\n");
         while (displayModeIterator->Next(&displayMode) == S_OK)
         {
                 BMD_STR                  displayModeString = NULL;
@@ -1683,7 +1698,7 @@ static void print_output_modes (IDeckLink* deckLink)
                         modeWidth = displayMode->GetWidth();
                         modeHeight = displayMode->GetHeight();
                         displayMode->GetFrameRate(&frameRateDuration, &frameRateScale);
-                        printf("%d.) %-20s \t %d x %d \t %2.2f FPS%s\n",displayModeNumber, displayModeCString,
+                        printf("\t\t%2d) %-20s  %d x %d \t %2.2f FPS%s\n",displayModeNumber, displayModeCString,
                                         modeWidth, modeHeight, (float) ((double)frameRateScale / (double)frameRateDuration),
                                         (flags & bmdDisplayModeSupports3D ? "\t (supports 3D)" : ""));
                         release_bmd_api_str(displayModeString);

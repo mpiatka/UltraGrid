@@ -96,7 +96,7 @@ enum class image_pattern : int {
         NOISE
 };
 
-#define BLANK_PATTERN 0xff000000
+#define DEFAULT_BLANK_COLOR 0xff000000
 
 struct testcard_state {
         std::chrono::steady_clock::time_point last_frame_time;
@@ -121,6 +121,7 @@ struct testcard_state {
 
         unsigned int still_image;
         enum image_pattern pattern;
+        uint32_t blank_color = DEFAULT_BLANK_COLOR;
 };
 
 static void testcard_fillRect(struct testcard_pixmap *s, struct testcard_rect *r, int color)
@@ -305,7 +306,7 @@ static int vidcap_testcard_init(const struct vidcap_params *params, void **state
 
         if (vidcap_params_get_fmt(params) == NULL || strcmp(vidcap_params_get_fmt(params), "help") == 0) {
                 printf("testcard options:\n");
-                printf("\t-t testcard:<width>:<height>:<fps>:<codec>[:filename=<filename>][:p][:s=<X>x<Y>][:i|:sf][:still][:pattern=bars|blank|noise]\n");
+                printf("\t-t testcard:<width>:<height>:<fps>:<codec>[:filename=<filename>][:p][:s=<X>x<Y>][:i|:sf][:still][:pattern=bars|blank|noise|0x<AAGGBBRR>]\n");
                 printf("\t<filename> - use file named filename instead of default bars\n");
                 printf("\tp - pan with frame\n");
                 printf("\ts - split the frames into XxY separate tiles\n");
@@ -378,7 +379,6 @@ static int vidcap_testcard_init(const struct vidcap_params *params, void **state
                 goto error;
         }
         {
-                const codec_t other[] = {R12L, VIDEO_CODEC_NONE};
                 const codec_t *sets[] = {codecs_8b, codecs_10b, codecs_12b};
                 bool supported = false;
                 for (int i = 0; i < (int) (sizeof sets / sizeof sets[0]); ++i) {
@@ -470,6 +470,12 @@ static int vidcap_testcard_init(const struct vidcap_params *params, void **state
                                 s->pattern = image_pattern::BLANK;
                         } else if (strcmp(pattern, "noise") == 0) {
                                 s->pattern = image_pattern::NOISE;
+                        } else if (strstr(pattern, "0x") == pattern) {
+                                s->pattern = image_pattern::BLANK;
+                                if (sscanf(pattern + 2, "%x", &s->blank_color) != 1) {
+                                        LOG(LOG_LEVEL_ERROR) << "[testcard] Wrong color!\n";
+                                        goto error;
+                                }
                         } else {
                                 fprintf(stderr, "[testcard] Unknown pattern!\n");;
                                 goto error;
@@ -491,7 +497,7 @@ static int vidcap_testcard_init(const struct vidcap_params *params, void **state
 
                 if (s->pattern == image_pattern::BLANK) {
                         for (int i = 0; i < pixmap_len / 4; ++i) {
-                                ((uint32_t *) s->pixmap.data)[i] = BLANK_PATTERN;
+                                ((uint32_t *) s->pixmap.data)[i] = s->blank_color;
 
                         }
                 } else if (s->pattern == image_pattern::NOISE) {
@@ -760,7 +766,7 @@ static struct vidcap_type *vidcap_testcard_probe(bool verbose)
                 if (verbose) {
                         vt->card_count = 1;
                         vt->cards = (struct device_info *) calloc(vt->card_count, sizeof(struct device_info));
-                        snprintf(vt->cards[0].id, sizeof vt->cards[0].name, "");
+                        vt->cards[0].id[0] = '\0';
                         snprintf(vt->cards[0].name, sizeof vt->cards[0].name, "Testing signal");
 
                         struct {

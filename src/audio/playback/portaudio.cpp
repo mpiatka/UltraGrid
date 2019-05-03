@@ -67,6 +67,7 @@
 #include "debug.h"
 #include "lib_common.h"
 #include "utils/audio_buffer.h"
+#include "utils/color_out.h"
 
 #define MODULE_NAME "[Portaudio playback] "
 #define BUFFER_LEN_SEC 1
@@ -149,9 +150,14 @@ static void * audio_play_portaudio_init(const char *cfg)
 {	
         struct state_portaudio_playback *s;
         int output_device;
+
+        portaudio_print_version();
         
         if(cfg) {
                 if(strcmp(cfg, "help") == 0) {
+                        printf("PortAudio playback usage:\n");
+                        color_out(COLOR_OUT_BOLD | COLOR_OUT_RED, "\t-r poraudio");
+                        color_out(COLOR_OUT_BOLD, "[:<index>]\n\n");
                         printf("Available PortAudio playback devices:\n");
                         audio_play_portaudio_help(NULL);
                         return &audio_init_state_ok;

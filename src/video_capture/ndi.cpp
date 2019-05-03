@@ -81,6 +81,7 @@ struct vidcap_state_ndi {
         array<struct audio_frame, 2> audio;
         int audio_buf_idx = 0;
         bool capture_audio = false;
+        struct video_desc last_desc{};
 
         string requested_name; // if not empty recv from requested NDI name
         string requested_url; // if not empty recv from requested URL (either addr or addr:port)
@@ -302,6 +303,7 @@ static struct video_frame *vidcap_ndi_grab(void *state, struct audio_frame **aud
         NDIlib_audio_frame_v2_t audio_frame;
 
         struct video_frame *out = nullptr;
+        video_desc out_desc;
 
         switch (NDIlib_recv_capture_v2(s->pNDI_recv, &video_frame, &audio_frame, nullptr, 200))
         {       // No data
@@ -314,27 +316,51 @@ static struct video_frame *vidcap_ndi_grab(void *state, struct audio_frame **aud
                 if (video_frame.frame_format_type != NDIlib_frame_format_type_progressive && video_frame.frame_format_type != NDIlib_frame_format_type_interleaved) {
                         LOG(LOG_LEVEL_ERROR) << "[NDI] Unsupported interlacing, please report to " PACKAGE_BUGREPORT "!\n";
                 }
+                union {
+                        uint32_t fcc_i;
+                        char fcc_s[5];
+                } u;
+                u.fcc_i = video_frame.FourCC;
+                u.fcc_s[5] = '\0';
                 if (video_frame.FourCC != NDIlib_FourCC_type_UYVY &&
-                                video_frame.FourCC != NDIlib_FourCC_type_RGBA) {
-                        LOG(LOG_LEVEL_ERROR) << "[NDI] Unsupported codec \" " << video_frame.FourCC << " \", please report to " PACKAGE_BUGREPORT "!\n";
+                                video_frame.FourCC != NDIlib_FourCC_type_RGBA &&
+                                video_frame.FourCC != NDIlib_FourCC_type_BGRA) {
+                        LOG(LOG_LEVEL_ERROR) << "[NDI] Unsupported codec '" << u.fcc_s << "', please report to " PACKAGE_BUGREPORT "!\n";
 
                 }
-                out = vf_alloc_desc({static_cast<unsigned int>(video_frame.xres),
+                out_desc = {static_cast<unsigned int>(video_frame.xres),
                                 static_cast<unsigned int>(video_frame.yres),
                                 video_frame.FourCC == NDIlib_FourCC_type_UYVY ? UYVY : RGBA,
                                 static_cast<double>(video_frame.frame_rate_N) / video_frame.frame_rate_D,
                                 video_frame.frame_format_type == NDIlib_frame_format_type_progressive ? PROGRESSIVE : INTERLACED_MERGED,
-                                1});
-                out->tiles[0].data = reinterpret_cast<char*>(video_frame.p_data);
-                struct dispose_udata_t {
-                        NDIlib_video_frame_v2_t video_frame;
-                        NDIlib_recv_instance_t pNDI_recv;
-                };
-                out->callbacks.dispose_udata = new dispose_udata_t{video_frame, s->pNDI_recv};
-                out->callbacks.dispose = [](struct video_frame *f) { auto du = static_cast<dispose_udata_t *>(f->callbacks.dispose_udata);
-                        NDIlib_recv_free_video_v2(du->pNDI_recv, &du->video_frame);
-                        delete du;
-                };
+                                1};
+                if (s->last_desc != out_desc) {
+                        LOG(LOG_LEVEL_NOTICE) << "[NDI] Received video changed: " << out_desc << "\n";
+                        s->last_desc = out_desc;
+                }
+                if (video_frame.FourCC == NDIlib_FourCC_type_BGRA) { // BGRA -> RGBA
+                        out = vf_alloc_desc_data(out_desc);
+                        auto in_p = reinterpret_cast<uint32_t *>(video_frame.p_data);
+                        auto out_p = reinterpret_cast<uint32_t *>(out->tiles[0].data);
+                        for (int i = 0; i < video_frame.xres * video_frame.yres; ++i) {
+                                uint32_t argb = *in_p++;
+                                *out_p++ = (argb & 0xff000000) | ((argb & 0xff) << 16) | (argb & 0xff00) | ((argb & 0xff0000) >> 16);
+                        }
+                        NDIlib_recv_free_video_v2(s->pNDI_recv, &video_frame);
+                        out->callbacks.dispose = vf_free;
+                } else {
+                        out = vf_alloc_desc(out_desc);
+                        out->tiles[0].data = reinterpret_cast<char*>(video_frame.p_data);
+                        struct dispose_udata_t {
+                                NDIlib_video_frame_v2_t video_frame;
+                                NDIlib_recv_instance_t pNDI_recv;
+                        };
+                        out->callbacks.dispose_udata = new dispose_udata_t{video_frame, s->pNDI_recv};
+                        out->callbacks.dispose = [](struct video_frame *f) { auto du = static_cast<dispose_udata_t *>(f->callbacks.dispose_udata);
+                                NDIlib_recv_free_video_v2(du->pNDI_recv, &du->video_frame);
+                                delete du;
+                        };
+                }
                 if (s->capture_audio) {
                         *audio = &s->audio[s->audio_buf_idx];
                         s->audio_buf_idx = (s->audio_buf_idx + 1) % 2;

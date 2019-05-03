@@ -91,6 +91,7 @@
 #include "rtp/video_decoders.h"
 #include "utils/synchronized_queue.h"
 #include "utils/timed_message.h"
+#include "utils/worker.h"
 #include "video.h"
 #include "video_decompress.h"
 #include "video_display.h"
@@ -472,7 +473,7 @@ static void *fec_thread(void *args) {
                                         char *src = fec_out_buffer;
                                         char *dst = tile->data + line_decoder->base_offset;
                                         while(data_pos < (int) fec_out_len) {
-                                                line_decoder->decode_line((unsigned char*)dst, (unsigned char *) src, line_decoder->src_linesize,
+                                                line_decoder->decode_line((unsigned char*)dst, (unsigned char *) src, line_decoder->dst_linesize,
                                                                 line_decoder->shifts[0],
                                                                 line_decoder->shifts[1],
                                                                 line_decoder->shifts[2]);
@@ -529,6 +530,42 @@ static bool blacklist_current_out_codec(struct state_video_decoder *decoder){
         return true;
 }
 
+struct decompress_data {
+        struct state_video_decoder *decoder;
+        int pos;
+        struct video_frame *compressed;
+        int buffer_num;
+        decompress_status ret = DECODER_NO_FRAME;
+};
+static void *decompress_worker(void *data)
+{
+        auto d = (struct decompress_data *) data;
+        struct state_video_decoder *decoder = d->decoder;
+        int pos = d->pos;
+
+        char *out;
+        int x = d->pos % get_video_mode_tiles_x(decoder->video_mode),
+            y = d->pos / get_video_mode_tiles_x(decoder->video_mode);
+        int tile_width = decoder->received_vid_desc.width; // get_video_mode_tiles_x(decoder->video_mode);
+        int tile_height = decoder->received_vid_desc.height; // get_video_mode_tiles_y(decoder->video_mode);
+        if(decoder->merged_fb) {
+                // TODO: OK when rendering directly to display FB, otherwise, do not reflect pitch (we use PP)
+                out = vf_get_tile(decoder->frame, 0)->data + y * decoder->pitch * tile_height +
+                        vc_get_linesize(tile_width, decoder->out_codec) * x;
+        } else {
+                out = vf_get_tile(decoder->frame, pos)->data;
+        }
+        if (!d->compressed->tiles[pos].data)
+                return NULL;
+        d->ret = decompress_frame(decoder->decompress_state[pos],
+                        (unsigned char *) out,
+                        (unsigned char *) d->compressed->tiles[pos].data,
+                        d->compressed->tiles[pos].data_len,
+                        d->buffer_num,
+                        &decoder->frame->callbacks);
+        return d;
+}
+
 static void *decompress_thread(void *args) {
         struct state_video_decoder *decoder =
                 (struct state_video_decoder *) args;
@@ -543,35 +580,33 @@ static void *decompress_thread(void *args) {
                 auto t0 = std::chrono::high_resolution_clock::now();
 
                 if(decoder->decoder_type == EXTERNAL_DECODER) {
-                        int tile_width = decoder->received_vid_desc.width; // get_video_mode_tiles_x(decoder->video_mode);
-                        int tile_height = decoder->received_vid_desc.height; // get_video_mode_tiles_y(decoder->video_mode);
-                        int x, y;
-                        for (x = 0; x < get_video_mode_tiles_x(decoder->video_mode); ++x) {
-                                for (y = 0; y < get_video_mode_tiles_y(decoder->video_mode); ++y) {
-                                        int pos = x + get_video_mode_tiles_x(decoder->video_mode) * y;
-                                        char *out;
-                                        if(decoder->merged_fb) {
-                                                // TODO: OK when rendering directly to display FB, otherwise, do not reflect pitch (we use PP)
-                                                out = vf_get_tile(decoder->frame, 0)->data + y * decoder->pitch * tile_height +
-                                                        vc_get_linesize(tile_width, decoder->out_codec) * x;
-                                        } else {
-                                                out = vf_get_tile(decoder->frame, pos)->data;
+                        int tile_count = get_video_mode_tiles_x(decoder->video_mode) *
+                                        get_video_mode_tiles_y(decoder->video_mode);
+                        vector<task_result_handle_t> handle(tile_count);
+                        vector<decompress_data> data(tile_count);
+                        for (int pos = 0; pos < tile_count; ++pos) {
+                                data[pos].decoder = decoder;
+                                data[pos].pos = pos;
+                                data[pos].compressed = msg->nofec_frame;
+                                data[pos].buffer_num = msg->buffer_num[pos];
+                                if (tile_count > 1) {
+                                        handle[pos] = task_run_async(decompress_worker, &data[pos]);
+                                } else {
+                                        decompress_worker(&data[pos]);
+                                }
+                        }
+                        if (tile_count > 1) {
+                                for (int pos = 0; pos < tile_count; ++pos) {
+                                        wait_task(handle[pos]);
+                                }
+                        }
+                        for (int pos = 0; pos < tile_count; ++pos) {
+                                if (data[pos].ret != DECODER_GOT_FRAME){
+                                        if (data[pos].ret == DECODER_CANT_DECODE){
+                                                if(blacklist_current_out_codec(decoder))
+                                                        decoder->msg_queue.push(new main_msg_reconfigure(decoder->received_vid_desc, nullptr, true));
                                         }
-                                        if(!msg->nofec_frame->tiles[pos].data)
-                                                continue;
-                                        decompress_status ret = decompress_frame(decoder->decompress_state[pos],
-                                                        (unsigned char *) out,
-                                                        (unsigned char *) msg->nofec_frame->tiles[pos].data,
-                                                        msg->nofec_frame->tiles[pos].data_len,
-                                                        msg->buffer_num[pos],
-														&decoder->frame->callbacks);
-                                        if (ret != DECODER_GOT_FRAME) {
-                                                if(ret == DECODER_CANT_DECODE){
-                                                        if(blacklist_current_out_codec(decoder))
-                                                                decoder->msg_queue.push(new main_msg_reconfigure(decoder->received_vid_desc, nullptr, true));
-                                                }
-                                                goto skip_frame;
-                                        }
+                                        goto skip_frame;
                                 }
                         }
                 } else {
@@ -1199,7 +1234,7 @@ bool parse_video_hdr(uint32_t *hdr, struct video_desc *desc)
         desc->height = ntohl(hdr[3]) & 0xffff;
         desc->color_spec = get_codec_from_fcc(hdr[4]);
         if(desc->color_spec == VIDEO_CODEC_NONE) {
-                log_msg(LOG_LEVEL_ERROR, "Unknown FourCC \"%4s\"!\n", (char *) &hdr[4]);
+                log_msg(LOG_LEVEL_ERROR, "Unknown FourCC \"%.4s\"!\n", (char *) &hdr[4]);
                 return false;
         }
 
@@ -1368,7 +1403,7 @@ int decode_video_frame(struct coded_data *cdata, void *decoder_data, struct pbuf
                 buffer_length = ntohl(hdr[2]);
                 ssrc = pckt->ssrc;
 
-                if (pt == PT_VIDEO_LDGM || pt == PT_ENCRYPT_VIDEO_LDGM || pt == PT_VIDEO_RS) {
+                if (PT_VIDEO_HAS_FEC(pt)) {
                         tmp = ntohl(hdr[3]);
                         k = tmp >> 19;
                         m = 0x1fff & (tmp >> 6);
@@ -1376,7 +1411,7 @@ int decode_video_frame(struct coded_data *cdata, void *decoder_data, struct pbuf
                         seed = ntohl(hdr[4]);
                 }
 
-                if (pt == PT_ENCRYPT_VIDEO || pt == PT_ENCRYPT_VIDEO_LDGM) {
+                if (PT_VIDEO_IS_ENCRYPTED(pt)) {
                         if(!decoder->decrypt) {
                                 log_msg(LOG_LEVEL_ERROR, ENCRYPTED_ERR);
                                 ERROR_GOTO_CLEANUP
@@ -1400,6 +1435,7 @@ int decode_video_frame(struct coded_data *cdata, void *decoder_data, struct pbuf
                         break;
                 case PT_ENCRYPT_VIDEO:
                 case PT_ENCRYPT_VIDEO_LDGM:
+                case PT_ENCRYPT_VIDEO_RS:
                         {
 				size_t media_hdr_len = pt == PT_ENCRYPT_VIDEO ? sizeof(video_payload_hdr_t) : sizeof(fec_video_payload_hdr_t);
                                 len = pckt->data_len - sizeof(crypto_payload_hdr_t) - media_hdr_len;
@@ -1442,7 +1478,7 @@ int decode_video_frame(struct coded_data *cdata, void *decoder_data, struct pbuf
                 }
 
                 char plaintext[len]; // will be actually shorter
-                if(pt == PT_ENCRYPT_VIDEO || pt == PT_ENCRYPT_VIDEO_LDGM) {
+                if (PT_VIDEO_IS_ENCRYPTED(pt)) {
                         int data_len;
 
                         if((data_len = decoder->dec_funcs->decrypt(decoder->decrypt,
@@ -1457,7 +1493,7 @@ int decode_video_frame(struct coded_data *cdata, void *decoder_data, struct pbuf
                         len = data_len;
                 }
 
-                if (pt == PT_VIDEO || pt == PT_ENCRYPT_VIDEO)
+                if (!PT_VIDEO_HAS_FEC(pt))
                 {
                         /* Critical section
                          * each thread *MUST* wait here if this condition is true
@@ -1632,7 +1668,6 @@ cleanup:
         pbuf_data->max_frame_size = max(pbuf_data->max_frame_size, frame_size);
         pbuf_data->decoded++;
 
-        /// @todo figure out multiple substreams
         if (decoder->last_buffer_number != -1) {
                 long int missing = buffer_number -
                         ((decoder->last_buffer_number + 1) & 0x3fffff);

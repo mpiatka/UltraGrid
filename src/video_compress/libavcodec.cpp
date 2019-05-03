@@ -45,24 +45,25 @@
 
 #include "libavcodec_common.h"
 
-#include <assert.h>
+#include <cassert>
+#include <cmath>
+#include <map>
+#include <regex>
+#include <string>
+#include <thread>
+#include <unordered_map>
 
 #include "debug.h"
 #include "host.h"
 #include "lib_common.h"
 #include "messaging.h"
 #include "module.h"
+#include "rang.hpp"
 #include "utils/misc.h"
 #include "utils/resource_manager.h"
 #include "utils/worker.h"
 #include "video.h"
 #include "video_compress.h"
-
-#include <map>
-#include <regex>
-#include <string>
-#include <thread>
-#include <unordered_map>
 
 #ifdef HWACC_VAAPI
 extern "C"
@@ -85,6 +86,7 @@ extern "C"
 #endif
 
 using namespace std;
+using namespace rang;
 
 static constexpr const codec_t DEFAULT_CODEC = MJPG;
 static constexpr double DEFAULT_X264_X265_CRF = 22.0;
@@ -175,6 +177,13 @@ static unordered_map<codec_t, codec_params_t, hash<int>> codec_params = {
         }},
         { FFV1, codec_params_t{
                 AV_CODEC_ID_FFV1,
+                nullptr,
+                0,
+                nullptr,
+                setparam_default
+        }},
+        { AV1, codec_params_t{
+                AV_CODEC_ID_AV1,
                 nullptr,
                 0,
                 nullptr,
@@ -322,11 +331,12 @@ static void print_codec_info(AVCodecID id, char *buf, size_t buflen)
 
 static void usage() {
         printf("Libavcodec encoder usage:\n");
-        printf("\t-c libavcodec[:codec=<codec_name>|:encoder=<encoder>][:bitrate=<bits_per_sec>|:bpp=<bits_per_pixel>][:crf=<crf>|:cqp=<cqp>]"
+        cout << style::bold << fg::red << "\t-c libavcodec" << fg::reset << "[:codec=<codec_name>|:encoder=<encoder>][:bitrate=<bits_per_sec>|:bpp=<bits_per_pixel>][:crf=<crf>|:cqp=<cqp>]"
                         "[:subsampling=<subsampling>][:gop=<gop>]"
-                        "[:disable_intra_refresh][:threads=<thr_mode>][:<lavc_opt>=<val>]*\n");
-        printf("\t\t<encoder> specifies encoder (eg. nvenc or libx264 for H.264)\n");
-        printf("\t\t<codec_name> may be specified codec name (default MJPEG), supported codecs:\n");
+                        "[:disable_intra_refresh][:threads=<thr_mode>][:<lavc_opt>=<val>]*\n" <<
+                        style::reset;
+        cout << style::bold << "\t\t<encoder>" << style::reset << " specifies encoder (eg. nvenc or libx264 for H.264)\n";
+        cout << style::bold << "\t\t<codec_name>" << style::reset << " may be specified codec name (default MJPEG), supported codecs:\n";
         for (auto && param : codec_params) {
                 if (param.second.av_codec != AV_CODEC_ID_NONE) {
                         char avail[1024];
@@ -338,18 +348,18 @@ static void usage() {
                         }
                         print_codec_info(param.second.av_codec, avail + strlen(avail), sizeof avail - strlen(avail));
 
-                        printf("\t\t\t%s - %s\n", get_codec_name(param.first), avail);
+                        cout << "\t\t\t" << style::bold << get_codec_name(param.first) << style::reset << " - " << avail << "\n";
                 }
 
         }
-        printf("\t\tdisable_intra_refresh - do not use Periodic Intra Refresh (H.264/H.265)\n");
-        printf("\t\t<bits_per_sec> specifies requested bitrate\n");
-        printf("\t\t\t0 means codec default (same as when parameter omitted)\n");
-        printf("\t\t<crf> specifies CRF factor (only for libx264/libx265)\n");
-        printf("\t\t<subsampling> may be one of 444, 422, or 420, default 420 for progresive, 422 for interlaced\n");
-        printf("\t\t<thr_mode> can be one of \"no\", \"frame\" or \"slice\"\n");
-        printf("\t\t<gop> specifies GOP size\n");
-        printf("\t\t<lavc_opt> arbitrary option to be passed directly to libavcodec (eg. preset=veryfast)\n");
+        cout << style::bold << "\t\tdisable_intra_refresh" << style::reset << " - do not use Periodic Intra Refresh (H.264/H.265)\n";
+        cout << style::bold << "\t\t<bits_per_sec>" << style::reset << " specifies requested bitrate\n"
+                << "\t\t\t0 means codec default (same as when parameter omitted)\n";
+        cout << style::bold << "\t\t<crf>" << style::reset << " specifies CRF factor (only for libx264/libx265)\n";
+        cout << style::bold << "\t\t<subsampling" << style::reset << "> may be one of 444, 422, or 420, default 420 for progresive, 422 for interlaced\n";
+        cout << style::bold << "\t\t<thr_mode>" << style::reset << " can be one of \"no\", \"frame\" or \"slice\"\n";
+        cout << style::bold << "\t\t<gop>" << style::reset << " specifies GOP size\n";
+        cout << style::bold << "\t\t<lavc_opt>" << style::reset << " arbitrary option to be passed directly to libavcodec (eg. preset=veryfast)\n";
         printf("\tLibavcodec version (linked): %s\n", LIBAVCODEC_IDENT);
 }
 
@@ -816,6 +826,10 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
         }
 #endif
 
+        if (ug_to_av_pixfmt_map.find(desc.color_spec) != ug_to_av_pixfmt_map.end()) {
+                requested_pix_fmts[total_pix_fmts++] = ug_to_av_pixfmt_map.find(desc.color_spec)->second;
+        }
+
         if (s->requested_subsampling == 0) {
                 // for interlaced formats, it is better to use either 422 or 444
                 if (desc.interlacing == INTERLACED_MERGED) {
@@ -934,37 +948,45 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
         log_msg(LOG_LEVEL_INFO, "[lavc] Selected pixfmt: %s\n", av_get_pix_fmt_name(pix_fmt));
         s->selected_pixfmt = pix_fmt;
 
+        s->decoder = nullptr;
         s->decoded_codec = UYVY; // most compressions use 8-bit YUV formats internally
-        switch(desc.color_spec) {
-                case UYVY:
-                        s->decoder = (decoder_t) memcpy;
-                        break;
-                case YUYV:
-                        s->decoder = (decoder_t) vc_copylineYUYV;
-                        break;
-                case v210:
-                        if (s->selected_pixfmt == AV_PIX_FMT_YUV420P10LE ||
-                                        s->selected_pixfmt == AV_PIX_FMT_YUV422P10LE ||
-                                        s->selected_pixfmt == AV_PIX_FMT_YUV444P10LE) {
+        if (ug_to_av_pixfmt_map.find(desc.color_spec) != ug_to_av_pixfmt_map.end()
+                        && s->selected_pixfmt == ug_to_av_pixfmt_map.find(desc.color_spec)->second) {
+                s->decoded_codec = desc.color_spec;
+                s->decoder = (decoder_t) memcpy;
+        }
+        if (s->decoder == nullptr) {
+                switch(desc.color_spec) {
+                        case UYVY:
                                 s->decoder = (decoder_t) memcpy;
-                                s->decoded_codec = v210;
-                        } else {
-                                s->decoder = (decoder_t) vc_copylinev210;
-                        }
-                        break;
-                case RGB:
-                        s->decoder = (decoder_t) vc_copylineRGBtoUYVY;
-                        break;
-                case BGR:
-                        s->decoder = (decoder_t) vc_copylineBGRtoUYVY;
-                        break;
-                case RGBA:
-                        s->decoder = (decoder_t) vc_copylineRGBAtoUYVY;
-                        break;
-                default:
-                        log_msg(LOG_LEVEL_ERROR, "[Libavcodec] Unable to find "
-                                        "appropriate pixel format.\n");
-                        return false;
+                                break;
+                        case YUYV:
+                                s->decoder = (decoder_t) vc_copylineYUYV;
+                                break;
+                        case v210:
+                                if (s->selected_pixfmt == AV_PIX_FMT_YUV420P10LE ||
+                                                s->selected_pixfmt == AV_PIX_FMT_YUV422P10LE ||
+                                                s->selected_pixfmt == AV_PIX_FMT_YUV444P10LE) {
+                                        s->decoded_codec = v210;
+                                        s->decoder = (decoder_t) memcpy;
+                                } else {
+                                        s->decoder = (decoder_t) vc_copylinev210;
+                                }
+                                break;
+                        case RGB:
+                                s->decoder = (decoder_t) vc_copylineRGBtoUYVY;
+                                break;
+                        case BGR:
+                                s->decoder = (decoder_t) vc_copylineBGRtoUYVY;
+                                break;
+                        case RGBA:
+                                s->decoder = (decoder_t) vc_copylineRGBAtoUYVY;
+                                break;
+                        default:
+                                log_msg(LOG_LEVEL_ERROR, "[Libavcodec] Unable to find "
+                                                "appropriate pixel format.\n");
+                                return false;
+                }
         }
 
         s->decoded = (unsigned char *) malloc(vc_get_linesize(desc.width, s->decoded_codec) * desc.height);
@@ -982,31 +1004,35 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
         s->in_frame->height = s->codec_ctx->height;
 #endif
 
-        /* the image can be allocated by any means and av_image_alloc() is
-         * just the most convenient way if av_malloc() is to be used */
-        ret = av_image_alloc(s->in_frame->data, s->in_frame->linesize,
-                        s->codec_ctx->width, s->codec_ctx->height,
-                        fmt, 32);
-        if (ret < 0) {
-                log_msg(LOG_LEVEL_ERROR, "Could not allocate raw picture buffer\n");
-                return false;
-        }
-        for(int i = 0; i < s->params.cpu_count; ++i) {
-                int chunk_size = s->codec_ctx->height / s->params.cpu_count;
-                chunk_size = chunk_size / 2 * 2;
-                s->in_frame_part[i]->data[0] = s->in_frame->data[0] + s->in_frame->linesize[0] * i *
-                        chunk_size;
-
-                if (av_pix_fmt_desc_get(s->selected_pixfmt)->log2_chroma_h == 1) { // eg. 4:2:0
-                        chunk_size /= 2;
+        // conversion needed
+        if (ug_to_av_pixfmt_map.find(desc.color_spec) == ug_to_av_pixfmt_map.end()
+                        || ug_to_av_pixfmt_map.find(desc.color_spec)->second != s->selected_pixfmt) {
+                /* the image can be allocated by any means and av_image_alloc() is
+                 * just the most convenient way if av_malloc() is to be used */
+                ret = av_image_alloc(s->in_frame->data, s->in_frame->linesize,
+                                s->codec_ctx->width, s->codec_ctx->height,
+                                fmt, 32);
+                if (ret < 0) {
+                        log_msg(LOG_LEVEL_ERROR, "Could not allocate raw picture buffer\n");
+                        return false;
                 }
-                s->in_frame_part[i]->data[1] = s->in_frame->data[1] + s->in_frame->linesize[1] * i *
-                        chunk_size;
-                s->in_frame_part[i]->data[2] = s->in_frame->data[2] + s->in_frame->linesize[2] * i *
-                        chunk_size;
-                s->in_frame_part[i]->linesize[0] = s->in_frame->linesize[0];
-                s->in_frame_part[i]->linesize[1] = s->in_frame->linesize[1];
-                s->in_frame_part[i]->linesize[2] = s->in_frame->linesize[2];
+                for(int i = 0; i < s->params.cpu_count; ++i) {
+                        int chunk_size = s->codec_ctx->height / s->params.cpu_count;
+                        chunk_size = chunk_size / 2 * 2;
+                        s->in_frame_part[i]->data[0] = s->in_frame->data[0] + s->in_frame->linesize[0] * i *
+                                chunk_size;
+
+                        if (av_pix_fmt_desc_get(s->selected_pixfmt)->log2_chroma_h == 1) { // eg. 4:2:0
+                                chunk_size /= 2;
+                        }
+                        s->in_frame_part[i]->data[1] = s->in_frame->data[1] + s->in_frame->linesize[1] * i *
+                                chunk_size;
+                        s->in_frame_part[i]->data[2] = s->in_frame->data[2] + s->in_frame->linesize[2] * i *
+                                chunk_size;
+                        s->in_frame_part[i]->linesize[0] = s->in_frame->linesize[0];
+                        s->in_frame_part[i]->linesize[1] = s->in_frame->linesize[1];
+                        s->in_frame_part[i]->linesize[2] = s->in_frame->linesize[2];
+                }
         }
 
         s->saved_desc = desc;
@@ -1288,6 +1314,11 @@ static void v210_to_yuv444p10le(AVFrame *out_frame, unsigned char *in_data, int 
 }
 
 static pixfmt_callback_t select_pixfmt_callback(AVPixelFormat fmt, codec_t src) {
+        // no conversion needed
+        if (ug_to_av_pixfmt_map.find(src) != ug_to_av_pixfmt_map.end()
+                        && ug_to_av_pixfmt_map.find(src)->second == fmt) {
+                return nullptr;
+        }
 
         if (src == v210) {
                 if (fmt == AV_PIX_FMT_YUV420P10LE) {
@@ -1339,6 +1370,7 @@ static shared_ptr<video_frame> libavcodec_compress_tile(struct module *mod, shar
         int ret;
         unsigned char *decoded;
         shared_ptr<video_frame> out{};
+        list<unique_ptr<state_video_compress_libav, void (*)(void *)>> cleanup_callbacks; // at function exit handlers
 
         libavcodec_check_messages(s);
 
@@ -1393,11 +1425,12 @@ static shared_ptr<video_frame> libavcodec_compress_tile(struct module *mod, shar
                 decoded = (unsigned char *) tx->tiles[0].data;
         }
 
-        {
+        auto pixfmt_conv_callback = select_pixfmt_callback(s->selected_pixfmt, s->decoded_codec);
+        if (pixfmt_conv_callback != nullptr) {
                 task_result_handle_t handle[s->params.cpu_count];
                 struct my_task_data data[s->params.cpu_count];
                 for(int i = 0; i < s->params.cpu_count; ++i) {
-                        data[i].callback = select_pixfmt_callback(s->selected_pixfmt, s->decoded_codec);
+                        data[i].callback = pixfmt_conv_callback;
                         data[i].out_frame = s->in_frame_part[i];
 
                         size_t height = tx->tiles[0].height / s->params.cpu_count;
@@ -1420,6 +1453,16 @@ static shared_ptr<video_frame> libavcodec_compress_tile(struct module *mod, shar
                 for(int i = 0; i < s->params.cpu_count; ++i) {
                         wait_task(handle[i]);
                 }
+        } else { // no pixel format conversion needed
+                s->in_frame->data[0] = (uint8_t *) decoded;
+                // prevent leaving dangling pointer to the input buffer that may
+                // be freed by cleanup()
+                std::unique_ptr<state_video_compress_libav, void (*)(void*)> clean_data_ptr{s,
+                        static_cast<void(*)(void *)>([](void *state) {
+                                        auto s = (state_video_compress_libav *) state;
+                                        s->in_frame->data[0] = nullptr;
+                                })};
+                cleanup_callbacks.push_back(move(clean_data_ptr));
         }
 
         AVFrame *frame = s->in_frame;
@@ -1770,6 +1813,8 @@ const struct video_compress_info libavcodec_info = {
         libavcodec_compress_init,
         NULL,
         libavcodec_compress_tile,
+        NULL,
+        NULL,
         NULL,
         NULL,
         get_libavcodec_presets,

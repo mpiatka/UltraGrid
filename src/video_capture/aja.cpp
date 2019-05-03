@@ -3,7 +3,7 @@
  * @author Martin Pulec     <pulec@cesnet.cz>
  */
 /*
- * Copyright (c) 2015-2018 CESNET, z. s. p. o.
+ * Copyright (c) 2015-2019 CESNET, z. s. p. o.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -93,6 +93,8 @@
 
 #include "aja_common.h"
 
+#define MOD_NAME "[AJA cap.] "
+
 namespace aja = ultragrid::aja;
 
 #ifdef _MSC_VER
@@ -113,6 +115,15 @@ volatile bool *aja_should_exit = &should_exit;
 #define LINK_SPEC static
 #endif
 
+#define MODULE_NAME "[AJA cap.] "
+
+#define CHECK_OK(cmd, msg, action_failed) do { bool ret = cmd; if (!ret) {\
+        LOG(LOG_LEVEL_WARNING) << MODULE_NAME << (msg) << "\n";\
+        action_failed;\
+}\
+} while(0)
+#define NOOP ((void)0)
+
 using namespace std;
 
 struct aligned_data_allocator {
@@ -128,7 +139,7 @@ static const ULWord app = AJA_FOURCC ('U','L','G','R');
 
 class vidcap_state_aja {
         public:
-                vidcap_state_aja(unordered_map<string, string> const & parameters, bool grabAudio);
+                vidcap_state_aja(unordered_map<string, string> const & parameters, int audioFlags);
                 void Init();
                 virtual ~vidcap_state_aja();
                 struct video_frame *grab(struct audio_frame **audio);
@@ -160,9 +171,9 @@ class vidcap_state_aja {
                 int                    mFrames;
                 struct audio_frame     mAudio;
                 int                    mMaxAudioChannels;
+                NTV2AudioSource        mAudioSource;
                 NTV2TCSource           mTimeCodeSource;                ///< @brief     Time code source
                 bool                   mCheckFor4K;
-                bool                   mGrabAudio;
                 uint32_t               mAudioInLastAddress;    ///< @brief My record of the location of the last audio sample captured
 
                 AJAStatus SetupVideo();
@@ -179,14 +190,15 @@ class vidcap_state_aja {
                 static void     ProducerThreadStatic (vidcap_state_aja * pContext);
 };
 
-vidcap_state_aja::vidcap_state_aja(unordered_map<string, string> const & parameters, bool grabAudio) :
+vidcap_state_aja::vidcap_state_aja(unordered_map<string, string> const & parameters, int audioFlags) :
         mDeviceIndex(0), mInputChannel(NTV2_CHANNEL1), mVideoFormat(NTV2_FORMAT_UNKNOWN),
         mPixelFormat(NTV2_FBF_8BIT_YCBCR), mInputSource(NTV2_INPUTSOURCE_SDI1),
         mAudioSystem(NTV2_AUDIOSYSTEM_1),
         mOutputFrame(0), mProgressive(false),
         mT0(chrono::system_clock::now()), mFrames(0), mAudio(audio_frame()), mMaxAudioChannels(0),
-        mTimeCodeSource(NTV2_TCSOURCE_DEFAULT), mCheckFor4K(false), mGrabAudio(grabAudio)
+        mTimeCodeSource(NTV2_TCSOURCE_DEFAULT), mCheckFor4K(false)
 {
+#define VIDCAP_FLAG_AUDIO_ANALOG (1<<3u)   ///< (balanced) analog audio
         for (auto it : parameters) {
                 if (it.first == "progressive") {
                         mProgressive = true;
@@ -194,6 +206,20 @@ vidcap_state_aja::vidcap_state_aja(unordered_map<string, string> const & paramet
                         mCheckFor4K = true;
                 } else if (it.first == "device") {
                         mDeviceIndex = stol(it.second, nullptr, 10);
+                } else if (it.first == "codec") {
+                        if (get_codec_from_name(it.second.c_str()) == VIDEO_CODEC_NONE) {
+                                throw string("Unknown codec " + it.second + "!");
+                        }
+                        mPixelFormat = NTV2_FBF_INVALID;
+                        for (auto c : aja::codec_map) {
+                                if (c.second == get_codec_from_name(it.second.c_str())) {
+                                        mPixelFormat = c.first;
+                                        break;
+                                }
+                        }
+                        if (mPixelFormat == NTV2_FBF_INVALID) {
+                                throw string("Cannoc map " + it.second + " to AJA codec!");
+                        }
                 } else if (it.first == "connection") {
                         NTV2InputSource source = NTV2InputSource();
                         while (source != NTV2_INPUTSOURCE_INVALID) {
@@ -224,6 +250,18 @@ vidcap_state_aja::vidcap_state_aja(unordered_map<string, string> const & paramet
                         throw string("Unknown option: ") + it.first;
                 }
         }
+
+        if (audioFlags & VIDCAP_FLAG_AUDIO_EMBEDDED) {
+                // this maps according to mInputSource - EMBEDDED (SDI), HDMI or ANALOG
+                mAudioSource = NTV2InputSourceToAudioSource(mInputSource);
+        } else if (audioFlags & VIDCAP_FLAG_AUDIO_AESEBU) {
+                mAudioSource = NTV2_AUDIO_AES;
+        } else if (audioFlags & VIDCAP_FLAG_AUDIO_ANALOG) {
+                mAudioSource = NTV2_AUDIO_MIC;
+        } else {
+                mAudioSource = NTV2_AUDIO_SOURCE_INVALID;
+        }
+
         Init();
 }
 
@@ -411,11 +449,11 @@ AJAStatus vidcap_state_aja::SetupVideo()
         mInputChannel = ::NTV2InputSourceToChannel (mInputSource);
 
 //      Sometimes other applications disable some or all of the frame buffers, so turn on ours now..
-        mDevice.EnableChannel (mInputChannel);
+        CHECK_OK(mDevice.EnableChannel (mInputChannel), "Cannot enable channel", NOOP);
 
         //      Enable and subscribe to the interrupts for the channel to be used...
-        mDevice.EnableInputInterrupt (mInputChannel);
-        mDevice.SubscribeInputVerticalEvent (mInputChannel);
+        CHECK_OK(mDevice.EnableInputInterrupt (mInputChannel), "EnableInputInterrupt failed", NOOP);
+        CHECK_OK(mDevice.SubscribeInputVerticalEvent (mInputChannel), "SubscribeInputVerticalEvent failed", NOOP);
 
         //      Set the video format to match the incomming video format.
         //      Does the device support the desired input source?
@@ -425,15 +463,15 @@ AJAStatus vidcap_state_aja::SetupVideo()
         //      is configured for input...
         if (::NTV2DeviceHasBiDirectionalSDI (mDeviceID) && NTV2_INPUT_SOURCE_IS_SDI (mInputSource))
         {
-                mDevice.SetSDITransmitEnable (mInputChannel, false);
+                CHECK_OK(mDevice.SetSDITransmitEnable (mInputChannel, false), "Cannot disable SDI transmit", NOOP);
 
                 //      Give the input circuit some time (~10 frames) to lock onto the input signal...
 #if AJA_NTV2_SDK_VERSION_BEFORE(12,5)
                 for (int i = 0; i < 10; i++) {
-                        mDevice.WaitForInputVerticalInterrupt (mInputChannel);
+                        CHECK_OK(mDevice.WaitForInputVerticalInterrupt (mInputChannel), "Cannot wait for VBI", NOOP);
                 }
 #else
-                mDevice.WaitForInputVerticalInterrupt (mInputChannel, 10);
+                CHECK_OK(mDevice.WaitForInputVerticalInterrupt (mInputChannel, 10), "Cannot wait for VBI", NOOP);
 #endif
         }
 
@@ -558,11 +596,15 @@ AJAStatus vidcap_state_aja::SetupVideo()
 
 AJAStatus vidcap_state_aja::SetupAudio (void)
 {
+        if (mAudioSource == NTV2_AUDIO_SOURCE_INVALID) {
+                LOG(LOG_LEVEL_INFO) << MOD_NAME "Audio capture disabled.\n";
+                return AJA_STATUS_SUCCESS;
+        }
         //      Have the audio system capture audio from the designated device input...
 #if AJA_NTV2_SDK_VERSION_BEFORE(12,4)
         mDevice.SetAudioSystemInputSource (mAudioSystem, mInputSource);
 #else
-        mDevice.SetAudioSystemInputSource (mAudioSystem, ::NTV2InputSourceToAudioSource(mInputSource), ::NTV2InputSourceToEmbeddedAudioInput(mInputSource));
+        CHECK_OK(mDevice.SetAudioSystemInputSource(mAudioSystem, mAudioSource, ::NTV2InputSourceToEmbeddedAudioInput(mInputSource)), string("Cannot set audio input source: ") + NTV2AudioSourceToString(mAudioSource), NOOP);
 #endif
 
         mMaxAudioChannels = ::NTV2DeviceGetMaxAudioChannels (mDeviceID);
@@ -695,7 +737,7 @@ void vidcap_state_aja::CaptureFrames (void)
                 //      Wait until the input has completed capturing a frame...
                 mDevice.WaitForInputFieldID (NTV2_FIELD0, mInputChannel);
 
-                if (mGrabAudio) {
+                if (mAudioSource != NTV2_AUDIO_SOURCE_INVALID) {
                         pHostAudioBuffer = reinterpret_cast <uint32_t *> (aligned_malloc(NTV2_AUDIOSIZE_MAX, AJA_PAGE_SIZE));
                         //      Read the audio position registers as close to the interrupt as possible...
                         mDevice.ReadAudioLastIn (currentAudioInAddress, mInputChannel);
@@ -813,7 +855,7 @@ struct video_frame *vidcap_state_aja::grab(struct audio_frame **audio)
 
 static void show_help() {
         cout << "Usage:\n";
-        cout << rang::style::bold << rang::fg::red << "\t-t aja[:device=<idx>]" << rang::fg::reset << "[:progressive][:4K][:connection=<c>][:format=<fmt>]\n" << rang::style::reset;
+        cout << rang::style::bold << rang::fg::red << "\t-t aja[:device=<idx>]" << rang::fg::reset << "[:progressive][:4K][:codec=<pixfmt>][:connection=<c>][:format=<fmt>] -r [embedded|AESEBU|analog]\n" << rang::style::reset;
         cout << "where\n";
 
         cout << rang::style::bold << "\tprogressive\n" << rang::style::reset;
@@ -845,9 +887,28 @@ static void show_help() {
                 cout << "\t"  << rang::style::bold << i << rang::style::reset << ") " << rang::style::bold << info.deviceIdentifier << rang::style::reset << ". " << info;
                 NTV2VideoFormatSet fmt_set;
                 if (NTV2DeviceGetSupportedVideoFormats(info.deviceID, fmt_set)) {
-                        cout << "\tAvailable formats:";
+                        cout << rang::style::underline << "\tAvailable formats:" << rang::style::reset;
                         for (auto fmt : fmt_set) {
+                                if (fmt != *fmt_set.begin()) {
+                                        cout << ",";
+                                }
                                 cout << " \"" << NTV2VideoFormatToString(fmt) << "\"";
+                        }
+                        cout << "\n";
+                }
+                NTV2FrameBufferFormatSet pix_fmts;
+                if (NTV2DeviceGetSupportedPixelFormats(info.deviceID, pix_fmts)) {
+                        cout << rang::style::underline << "\tAvailable pixel formats:" << rang::style::reset;
+                        for (auto fmt : pix_fmts) {
+                                if (fmt != *pix_fmts.begin()) {
+                                        cout << ",";
+                                }
+                                if (aja::codec_map.find(fmt) == aja::codec_map.end()) {
+                                        cout << " " << NTV2FrameBufferFormatToString(fmt) << " (unsupported)";
+                                } else {
+                                        cout << " " << get_codec_name(aja::codec_map.at(fmt));
+
+                                }
                         }
                         cout << "\n";
                 }
@@ -883,7 +944,7 @@ LINK_SPEC int vidcap_aja_init(const struct vidcap_params *params, void **state)
 
         vidcap_state_aja *ret = nullptr;
         try {
-                ret = new vidcap_state_aja(parameters_map, vidcap_params_get_flags(params) & VIDCAP_FLAG_AUDIO_EMBEDDED);
+                ret = new vidcap_state_aja(parameters_map, vidcap_params_get_flags(params) & VIDCAP_FLAG_AUDIO_ANY);
                 ret->Run();
         } catch (string const & s) {
                 LOG(LOG_LEVEL_ERROR) << "[AJA cap.] " << s << "\n";

@@ -64,6 +64,8 @@
 #define EXIT_FAIL_NETWORK      10
 #define EXIT_FAIL_AUDIO        11
 
+#define BUG_MSG "Please report a bug to " PACKAGE_BUGREPORT " if you reach here."
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -154,6 +156,15 @@ bool register_mainloop(mainloop_t, void *);
 extern std::unordered_map<std::string, std::string> commandline_params;
 #endif
 
+/**
+ * Introduces new parameter. Without calling that, parameter from command-line
+ * would be rejected.
+ *
+ * @param salt  unique salt to be added to identifier. Must be a sequence
+ *              of digits, underscores, lowercase and uppercase Latin letters.
+ * @param param parameter name ("-enclosed string)
+ * @param doc   documentation - string
+ */
 #define ADD_TO_PARAM(salt, param, doc) static void add_to_param_doc##salt(void)  __attribute__((constructor));\
 \
 static void add_to_param_doc##salt(void) \

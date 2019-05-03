@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>440</width>
-    <height>341</height>
+    <width>452</width>
+    <height>460</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -17,7 +17,7 @@
    <item>
     <widget class="QTabWidget" name="tabWidget">
      <property name="currentIndex">
-      <number>0</number>
+      <number>1</number>
      </property>
      <widget class="QWidget" name="Network">
       <property name="sizePolicy">
@@ -31,7 +31,7 @@
       </attribute>
       <layout class="QVBoxLayout" name="verticalLayout_5">
        <item>
-        <layout class="QFormLayout" name="formLayout">
+        <layout class="QFormLayout" name="networkFormLayout">
          <property name="sizeConstraint">
           <enum>QLayout::SetFixedSize</enum>
          </property>
@@ -177,7 +177,7 @@
                   </sizepolicy>
                  </property>
                  <property name="currentIndex">
-                  <number>3</number>
+                  <number>2</number>
                  </property>
                  <widget class="QWidget" name="mult">
                   <layout class="QHBoxLayout" name="horizontalLayout_7">
@@ -303,27 +303,6 @@
                       <number>5</number>
                      </property>
                     </widget>
-                   </item>
-                   <item>
-                    <layout class="QVBoxLayout" name="verticalLayout_4">
-                     <property name="rightMargin">
-                      <number>5</number>
-                     </property>
-                     <item>
-                      <widget class="QRadioButton" name="ldgmAdvCpuRadio">
-                       <property name="text">
-                        <string>CPU</string>
-                       </property>
-                      </widget>
-                     </item>
-                     <item>
-                      <widget class="QRadioButton" name="ldgmAdvGpuRadio">
-                       <property name="text">
-                        <string>GPU</string>
-                       </property>
-                      </widget>
-                     </item>
-                    </layout>
                    </item>
                   </layout>
                  </widget>
@@ -499,6 +478,45 @@
           </layout>
          </widget>
         </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="accelTab">
+      <attribute name="title">
+       <string>Acceleration</string>
+      </attribute>
+      <layout class="QFormLayout" name="accelFormLayout">
+       <item row="0" column="0">
+        <widget class="QCheckBox" name="decodeAccelCheck">
+         <property name="text">
+          <string>Video decode</string>
+         </property>
+        </widget>
+       </item>
+       <item row="2" column="0">
+        <layout class="QHBoxLayout" name="accelHorizontalLayout">
+         <item>
+          <widget class="QLabel" name="label_5">
+           <property name="text">
+            <string>LDGM</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QRadioButton" name="ldgmCpuRadio">
+           <property name="text">
+            <string>CPU</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QRadioButton" name="ldgmGpuRadio">
+           <property name="text">
+            <string>GPU</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
        </item>
       </layout>
      </widget>

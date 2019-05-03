@@ -17,6 +17,7 @@ AC_PROG_CC
 AC_PROG_CC_C99
 AC_PROG_CPP
 AC_PROG_CXX
+AC_PROG_CXXCPP
 AC_PROG_INSTALL
 AC_HEADER_STDC
 AC_C_CONST
@@ -107,6 +108,14 @@ m4_defun([MY_CHECK_FRAMEWORK],
 AC_MSG_CHECKING([GIT presence])
 if which git
 then
+        AC_MSG_CHECKING([checking GIT branch ])
+        git_branch=`git name-rev --name-only HEAD`
+        if test "$git_branch"; then
+                AC_DEFINE_UNQUOTED([GIT_BRANCH], "$git_branch", [Current GIT branch])
+                AC_MSG_RESULT($git_branch);
+        else
+                AC_MSG_RESULT(no);
+        fi
         AC_MSG_CHECKING([checking GIT revision ])
         git_rev=`git rev-parse --short HEAD`
         if test "$git_rev"; then
@@ -125,13 +134,19 @@ if expr "$host_os" : ".*darwin.*" > /dev/null; then
 else if expr "$host_os" : ".*mingw32.*" > /dev/null || expr "$host_os" : ".*msys.*" > /dev/null; then
         system=Windows
 	AC_DEFINE([WIN32], [1], [This is an Windows OS])
-	NET_LIBS="-lsetupapi -lWs2_32 -lIphlpapi -lOleAut32"
+	NET_LIBS="-lsetupapi -lws2_32 -liphlpapi -loleaut32"
 	LIBS="$LIBS $NET_LIBS"
 else
         system=Linux
 	LDFLAGS="$LDFLAGS -Wl,--dynamic-list-data"
 	AC_DEFINE([HAVE_LINUX], [1], [This is Linux])
 fi
+fi
+
+if test $build != $host; then
+        cross_compile=yes
+else
+        cross_compile=no
 fi
 
 AC_SUBST(system)
@@ -159,9 +174,6 @@ then
 	X_CFLAGS="$X_CFLAGS -I/usr/X11R6/include"
         OBJS="$OBJS src/utils/autorelease_pool.o"
 fi
-
-AC_DEFINE_UNQUOTED([OS_VERSION_MAJOR], $os_version_major, [OS kernel major version])
-AC_DEFINE_UNQUOTED([OS_VERSION_MINOR], $os_version_minor, [OS kernel minor version])
 
 LINKER=$CXX
 
@@ -221,7 +233,9 @@ AH_BOTTOM([
  * so supplying a fake one (Macs allocate always aligned pointers
  * to a 16 byte boundry.
  */
-#if defined HAVE_MACOSX && OS_VERSION_MAJOR <= 9
+#if defined HAVE_MACOSX
+#include <Availability.h>
+#ifndef __MAC_10_9
 #include <errno.h>
 #include <stdlib.h>
 #ifndef POSIX_MEMALIGN
@@ -236,7 +250,13 @@ static inline int posix_memalign(void **memptr, size_t alignment, size_t size)
        return 0;
 }
 #endif // POSIX_MEMALIGN
-#endif // defined HAVE_MACOSX && OS_VERSION_MAJOR <= 9
+#endif // !defined __MAC_10_9
+#endif // defined HAVE_MACOSX
+
+#undef MIN
+#define MIN(a,b) (((a)<(b))?(a):(b))
+#undef MAX
+#define MAX(a,b) (((a)>(b))?(a):(b))
 ])
 
 # @param $1 name of the module
@@ -259,6 +279,7 @@ AC_DEFUN([ADD_MODULE], [
 				 MODULES="$MODULES $TARGET"
 				 TARGETS="$TARGETS
 $TARGET: "$2" $4
+	\$(MKDIR_P) lib/ultragrid
 	\$(LINKER) \$(LDFLAGS) -shared -Wl,-soname,ultragrid_"$1.so" "$2" -o lib/ultragrid/ultragrid_"$1".so "$3" $4
 "
 				 ])
@@ -668,7 +689,7 @@ case "$system" in
                         DECKLINK_INC=$srcdir/DeckLink/Windows
                 fi
                 SAVED_LIBS=$LIBS
-                LIBS="$LIBS -lOle32"
+                LIBS="$LIBS -lole32"
                 AC_LANG_PUSH(C++)
 		AC_MSG_CHECKING([DeckLink usability])
 		AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
@@ -679,7 +700,7 @@ case "$system" in
 		[[IDeckLinkIterator *deckLinkIter; CoCreateInstance(CLSID_CDeckLinkIterator, NULL, CLSCTX_ALL, IID_IDeckLinkIterator, (void **) deckLinkIter);]])],FOUND_DECKLINK=yes,FOUND_DECKLINK=no)
                 LIBS=$SAVED_LIBS
                 if test $FOUND_DECKLINK = yes; then
-                        DECKLINK_LIB="$DECKLINK_LIB -lOle32"
+                        DECKLINK_LIB="$DECKLINK_LIB -lole32"
                 fi
 		AC_MSG_RESULT([$FOUND_DECKLINK])
                 AC_LANG_POP(C++)
@@ -1205,19 +1226,42 @@ fi
 # OpenCV version detection
 # -------------------------------------------------------------------------------------------------
 
-OPENCV_MAJOR=
+AC_ARG_ENABLE(opencv,
+              AS_HELP_STRING([--disable-opencv], [disable all OpenCV code]),
+              [opencv_req=$enableval],
+              [opencv_req=auto])
 
 PKG_CHECK_MODULES([OPENCV_3], [opencv > 3.0], [
 		AC_DEFINE([HAVE_OPENCV_3], [1], [Use OpenCV version 3])
 		OPENCV_MAJOR=3
+		OPENCV_LIBS=$OPENCV_3_LIBS
+		OPENCV_CFLAGS=$OPENCV_3_CFLAGS
 	], [
 		PKG_CHECK_MODULES([OPENCV_2], [opencv > 2.3], [
 			AC_DEFINE([HAVE_OPENCV_2], [1], [Use OpenCV version 2])
 			OPENCV_MAJOR=2
-			], [OPENCV_MAJOR=]
+			OPENCV_LIBS=$OPENCV_2_LIBS
+			OPENCV_CFLAGS=$OPENCV_2_CFLAGS
+			], [
+				PKG_CHECK_MODULES([OPENCV_4], [opencv4], [
+					AC_DEFINE([HAVE_OPENCV_4], [1], [Use OpenCV version 4])
+					OPENCV_MAJOR=4
+					OPENCV_LIBS=$OPENCV_4_LIBS
+					OPENCV_CFLAGS=$OPENCV_4_CFLAGS
+					], [OPENCV_MAJOR=]
+					)
+			]
 		)
 	]
 )
+
+if test -n "$OPENCV_MAJOR" -a $opencv_req != "no"; then
+        HAVE_OPENCV=yes
+        opencv="yes (version: $OPENCV_MAJOR)"
+else
+        HAVE_OPENCV=no
+        opencv="no"
+fi
 
 # -------------------------------------------------------------------------------------------------
 # RTSP capture stuff
@@ -1279,13 +1323,17 @@ AC_ARG_WITH(live555,
             [livemedia_prefix=$withval
             ])
 
-
-AC_CHECK_FILE($livemedia_prefix/include/liveMedia/liveMedia.hh, [FOUND_LIVE_H=yes], [echo "liveMedia (live555 library) headers not found; may apt-get install liblivemedia-dev"; FOUND_LIVE_H=no])
+AC_LANG_PUSH(C++)
+RTSP_SERVER_FLAGS="-I$livemedia_prefix/include/groupsock -I$livemedia_prefix/include/liveMedia -I$livemedia_prefix/include/BasicUsageEnvironment -I$livemedia_prefix/include/UsageEnvironment"
+SAVED_CPPFLAGS=$CPPFLAGS
+CPPFLAGS="$CPPFLAGS $RTSP_SERVER_FLAGS"
+AC_CHECK_HEADERS(liveMedia.hh, [FOUND_LIVE_H=yes], [echo "liveMedia (live555 library) headers not found; may apt-get install liblivemedia-dev"; FOUND_LIVE_H=no])
+CPPFLAGS=$SAVED_CPPFLAGS
+AC_LANG_POP(C++)
 
 if test $rtsp_server_req != no -a $FOUND_LIVE_H = yes
 then
         AC_DEFINE([HAVE_RTSP_SERVER], [1], [RTSP server build with live555 support])
-        RTSP_SERVER_FLAGS="-I$livemedia_prefix/include/groupsock -I$livemedia_prefix/include/liveMedia -I$livemedia_prefix/include/BasicUsageEnvironment -I$livemedia_prefix/include/UsageEnvironment"
         CFLAGS="$CFLAGS $RTSP_SERVER_FLAGS"
         CXXFLAGS="$CXXFLAGS $RTSP_SERVER_FLAGS"
         RTSP_SERVER_LIBS="-lliveMedia -lBasicUsageEnvironment -lUsageEnvironment -lgroupsock"
@@ -1326,23 +1374,19 @@ RESIZE_LIBS=
 RESIZE_OBJ=
 resize=no
 
-define(resize_dep, opencv > 2.3.1) # TODO: supply correct version requirement
-
 AC_ARG_ENABLE(resize,
 [  --disable-resize        disable resize capture filter (default is auto)]
-[                          Requires: resize_dep],
+[                          Requires: opencv],
     [resize_req=$enableval],
     [resize_req=auto]
     )
 
-PKG_CHECK_MODULES([RESIZE], [resize_dep], FOUND_RESIZE_DEP=yes, FOUND_RESIZE_DEP=no)
-
-if test $resize_req != no -a $FOUND_RESIZE_DEP = yes -a $system = Linux
+if test $resize_req != no -a $HAVE_OPENCV = yes
 then
-        CFLAGS="$CFLAGS ${RESIZE_CFLAGS}"
-        CXXFLAGS="$CXXFLAGS ${RESIZE_CFLAGS}"
+        CFLAGS="$CFLAGS ${OPENCV_CFLAGS}"
+        CXXFLAGS="$CXXFLAGS ${OPENCV_CFLAGS}"
         RESIZE_OBJ="src/capture_filter/resize.o src/capture_filter/resize_utils.o"
-        ADD_MODULE("vcapfilter_resize", "$RESIZE_OBJ", "$RESIZE_LIBS")
+        ADD_MODULE("vcapfilter_resize", "$RESIZE_OBJ", "$OPENCV_LIBS")
         resize=yes
 fi
 
@@ -2044,7 +2088,7 @@ AC_ARG_WITH(cuda,
 AC_PATH_PROG(NVCC, nvcc, [], [$CUDA_PATH/bin$PATH_SEPARATOR$PATH]dnl
         [$PATH_SEPARATOR/opt/cuda/bin$PATH_SEPARATOR/usr/local/cuda/bin])
 
-if test -n "$NVCC" -a $cuda_req != no
+if test -n "$NVCC" -a $cross_compile = no -a $cuda_req != no
 then
         CUDA_PATH=`dirname "$NVCC"`
         CUDA_PATH=`dirname "$CUDA_PATH"`
@@ -2121,7 +2165,7 @@ else
 	with_cuda_host_compiler="default"
 fi
 
-if test "x$NVCC" != "X" ; then
+if test "x$FOUND_CUDA" = "xyes" ; then
 	HOST_CC_REPORT="$HOST_CC_REPORT, ${with_cuda_host_compiler})"
 else
 	HOST_CC_REPORT=""
@@ -2326,7 +2370,7 @@ then
         AC_CHECK_LIB(sail, main, FOUND_SAGE_L=yes, FOUND_SAGE_L=no, -lquanta -I${SAGE_INC} -L${SAGE_LIB})
 fi
 
-AC_CHECK_FILE(${SAGE_INC}/sail.h, FOUND_SAGE_H=yes, FOUND_SAGE_H=no)
+AC_CHECK_HEADERS(${SAGE_INC}/sail.h, FOUND_SAGE_H=yes, FOUND_SAGE_H=no)
 
 if test $sage_req != no -a $FOUND_SAGE_L = yes -a $FOUND_SAGE_H = yes
 then
@@ -2371,11 +2415,14 @@ fi
 
 if test $portaudio = yes
 then
-            PORTAUDIO_CAP_OBJ="src/audio/portaudio_common.o src/audio/capture/portaudio.o"
-            PORTAUDIO_PLAY_OBJ="src/audio/portaudio_common.o src/audio/playback/portaudio.o"
-            AC_DEFINE([HAVE_PORTAUDIO], [1], [Build with Portaudio support])
-            ADD_MODULE("acap_portaudio", "$PORTAUDIO_CAP_OBJ", "$PORTAUDIO_LIB")
-            ADD_MODULE("aplay_portaudio", "$PORTAUDIO_PLAY_OBJ", "$PORTAUDIO_LIB")
+        AC_CHECK_LIB(portaudio, Pa_GetVersionInfo,
+                     AC_DEFINE([HAVE_PA_GETVERSIONINFO], [1], [Portaudio
+                                has Pa_GetVersionInfo]))
+        PORTAUDIO_CAP_OBJ="src/audio/portaudio_common.o src/audio/capture/portaudio.o"
+        PORTAUDIO_PLAY_OBJ="src/audio/portaudio_common.o src/audio/playback/portaudio.o"
+        AC_DEFINE([HAVE_PORTAUDIO], [1], [Build with Portaudio support])
+        ADD_MODULE("acap_portaudio", "$PORTAUDIO_CAP_OBJ", "$PORTAUDIO_LIB")
+        ADD_MODULE("aplay_portaudio", "$PORTAUDIO_PLAY_OBJ", "$PORTAUDIO_LIB")
 fi
 
 if test $portaudio_req = yes -a $portaudio = no; then
@@ -2713,6 +2760,27 @@ if test $dshow_req = yes -a $dshow = no; then
         AC_MSG_ERROR([DirectShow not found]);
 fi
 
+# -----------------------------------------------------------------------------
+# WASAPI
+# -----------------------------------------------------------------------------
+wasapi=no
+wasapi_req=auto
+AC_ARG_ENABLE(wasapi,
+      AS_HELP_STRING([--disable-wasapi], [disable WASAPI support (default is auto)]),
+    [wasapi_req=$enableval],
+    [wasapi_req=auto]
+    )
+
+if test $system = Windows -a $wasapi_req != no; then
+        AC_DEFINE([HAVE_WASAPI], [1], [Build with WASAPI support])
+        ADD_MODULE("aplay_wasapi", "src/audio/playback/wasapi.o", "")
+        wasapi=yes
+fi
+
+if test $wasapi_req = yes -a $wasapi = no; then
+        AC_MSG_ERROR([WASAPI not found]);
+fi
+
 # -------------------------------------------------------------------------------------------------
 # iHDTV
 # -------------------------------------------------------------------------------------------------
@@ -2886,16 +2954,20 @@ fi
 # -------------------------------------------------------------------------------------------------
 video_mix=no
 
-define(video_mix_dep, opencv)
-
 AC_ARG_ENABLE(video-mixer,
 [  --disable-video-mixer   disable MCU-like video mixer (default is auto)]
-[                          Requires: video_mix_dep],
+[                          Requires: opencv],
     [video_mix_req=$enableval],
     [video_mix_req=auto]
     )
 
-PKG_CHECK_MODULES([VIDEO_MIX], [video_mix_dep], FOUND_VIDEO_MIX_DEP=yes, FOUND_VIDEO_MIX_DEP=no)
+if test x$HAVE_OPENCV != xno; then
+	FOUND_VIDEO_MIX_DEP=yes
+	VIDEO_MIX_LIBS=$OPENCV_LIBS
+	VIDEO_MIX_CFLAGS=$OPENCV_CFLAGS
+else
+	FOUND_VIDEO_MIX_DEP=no
+fi
 
 if test $video_mix_req != no -a $FOUND_VIDEO_MIX_DEP = yes -a x$OPENCV_MAJOR = x3
 then
@@ -2909,7 +2981,9 @@ then
 	])
 elif test x$OPENCV_MAJOR != x3
 then
-	AC_DEFINE([HAVE_OPENCV_CUDA], [1], [Whether the opencv installation supports cuda modules])
+	AC_CHECK_HEADER(opencv2/gpu/gpu.hpp, AC_DEFINE([HAVE_OPENCV_CUDA], [1],
+			[Whether the opencv installation supports cuda modules]),
+			AC_MSG_WARN([Video mixer will be compiled as CPU-only]))
 fi
 
 if test $video_mix_req != no -a $FOUND_VIDEO_MIX_DEP = yes
@@ -2980,12 +3054,18 @@ AC_ARG_ENABLE(ndi,
     [ndi_req=auto]
     )
 
-AC_CHECK_HEADER(Processing.NDI.Lib.h, FOUND_NDI_H=yes, FOUND_NDI_H=no)
-AC_CHECK_LIB(ndi, NDIlib_initialize,  FOUND_NDI_L=yes, FOUND_NDI_L=no)
+if test $system = Windows; then
+        NDI_LIB=Processing.NDI.Lib.x64
+else
+        NDI_LIB=ndi
+fi
 
-if test $ndi_req != no -a "$FOUND_NDI_H" = yes -a "$FOUND_NDI_L"
+AC_CHECK_HEADER(Processing.NDI.Lib.h, FOUND_NDI_H=yes, FOUND_NDI_H=no)
+AC_CHECK_LIB($NDI_LIB, NDIlib_initialize,  FOUND_NDI_L=yes, FOUND_NDI_L=no)
+
+if test $ndi_req != no -a "$FOUND_NDI_H" = yes -a "$FOUND_NDI_L" = yes
 then
-        ADD_MODULE("vidcap_ndi", "src/video_capture/ndi.o", "-lndi")
+        ADD_MODULE("vidcap_ndi", "src/video_capture/ndi.o", "-l$NDI_LIB")
         ndi=yes
 fi
 
@@ -3028,7 +3108,7 @@ else
 fi
 
 
-if test -n "$CINEFORM_PATH"
+if test -n "$CINEFORM_PATH" -a $cross_compile = no
 then
         AC_CHECK_FILES(${CINEFORM_STATIC_PATH}, FOUND_CINEFORM=yes, FOUND_CINEFORM=no)
 fi
@@ -3097,6 +3177,7 @@ RESULT=\
   CUDA support ................ $FOUND_CUDA$HOST_CC_REPORT
   Library live555 ............. $livemedia
   Qt GUI ...................... $qt_gui
+  OpenCV ...................... $opencv
 "
 
 # params: <result> <feature> <bool> 0|1
@@ -3140,6 +3221,7 @@ RESULT=`add_column "$RESULT" "CoreAudio" $coreaudio $?`
 RESULT=`add_column "$RESULT" "JACK" $jack $?`
 RESULT=`add_column "$RESULT" "JACK transport" $jack_trans $?`
 RESULT=`add_column "$RESULT" "Portaudio" $portaudio $?`
+RESULT=`add_column "$RESULT" "WASAPI" $wasapi $?`
 
 RESULT="$RESULT
 "

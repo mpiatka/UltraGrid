@@ -43,6 +43,9 @@
 #ifndef TYPES_H_
 #define TYPES_H_
 
+#ifndef __cpluspus
+#include <stdbool.h>
+#endif
 #include <stddef.h>
 #include <stdint.h>
 
@@ -70,7 +73,7 @@ typedef enum {
         RGBA,     ///< RGBA 8-bit
         UYVY,     ///< YCbCr 422 8-bit - Cb Y0 Cr Y1
         YUYV,     ///< YCbCr 422 8-bit - Y0 Cb Y1 Cr
-        R10k,     ///< RGB 10-bit (also know as r210)
+        R10k,     ///< RGB 10-bit
         R12L,     ///< RGB 12-bit packed, little-endian
         v210,     ///< YCbCr 422 10-bit
         DVS10,    ///< DVS 10-bit format
@@ -93,6 +96,8 @@ typedef enum {
         HFYU,     ///< HuffYUV
         FFV1,     ///< FFV1
         CFHD,     ///< Cineform
+        RG48,     ///< Cineform 16-bit RGB
+        AV1,      ///< AOMedia Video 1
         VIDEO_CODEC_COUNT ///< count of known video codecs (including VIDEO_CODEC_NONE)
 } codec_t;
 

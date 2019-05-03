@@ -253,13 +253,14 @@ void print_capabilities(struct module *root, bool use_vidcap)
                 auto vdi = static_cast<const struct video_display_info *>(it.second);
                 int count;
                 struct device_info *devices;
-                vdi->probe(&devices, &count);
+                void (*deleter)(void *) = nullptr;
+                vdi->probe(&devices, &count, &deleter);
                 cout << "[cap][display] " << it.first << std::endl;
                 for (int i = 0; i < count; ++i) {
                         cout << "[cap] (" << devices[i].id << ";" << devices[i].name << ";" <<
                                 devices[i].repeatable << ")\n";
                 }
-                free(devices);
+                deleter ? deleter(devices) : free(devices);
         }
 
         cout << "[cap] Audio capturers:" << endl;
@@ -297,6 +298,9 @@ void print_version()
 {
         cout << rang::fg::cyan << rang::style::bold << PACKAGE_STRING <<
                 rang::fg::reset << rang::style::reset << " (" <<
+#ifdef GIT_BRANCH
+                GIT_BRANCH << " "
+#endif
 #ifdef GIT_REV
                 "rev " GIT_REV " " <<
 #endif
@@ -391,7 +395,9 @@ bool register_mainloop(mainloop_t m, void *u)
 
 // some common parameters used within multiple modules
 ADD_TO_PARAM(audio_buffer_len, "audio-buffer-len", "* audio-buffer-len=<ms>\n"
-                "  Sets length of software audio playback buffer (in ms, ALSA/Portaudio)\n");
+                "  Sets length of software audio playback buffer (in ms, ALSA/Coreaudio/Portaudio/WASAPI)\n");
+ADD_TO_PARAM(audio_cap_frames, "audio-cap-frames", "* audio-cap-frames=<f>\n"
+                "  Sets number of audio frames captured at once (CoreAudio)\n");
 ADD_TO_PARAM(low_latency_audio, "low-latency-audio", "* low-latency-audio\n"
                 "  Try to reduce audio latency at the expense of worse reliability\n");
 ADD_TO_PARAM(window_title, "window-title", "* window-title=<title>\n"

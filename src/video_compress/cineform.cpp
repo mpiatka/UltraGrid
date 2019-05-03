@@ -1,3 +1,44 @@
+/**
+ * @file   cineform.cpp
+ * @author Martin Piatka <piatka@cesnet.cz>
+ *
+ */
+/* Copyright (c) 2019 CESNET z.s.p.o.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, is permitted provided that the following conditions
+ * are met:
+ * 
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ * 
+ *      This product includes software developed by CESNET z.s.p.o.
+ * 
+ * 4. Neither the name of the CESNET nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software without
+ *    specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHORS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESSED OR IMPLIED WARRANTIES, INCLUDING,
+ * BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+ * EVENT SHALL THE AUTHORS OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+ * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ */
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -38,6 +79,7 @@ struct state_video_compress_cineform{
         std::mutex mutex;
 
         struct video_desc saved_desc;
+        struct video_desc precompress_desc;
         struct video_desc compressed_desc;
 
         void (*convertFunc)(video_frame *dst, video_frame *src);
@@ -117,7 +159,7 @@ static int parse_fmt(struct state_video_compress_cineform *s, char *fmt) {
         return 0;
 }
 
-struct module * cineform_compress_init(struct module *parent, const char *opts)
+static struct module * cineform_compress_init(struct module *parent, const char *opts)
 {
         struct state_video_compress_cineform *s;
 
@@ -141,7 +183,7 @@ struct module * cineform_compress_init(struct module *parent, const char *opts)
                         return NULL;
         }
 
-        log_msg(LOG_LEVEL_ERROR, "[cineform] : Threads: %d.\n", s->requested_threads);
+        log_msg(LOG_LEVEL_NOTICE, "[cineform] : Threads: %d.\n", s->requested_threads);
         CFHD_Error status = CFHD_ERROR_OKAY;
         status = CFHD_CreateEncoderPool(&s->encoderPoolRef,
                         s->requested_threads,
@@ -162,42 +204,56 @@ struct module * cineform_compress_init(struct module *parent, const char *opts)
         return &s->module_data;
 }
 
-void RGBtoBGR_invert(video_frame *dst, video_frame *src){
+static void RGBtoBGR_invert(video_frame *dst, video_frame *src){
         int pitch = vc_get_linesize(src->tiles[0].width, src->color_spec);
 
         unsigned char *s = (unsigned char *) src->tiles[0].data + (src->tiles[0].height - 1) * pitch;
         unsigned char *d = (unsigned char *) dst->tiles[0].data;
 
-        for(int i = 0; i < src->tiles[0].height; i++){
+        for(unsigned i = 0; i < src->tiles[0].height; i++){
                 vc_copylineBGRtoRGB(d, s, pitch, 0, 8, 16);
                 s -= pitch;
                 d += pitch;
         }
 }
 
-void RGBAtoBGRA(video_frame *dst, video_frame *src){
+static void RGBAtoBGRA(video_frame *dst, video_frame *src){
         int pitch = vc_get_linesize(src->tiles[0].width, src->color_spec);
 
         unsigned char *s = (unsigned char *) src->tiles[0].data;
         unsigned char *d = (unsigned char *) dst->tiles[0].data;
 
-        for(int i = 0; i < src->tiles[0].height; i++){
+        for(unsigned i = 0; i < src->tiles[0].height; i++){
                 vc_copylineRGBA(d, s, pitch, 16, 8, 0);
                 s += pitch;
                 d += pitch;
         }
 }
 
-void R10k_shift(video_frame *dst, video_frame *src){
+static void R10k_shift(video_frame *dst, video_frame *src){
         int pitch = vc_get_linesize(src->tiles[0].width, src->color_spec);
 
         unsigned char *s = (unsigned char *) src->tiles[0].data;
         unsigned char *d = (unsigned char *) dst->tiles[0].data;
 
-        for(int i = 0; i < src->tiles[0].height; i++){
+        for(unsigned i = 0; i < src->tiles[0].height; i++){
                 vc_copyliner10k(d, s, pitch, 2, 12, 22);
                 s += pitch;
                 d += pitch;
+        }
+}
+
+static void R12L_to_RG48(video_frame *dst, video_frame *src){
+        int src_pitch = vc_get_linesize(src->tiles[0].width, src->color_spec);
+        int dst_pitch = vc_get_linesize(dst->tiles[0].width, dst->color_spec);
+
+        unsigned char *s = (unsigned char *) src->tiles[0].data;
+        unsigned char *d = (unsigned char *) dst->tiles[0].data;
+
+        for(unsigned i = 0; i < src->tiles[0].height; i++){
+                vc_copylineR12LtoRG48(d, s, dst_pitch);
+                s += src_pitch;
+                d += dst_pitch;
         }
 }
 
@@ -205,13 +261,15 @@ static struct {
         codec_t ug_codec;
         CFHD_PixelFormat cfhd_pixel_format;
         CFHD_EncodedFormat cfhd_encoded_format;
+        codec_t convert_codec;
         void (*convertFunc)(video_frame *dst, video_frame *src);
 } codecs[] = {
-        {UYVY, CFHD_PIXEL_FORMAT_2VUY, CFHD_ENCODED_FORMAT_YUV_422, nullptr},
-        {RGB, CFHD_PIXEL_FORMAT_RG24, CFHD_ENCODED_FORMAT_RGB_444, RGBtoBGR_invert},
-        {RGBA, CFHD_PIXEL_FORMAT_BGRa, CFHD_ENCODED_FORMAT_RGBA_4444, RGBAtoBGRA},
-        {v210, CFHD_PIXEL_FORMAT_V210, CFHD_ENCODED_FORMAT_YUV_422, nullptr},
-        {R10k, CFHD_PIXEL_FORMAT_RG30, CFHD_ENCODED_FORMAT_RGB_444, R10k_shift},
+        {UYVY, CFHD_PIXEL_FORMAT_2VUY, CFHD_ENCODED_FORMAT_YUV_422, VIDEO_CODEC_NONE, nullptr},
+        {RGB, CFHD_PIXEL_FORMAT_RG24, CFHD_ENCODED_FORMAT_RGB_444, VIDEO_CODEC_NONE, RGBtoBGR_invert},
+        {RGBA, CFHD_PIXEL_FORMAT_BGRa, CFHD_ENCODED_FORMAT_RGBA_4444, VIDEO_CODEC_NONE, RGBAtoBGRA},
+        {v210, CFHD_PIXEL_FORMAT_V210, CFHD_ENCODED_FORMAT_YUV_422, VIDEO_CODEC_NONE, nullptr},
+        {R10k, CFHD_PIXEL_FORMAT_RG30, CFHD_ENCODED_FORMAT_RGB_444, VIDEO_CODEC_NONE, R10k_shift},
+        {R12L, CFHD_PIXEL_FORMAT_RG48, CFHD_ENCODED_FORMAT_RGB_444, RG48, R12L_to_RG48},
 };
 
 static bool configure_with(struct state_video_compress_cineform *s, struct video_desc desc)
@@ -235,6 +293,10 @@ static bool configure_with(struct state_video_compress_cineform *s, struct video
                         pix_fmt = codec.cfhd_pixel_format;
                         enc_fmt = codec.cfhd_encoded_format;
                         s->convertFunc = codec.convertFunc;
+                        s->precompress_desc = desc;
+                        if(codec.convert_codec != VIDEO_CODEC_NONE){
+                                s->precompress_desc.color_spec = codec.convert_codec;
+                        }
                         break;
                 }
         }
@@ -263,7 +325,7 @@ static bool configure_with(struct state_video_compress_cineform *s, struct video
 
         s->saved_desc = desc;
 
-        log_msg(LOG_LEVEL_ERROR, "[cineform] start encoder pool\n");
+        log_msg(LOG_LEVEL_INFO, "[cineform] start encoder pool\n");
         status = CFHD_StartEncoderPool(s->encoderPoolRef);
         if(status != CFHD_ERROR_OKAY){
                 log_msg(LOG_LEVEL_ERROR, "[cineform] Failed to start encoder pool\n");
@@ -281,7 +343,7 @@ static video_frame *get_copy(struct state_video_compress_cineform *s, video_fram
                 return vf_get_copy(frame);
         }
 
-        video_frame *ret = vf_alloc_desc_data(s->saved_desc);
+        video_frame *ret = vf_alloc_desc_data(s->precompress_desc);
         s->convertFunc(ret, frame);
 
         return ret;
@@ -298,7 +360,7 @@ static void cineform_compress_push(struct module *state, std::shared_ptr<video_f
                 return;
 
         if(!tx){
-                std::unique_ptr<video_frame, decltype(&vf_free)> dummy(vf_alloc_desc_data(s->saved_desc), vf_free);
+                std::unique_ptr<video_frame, decltype(&vf_free)> dummy(vf_alloc_desc_data(s->precompress_desc), vf_free);
                 video_frame *dummy_ptr = dummy.get();
 
                 lock.lock();
@@ -307,9 +369,9 @@ static void cineform_compress_push(struct module *state, std::shared_ptr<video_f
                 lock.unlock();
 
                 status = CFHD_EncodeAsyncSample(s->encoderPoolRef,
-                                s->frame_seq_in,
+                                s->frame_seq_in++,
                                 dummy_ptr->tiles[0].data,
-                                vc_get_linesize(s->saved_desc.width, s->saved_desc.color_spec),
+                                vc_get_linesize(s->precompress_desc.width, s->precompress_desc.color_spec),
                                 nullptr);
                 if(status != CFHD_ERROR_OKAY){
                         log_msg(LOG_LEVEL_ERROR, "[cineform] Failed to push null %i pool\n", status);
@@ -335,8 +397,6 @@ static void cineform_compress_push(struct module *state, std::shared_ptr<video_f
         lock.lock();
         s->frame_queue.push(std::move(frame_copy));
 
-        s->frame_seq_in++;
-
 #ifdef MEASUREMENT
         struct timespec t_0;
         clock_gettime(CLOCK_MONOTONIC_RAW, &t_0);
@@ -346,9 +406,9 @@ static void cineform_compress_push(struct module *state, std::shared_ptr<video_f
         lock.unlock();
 
         status = CFHD_EncodeAsyncSample(s->encoderPoolRef,
-                        s->frame_seq_in,
+                        s->frame_seq_in++,
                         frame_ptr->tiles[0].data,
-                        vc_get_linesize(s->saved_desc.width, s->saved_desc.color_spec),
+                        vc_get_linesize(s->precompress_desc.width, s->precompress_desc.color_spec),
                         nullptr);
 
         if(status != CFHD_ERROR_OKAY){
@@ -358,7 +418,7 @@ static void cineform_compress_push(struct module *state, std::shared_ptr<video_f
 }
 
 #ifdef MEASUREMENT
-void timespec_diff(struct timespec *start, struct timespec *stop,
+static void timespec_diff(struct timespec *start, struct timespec *stop,
                 struct timespec *result)
 {
         if ((stop->tv_nsec - start->tv_nsec) < 0) {
@@ -431,6 +491,7 @@ static std::shared_ptr<video_frame> cineform_compress_pop(struct module *state)
                 return {};
         }
         out->callbacks.dispose_udata = new std::tuple<CFHD_EncoderPoolRef, CFHD_SampleBufferRef>(s->encoderPoolRef, buf);
+        out->seq = frame_num;
 
         lock.lock();
         if(s->frame_queue.empty()){
@@ -450,6 +511,8 @@ static std::list<compress_preset> get_cineform_presets() {
 const struct video_compress_info cineform_info = {
         "cineform",
         cineform_compress_init,
+        NULL,
+        NULL,
         NULL,
         NULL,
         cineform_compress_push,

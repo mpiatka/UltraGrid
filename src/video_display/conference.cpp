@@ -591,7 +591,7 @@ static void display_conference_run(void *state)
 
                 vf_free(frame);
 
-                now = chrono::high_resolution_clock::now();
+                now = chrono::system_clock::now();
 
                 //If it's time to send next frame downlaod it from gpu,
                 //convert to UYVY and send
@@ -694,7 +694,8 @@ static int display_conference_reconfigure_audio(void *state, int quant_samples, 
 }
 
 static const struct video_display_info display_conference_info = {
-        [](struct device_info **available_cards, int *count) {
+        [](struct device_info **available_cards, int *count, void (**deleter)(void *)) {
+                UNUSED(deleter);
                 *available_cards = nullptr;
                 *count = 0;
         },

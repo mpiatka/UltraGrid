@@ -47,6 +47,8 @@
 #include "DeckLinkAPIVersion.h"
 #include <unordered_map>
 
+#define MOD_NAME "[DeckLink] "
+
 using namespace std;
 
 static unordered_map<HRESULT, string> bmd_hresult_to_string_map = {
@@ -117,7 +119,7 @@ IDeckLinkIterator *create_decklink_iterator(bool verbose, bool coinit)
 #ifdef WIN32
         if (coinit) {
                 // Initialize COM on this thread
-                HRESULT result = CoInitialize(NULL);
+                HRESULT result = CoInitializeEx(NULL, COINIT_MULTITHREADED);
                 if(FAILED(result)) {
                         log_msg(LOG_LEVEL_ERROR, "Initialize of COM failed - result = "
                                         "%08lx.\n", result);
@@ -162,7 +164,7 @@ bool blackmagic_api_version_check()
 
 #ifdef WIN32
         // Initialize COM on this thread
-        result = CoInitialize(NULL);
+        result = CoInitializeEx(NULL, COINIT_MULTITHREADED);
         if(FAILED(result)) {
                 log_msg(LOG_LEVEL_ERROR, "Initialize of COM failed - result = "
                                 "%08lx.\n", result);
@@ -215,7 +217,7 @@ void print_decklink_version()
 
 #ifdef WIN32
         // Initialize COM on this thread
-        result = CoInitialize(NULL);
+        result = CoInitializeEx(NULL, COINIT_MULTITHREADED);
         if(FAILED(result)) {
                 fprintf(stderr, "Initialize of COM failed - result = "
                                 "%08lx.\n", result);
@@ -252,5 +254,79 @@ cleanup:
 #ifdef WIN32
         CoUninitialize();
 #endif
+}
+
+#define EXIT_IF_FAILED(cmd, name) \
+        do {\
+                HRESULT result = cmd;\
+                if (FAILED(result)) {;\
+                        LOG(LOG_LEVEL_ERROR) << MOD_NAME << name << ": " << bmd_hresult_to_string(result) << "\n";\
+			ret = false;\
+			goto cleanup;\
+                }\
+        } while (0)
+
+#define RELEASE_IF_NOT_NULL(x) if (x != nullptr) { x->Release(); x = nullptr; }
+
+/**
+ * @todo
+ * handle also other modes - bmdProfileTwoSubDevicesFullDuplex and
+ * bmdProfileOneSubDevicesHalfDuplex (8K Pro) cannot be currently set
+ */
+bool decklink_set_duplex(IDeckLink *deckLink, BMDDuplexMode duplex)
+{
+        bool ret = true;
+        IDeckLinkProfileManager *manager = nullptr;
+        IDeckLinkProfileIterator *it = nullptr;
+        IDeckLinkProfile *profile = nullptr;
+        bool found = false;
+
+        EXIT_IF_FAILED(deckLink->QueryInterface(IID_IDeckLinkProfileManager, (void**)&manager), "Cannot set duplex - query profile manager");
+
+        EXIT_IF_FAILED(manager->GetProfiles(&it), "Cannot set duplex - get profiles");
+
+        while (it->Next(&profile) == S_OK) {
+                IDeckLinkProfileAttributes *attributes;
+                int64_t id;
+                if (profile->QueryInterface(IID_IDeckLinkProfileAttributes,
+                                        (void**)&attributes) != S_OK) {
+                        LOG(LOG_LEVEL_WARNING) << "[DeckLink] Cannot get profile attributes!\n";
+                        continue;
+                }
+                if (attributes->GetInt(BMDDeckLinkProfileID, &id) == S_OK) {
+                        if (duplex == bmdDuplexFull) {
+                                if (id == bmdProfileOneSubDeviceFullDuplex) {
+                                        found = true;
+                                }
+                        } else  { // bmdDuplexHalf
+                                if (id == bmdProfileTwoSubDevicesHalfDuplex || id == bmdProfileFourSubDevicesHalfDuplex) {
+                                        found = true;
+                                }
+                        }
+                        if (found) {
+                                if (profile->SetActive() != S_OK) {
+                                        LOG(LOG_LEVEL_ERROR) << "[DeckLink] Cannot set profile!\n";
+                                        ret = false;
+                                }
+                        }
+                } else {
+                        LOG(LOG_LEVEL_WARNING) << "[DeckLink] Cannot get profile ID!\n";
+                }
+                attributes->Release();
+                profile->Release();
+                if (found) {
+                        break;
+                }
+        }
+
+        if (!found && ret) { // no err but not found
+                LOG(LOG_LEVEL_WARNING) << "[DeckLink] didn't found suitable duplex profile!\n";
+                ret = false;
+        }
+
+cleanup:
+        RELEASE_IF_NOT_NULL(it);
+        RELEASE_IF_NOT_NULL(manager);
+	return ret;
 }
 

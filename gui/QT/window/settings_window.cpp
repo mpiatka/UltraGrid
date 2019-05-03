@@ -16,9 +16,6 @@ SettingsWindow::SettingsWindow(QWidget *parent): QDialog(parent){
 
 	connect(ui.ldgmSimpCpuRadio, SIGNAL(toggled(bool)), this, SIGNAL(changed()));
 	connect(ui.ldgmSimpGpuRadio, SIGNAL(toggled(bool)), this, SIGNAL(changed()));
-	connect(ui.ldgmAdvCpuRadio, SIGNAL(toggled(bool)), this, SIGNAL(changed()));
-	connect(ui.ldgmAdvGpuRadio, SIGNAL(toggled(bool)), this, SIGNAL(changed()));
-
 }
 
 void SettingsWindow::init(SettingsUi *settingsUi, Settings *s){
