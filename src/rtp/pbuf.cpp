@@ -97,6 +97,7 @@ struct pbuf {
         long long int received_pkts_cum, expected_pkts_cum; // cumulative values
         uint32_t last_display_ts;
         int longest_gap; // longest loss
+        bool out_of_order_pkts;
 };
 
 static void free_cdata(struct coded_data *head);
@@ -345,10 +346,11 @@ void pbuf_insert(struct pbuf *playout_buf, rtp_packet * pkt)
                 memset(playout_buf->packets + playout_buf->last_report_seq / number_word_bits, 0xff, STATS_INTERVAL / 8);
                 memset(playout_buf->packets + (playout_buf->last_report_seq + (1<<16) - STATS_INTERVAL) % (1<<16) / number_word_bits, 0xff, STATS_INTERVAL / 8);
         } else {
-                playout_buf->packets[pkt->seq / number_word_bits]
-                        |= 1ull << (pkt->seq % number_word_bits);
-                if (playout_buf->packets[pkt->seq / number_word_bits] >
-                                1ull << (pkt->seq % number_word_bits);
+                unsigned long long current_bit = 1ull << (pkt->seq % number_word_bits);
+                if (playout_buf->packets[pkt->seq / number_word_bits] > current_bit) {
+                        playout_buf->out_of_order_pkts = true;
+                }
+                playout_buf->packets[pkt->seq / number_word_bits] |= current_bit;
                 if ((uint16_t) (pkt->seq - playout_buf->last_report_seq) >= STATS_INTERVAL * 2) {
                         uint16_t report_seq_until = (uint16_t) ((pkt->seq / STATS_INTERVAL * STATS_INTERVAL) - STATS_INTERVAL); // sum up only up to current-STATS_INTERVAL to be able to catch out-of-order packets
                         for (uint16_t i = playout_buf->last_report_seq;
@@ -371,18 +373,20 @@ void pbuf_insert(struct pbuf *playout_buf, rtp_packet * pkt)
                         playout_buf->expected_pkts > 0) {
                 // print stats
                 log_msg(LOG_LEVEL_INFO, "SSRC %08x: %d/%d packets received "
-                                "(%.5f%%), max loss %d.\n",
+                                "(%.5f%%), max loss %d%s.\n",
                                 pkt->ssrc,
                                 playout_buf->received_pkts,
                                 playout_buf->expected_pkts,
                                 (double) playout_buf->received_pkts /
                                 playout_buf->expected_pkts * 100.0,
-                                playout_buf->longest_gap);
+                                playout_buf->longest_gap,
+                                playout_buf->out_of_order_pkts ? ", out-of-order pkts" : "");
                 playout_buf->received_pkts_last = playout_buf->received_pkts;
                 playout_buf->expected_pkts_last = playout_buf->expected_pkts;
                 playout_buf->expected_pkts = playout_buf->received_pkts = 0;
                 playout_buf->last_display_ts = pkt->ts;
                 playout_buf->longest_gap = 0;
+                playout_buf->out_of_order_pkts = false;
         }
 
         if (playout_buf->frst == NULL && playout_buf->last == NULL) {
