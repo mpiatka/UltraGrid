@@ -139,6 +139,11 @@ static bool configure_with(struct state_cineform_decompress *s,
         s->prepared_to_decode = false;
         s->saved_desc = desc;
 
+        if(s->out_codec == VIDEO_CODEC_NONE){
+                log_msg(LOG_LEVEL_DEBUG, "[cineform] Will probe for internal format.\n");
+                return true;
+        }
+
         for(const auto& i : decode_codecs){
                 if(i.ug_codec == s->out_codec){
                         s->decode_codec = i.cfhd_pixfmt;
@@ -238,8 +243,10 @@ static decompress_status probe_internal(struct state_cineform_decompress *s,
                                        fmt_list,
                                        sizeof(fmt_list) / sizeof(fmt_list[0]),
                                        &count);
+        log_msg(LOG_LEVEL_DEBUG, "[cineform] probing...\n");
 
         if(status != CFHD_ERROR_OKAY){
+                log_msg(LOG_LEVEL_ERROR, "[cineform] probe failed\n");
                 return DECODER_NO_FRAME;
         }
 
@@ -264,9 +271,9 @@ static decompress_status cineform_decompress(void *state, unsigned char *dst, un
 
         CFHD_Error status;
 
-		if(s->out_codec == VIDEO_CODEC_NONE){
-			return probe_internal(s, src, src_len, internal_codec);
-		}
+        if(s->out_codec == VIDEO_CODEC_NONE){
+                return probe_internal(s, src, src_len, internal_codec);
+        }
 
         if(!prepare(s, src, src_len)){
                 return res;
@@ -327,6 +334,7 @@ ADD_TO_PARAM(cfhd_use_12bit, "cfhd-use-12bit",
 
 static const struct decode_from_to *cineform_decompress_get_decoders() {
         const struct decode_from_to dec_static[] = {
+		{ CFHD, VIDEO_CODEC_NONE, VIDEO_CODEC_NONE, 50 },
                 { CFHD, UYVY, UYVY, 500 },
                 { CFHD, R12L, R12L, 500 },
                 { VIDEO_CODEC_NONE, VIDEO_CODEC_NONE, VIDEO_CODEC_NONE, 0 },
