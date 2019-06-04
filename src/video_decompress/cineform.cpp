@@ -75,6 +75,7 @@ struct state_cineform_decompress {
         bool             prepared_to_decode;
 
         CFHD_DecoderRef decoderRef;
+        CFHD_MetadataRef metadataRef;
 
         struct video_desc saved_desc;
 };
@@ -93,6 +94,10 @@ static void * cineform_decompress_init(void)
         status = CFHD_OpenDecoder(&s->decoderRef, nullptr);
         if(status != CFHD_ERROR_OKAY){
                 log_msg(LOG_LEVEL_ERROR, "[cineform] Failed to open decoder\n");
+        }
+        status = CFHD_OpenMetadata(&s->metadataRef);
+        if(status != CFHD_ERROR_OKAY){
+                log_msg(LOG_LEVEL_ERROR, "[cineform] Failed to open metadata\n");
         }
 
         return s;
@@ -228,7 +233,7 @@ static bool prepare(struct state_cineform_decompress *s,
         return true;
 }
 
-static decompress_status probe_internal(struct state_cineform_decompress *s,
+static decompress_status probe_internal_cineform(struct state_cineform_decompress *s,
                                         unsigned char *src,
                                         unsigned src_len,
                                         codec_t *internal_codec)
@@ -264,6 +269,33 @@ static decompress_status probe_internal(struct state_cineform_decompress *s,
         //Here we just select UYVY and hope for the best.
         *internal_codec = UYVY;
         return DECODER_GOT_CODEC;
+}
+
+static decompress_status probe_internal(struct state_cineform_decompress *s,
+                                        unsigned char *src,
+                                        unsigned src_len,
+                                        codec_t *internal_codec)
+{
+        CFHD_Error status;
+
+        status = CFHD_InitSampleMetadata(s->metadataRef,
+                                         METADATATYPE_ORIGINAL,
+                                         src,
+                                         src_len);
+        if(status != CFHD_ERROR_OKAY){
+                log_msg(LOG_LEVEL_ERROR, "[cineform] InitSampleMetadata failed\n");
+                return DECODER_NO_FRAME;
+        }
+
+        CFHD_MetadataTag tag;
+        CFHD_MetadataType type;
+        void *data;
+        CFHD_MetadataSize size;
+        while((status = CFHD_ReadMetadata(s->metadataRef, &tag, &type, &data, &size)) == CFHD_ERROR_OKAY){
+                log_msg(LOG_LEVEL_DEBUG, "[cineform] Metadata found. tag = %x \n", tag);
+        }
+
+        return probe_internal_cineform(s, src, src_len, internal_codec);
 }
 
 static decompress_status cineform_decompress(void *state, unsigned char *dst, unsigned char *src,
