@@ -258,6 +258,12 @@ static decompress_status probe_internal(struct state_cineform_decompress *s,
                         }
                 }
         }
+
+        //Unknown internal format. This should never happen since cineform can
+        //decode any internal codec to CFHD_PIXEL_FORMAT_YUY2.
+        //Here we just select UYVY and hope for the best.
+        *internal_codec = UYVY;
+        return DECODER_GOT_CODEC;
 }
 
 static decompress_status cineform_decompress(void *state, unsigned char *dst, unsigned char *src,
@@ -334,9 +340,10 @@ ADD_TO_PARAM(cfhd_use_12bit, "cfhd-use-12bit",
 
 static const struct decode_from_to *cineform_decompress_get_decoders() {
         const struct decode_from_to dec_static[] = {
-		{ CFHD, VIDEO_CODEC_NONE, VIDEO_CODEC_NONE, 50 },
+                { CFHD, VIDEO_CODEC_NONE, VIDEO_CODEC_NONE, 50 },
                 { CFHD, UYVY, UYVY, 500 },
                 { CFHD, R12L, R12L, 500 },
+                { CFHD, VIDEO_CODEC_NONE, UYVY, 600 },
                 { VIDEO_CODEC_NONE, VIDEO_CODEC_NONE, VIDEO_CODEC_NONE, 0 },
         };
 
