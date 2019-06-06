@@ -98,6 +98,7 @@ static void * cineform_decompress_init(void)
         status = CFHD_OpenMetadata(&s->metadataRef);
         if(status != CFHD_ERROR_OKAY){
                 log_msg(LOG_LEVEL_ERROR, "[cineform] Failed to open metadata\n");
+                CFHD_CloseDecoder(s->decoderRef);
         }
 
         return s;
@@ -109,6 +110,7 @@ static void cineform_decompress_done(void *state)
                 (struct state_cineform_decompress *) state;
 
         CFHD_CloseDecoder(s->decoderRef);
+        CFHD_CloseMetadata(s->metadataRef);
         delete s;
 }
 
@@ -271,6 +273,15 @@ static decompress_status probe_internal_cineform(struct state_cineform_decompres
         return DECODER_GOT_CODEC;
 }
 
+static void write_fcc(char *out, int pixelformat){
+        out[4] = '\0';
+
+        for(int i = 0; i < 4; i++){
+                out[i] = pixelformat & 0xff;
+                pixelformat >>= 8;
+        }
+}
+
 static decompress_status probe_internal(struct state_cineform_decompress *s,
                                         unsigned char *src,
                                         unsigned src_len,
@@ -291,8 +302,10 @@ static decompress_status probe_internal(struct state_cineform_decompress *s,
         CFHD_MetadataType type;
         void *data;
         CFHD_MetadataSize size;
+        char fcc[5];
         while((status = CFHD_ReadMetadata(s->metadataRef, &tag, &type, &data, &size)) == CFHD_ERROR_OKAY){
-                log_msg(LOG_LEVEL_DEBUG, "[cineform] Metadata found. tag = %x \n", tag);
+                write_fcc(fcc, tag);
+                log_msg(LOG_LEVEL_DEBUG, "[cineform] Metadata found. tag = %s \n", fcc);
         }
 
         return probe_internal_cineform(s, src, src_len, internal_codec);
