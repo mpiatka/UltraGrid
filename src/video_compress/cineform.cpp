@@ -88,7 +88,6 @@ struct state_video_compress_cineform{
         int requested_threads;
         int requested_pool_size;
 
-        CFHD_EncoderRef encoderRef;
         CFHD_EncoderPoolRef encoderPoolRef;
 
         uint32_t frame_seq_in;
@@ -452,8 +451,9 @@ static std::shared_ptr<video_frame> cineform_compress_pop(struct module *state)
                 return {};
         }
 
-        while(!s->started)
-                s->cv.wait(lock, [&started = s->started](){return started;});
+        const auto& started = s->started;
+        while(!started)
+                s->cv.wait(lock, [&started](){return started;});
 
         lock.unlock();
 
