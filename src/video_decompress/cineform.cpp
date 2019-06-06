@@ -49,6 +49,7 @@
 #include "utils/resource_manager.h"
 #include "video.h"
 #include "video_decompress.h"
+#include "utils/misc.h" // to_fourcc
 
 #include "CFHDTypes.h"
 #include "CFHDDecoder.h"
@@ -137,6 +138,7 @@ static const struct {
 } decode_codecs[] = {
         {R12L, CFHD_PIXEL_FORMAT_RG48, rg48_to_r12l},
         {UYVY, CFHD_PIXEL_FORMAT_2VUY, nullptr},
+        {v210, CFHD_PIXEL_FORMAT_V210, nullptr},
 };
 
 static bool configure_with(struct state_cineform_decompress *s,
@@ -308,6 +310,20 @@ static decompress_status probe_internal(struct state_cineform_decompress *s,
                 log_msg(LOG_LEVEL_DEBUG, "[cineform] Metadata found. tag = %s \n", fcc);
         }
 
+        status = CFHD_FindMetadata(s->metadataRef,
+                                   to_fourcc('U', 'G', 'P', 'F'),
+                                   &type,
+                                   &data,
+                                   &size);
+        if(status != CFHD_ERROR_OKAY || type != METADATATYPE_UINT32){
+                log_msg(LOG_LEVEL_ERROR, "[cineform] UGPF metadata not found or wrong type, "
+                                         "falling back to cineform internal format detection.\n");
+        } else {
+                *internal_codec = *static_cast<codec_t *>(data);
+                log_msg(LOG_LEVEL_NOTICE, "[cineform] Codec determined from metadata: %s \n", get_codec_name(*internal_codec));
+                return DECODER_GOT_CODEC;
+        }
+
         return probe_internal_cineform(s, src, src_len, internal_codec);
 }
 
@@ -388,6 +404,7 @@ static const struct decode_from_to *cineform_decompress_get_decoders() {
                 { CFHD, VIDEO_CODEC_NONE, VIDEO_CODEC_NONE, 50 },
                 { CFHD, UYVY, UYVY, 500 },
                 { CFHD, R12L, R12L, 500 },
+                { CFHD, v210, v210, 500 },
                 { CFHD, VIDEO_CODEC_NONE, UYVY, 600 },
                 { VIDEO_CODEC_NONE, VIDEO_CODEC_NONE, VIDEO_CODEC_NONE, 0 },
         };
