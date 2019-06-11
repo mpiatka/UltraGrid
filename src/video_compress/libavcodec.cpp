@@ -72,6 +72,7 @@ extern "C"
 #include <libavutil/hwcontext.h>
 #include <libavutil/hwcontext_vaapi.h>
 #include <libavcodec/vaapi.h>
+#include <libswscale/swscale.h>
 }
 #endif
 
@@ -238,6 +239,8 @@ struct state_video_compress_libav {
 
         bool hwenc;
         AVFrame *hwframe;
+
+        struct SwsContext *sws_ctx;
 };
 
 static void print_codec_info(AVCodecID id, char *buf, size_t buflen)
@@ -511,6 +514,8 @@ struct module * libavcodec_compress_init(struct module *parent, const char *opts
 
         s->hwenc = false;
         s->hwframe = NULL;
+
+        s->sws_ctx = NULL;
 
         return &s->module_data;
 }
@@ -910,6 +915,8 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
         codec_t ug_codec = VIDEO_CODEC_NONE;
         AVPixelFormat pix_fmt;
         AVCodec *codec = nullptr;
+        sws_freeContext(s->sws_ctx);
+        s->sws_ctx = nullptr;
 
         s->params.fps = desc.fps;
         s->params.interlaced = desc.interlacing == INTERLACED_MERGED;
@@ -1352,6 +1359,8 @@ static void cleanup(struct state_video_compress_libav *s)
         if(s->hwframe){
                 av_frame_free(&s->hwframe);
         }
+
+        sws_freeContext(s->sws_ctx);
 }
 
 static void libavcodec_compress_done(struct module *mod)
