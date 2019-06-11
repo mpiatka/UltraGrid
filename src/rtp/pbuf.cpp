@@ -384,18 +384,16 @@ void pbuf_insert(struct pbuf *playout_buf, rtp_packet * pkt)
         if ((pkt->ts - playout_buf->last_display_ts) > 90000 * 5 &&
                         playout_buf->expected_pkts > 0) {
                 // print stats
-                if (log_level >= LOG_LEVEL_INFO) {
-                        double loss_pct = (double) playout_buf->received_pkts /
-                                        playout_buf->expected_pkts * 100.0;
-                        cerr << "SSRC " << hex << setfill('0') << setw(8) <<
-                                pkt->ssrc << ": " << setw(0) << dec
-                                        << playout_buf->received_pkts << "/"
-                                        << playout_buf->expected_pkts << " packets received ("
-                                        << (loss_pct < 100.0 ? fg::red : fg::reset)
-                                        << setprecision(4) << loss_pct << "%" << fg::reset
-                                        << "), max loss " << playout_buf->longest_gap
-                                        << (playout_buf->out_of_order_pkts ? ", out-of-order pkts" : "") << ".\n";
-                }
+                double loss_pct = (double) playout_buf->received_pkts /
+                        playout_buf->expected_pkts * 100.0;
+                LOG(LOG_LEVEL_INFO) << "SSRC " << hex << setfill('0') << setw(8) <<
+                        pkt->ssrc << ": " << setw(0) << dec
+                        << playout_buf->received_pkts << "/"
+                        << playout_buf->expected_pkts << " packets received ("
+                        << (loss_pct < 100.0 ? fg::red : fg::reset)
+                        << setprecision(4) << loss_pct << "%" << fg::reset
+                        << "), max loss " << playout_buf->longest_gap
+                        << (playout_buf->out_of_order_pkts ? ", out-of-order pkts" : "") << ".\n";
                 playout_buf->expected_pkts = playout_buf->received_pkts = 0;
                 playout_buf->last_display_ts = pkt->ts;
                 playout_buf->longest_gap = 0;
