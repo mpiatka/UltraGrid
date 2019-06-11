@@ -1237,7 +1237,8 @@ void vc_copylineRGBAtoRGBwithShift(unsigned char * __restrict dst2, const unsign
 {
 	register const uint32_t * src = (const uint32_t *)(const void *) src2;
 	register uint32_t * dst = (uint32_t *)(void *) dst2;
-        OPTIMIZED_FOR (int x = 0; x <= dst_len - 12; x += 12) {
+        int x;
+        OPTIMIZED_FOR (x = 0; x <= dst_len - 12; x += 12) {
 		register uint32_t in1 = *src++;
 		register uint32_t in2 = *src++;
 		register uint32_t in3 = *src++;
@@ -1258,7 +1259,7 @@ void vc_copylineRGBAtoRGBwithShift(unsigned char * __restrict dst2, const unsign
         }
 
         uint8_t *dst_c = (uint8_t *) dst;
-        OPTIMIZED_FOR (int x = 0; x <= dst_len - 4; x += 4) {
+        OPTIMIZED_FOR (; x <= dst_len - 4; x += 4) {
 		register uint32_t in = *src++;
                 *dst_c++ = (in >> rshift) & 0xff;
                 *dst_c++ = (in >> gshift) & 0xff;
