@@ -72,7 +72,9 @@ extern "C"
 #include <libavutil/hwcontext.h>
 #include <libavutil/hwcontext_vaapi.h>
 #include <libavcodec/vaapi.h>
+#ifdef HAVE_SWSCALE
 #include <libswscale/swscale.h>
+#endif
 }
 #endif
 
@@ -240,9 +242,11 @@ struct state_video_compress_libav {
         bool hwenc;
         AVFrame *hwframe;
 
+#ifdef HAVE_SWSCALE
         struct SwsContext *sws_ctx;
         AVPixelFormat out_pixfmt;
         AVFrame *sws_frame;
+#endif
 };
 
 static void print_codec_info(AVCodecID id, char *buf, size_t buflen)
@@ -517,8 +521,11 @@ struct module * libavcodec_compress_init(struct module *parent, const char *opts
         s->hwenc = false;
         s->hwframe = NULL;
 
-        s->sws_ctx = NULL;
+#ifdef HAVE_SWSCALE
+        s->sws_ctx = nullptr;
         s->out_pixfmt = AV_PIX_FMT_NONE;
+        s->sws_frame = nullptr;
+#endif
 
         return &s->module_data;
 }
@@ -994,9 +1001,12 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
         codec_t ug_codec = VIDEO_CODEC_NONE;
         AVPixelFormat pix_fmt;
         AVCodec *codec = nullptr;
+#ifdef HAVE_SWSCALE
         sws_freeContext(s->sws_ctx);
         s->sws_ctx = nullptr;
+        av_frame_free(&s->sws_frame);
         s->out_pixfmt = AV_PIX_FMT_NONE;
+#endif //HAVE_SWSCALE
 
         s->params.fps = desc.fps;
         s->params.interlaced = desc.interlacing == INTERLACED_MERGED;
@@ -1087,8 +1097,9 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
         if(!find_decoder(desc, s->selected_pixfmt, &s->decoded_codec, &s->decoder)){
                 log_msg(LOG_LEVEL_ERROR, "[lavc] Failed to find a way to convert %s to %s\n",
                                get_codec_name(desc.color_spec), av_get_pix_fmt_name(s->selected_pixfmt));
-                //return false;
-
+#ifndef HAVE_SWSCALE
+                return false;
+#else
                 log_msg(LOG_LEVEL_NOTICE, "[lavc] Attempting to use swscale to convert.\n");
                 //get all AVPixelFormats we can convert to and pick the first
                 auto fmts = get_available_pix_fmts(desc, codec, s->requested_subsampling, VIDEO_CODEC_NONE);
@@ -1135,6 +1146,7 @@ static bool configure_with(struct state_video_compress_libav *s, struct video_de
                 log_msg(LOG_LEVEL_NOTICE, "[lavc] Using swscale to convert %s to %s.\n",
                                 av_get_pix_fmt_name(s->selected_pixfmt),
                                 av_get_pix_fmt_name(s->out_pixfmt));
+#endif //HAVE_SWSCALE
         }
 
         s->decoded = (unsigned char *) malloc(vc_get_linesize(desc.width, s->decoded_codec) * desc.height);
@@ -1340,6 +1352,7 @@ static shared_ptr<video_frame> libavcodec_compress_tile(struct module *mod, shar
         }
 #endif
 
+#ifdef HAVE_SWSCALE
         if(s->sws_ctx){
                 sws_scale(s->sws_ctx,
                           s->in_frame->data,
@@ -1350,6 +1363,7 @@ static shared_ptr<video_frame> libavcodec_compress_tile(struct module *mod, shar
                           s->sws_frame->linesize);
                 frame = s->sws_frame;
         }
+#endif //HAVE_SWSCALE
 
         /* encode the image */
 #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(57, 37, 100)
@@ -1457,11 +1471,12 @@ static void cleanup(struct state_video_compress_libav *s)
         free(s->decoded);
         s->decoded = NULL;
 
-        if(s->hwframe){
-                av_frame_free(&s->hwframe);
-        }
+        av_frame_free(&s->hwframe);
 
+#ifdef HAVE_SWSCALE
         sws_freeContext(s->sws_ctx);
+        av_frame_free(&s->sws_frame);
+#endif //HAVE_SWSCALE
 }
 
 static void libavcodec_compress_done(struct module *mod)
