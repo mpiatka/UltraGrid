@@ -746,6 +746,57 @@ fi
 AC_SUBST(DECKLINK_PATH)
 
 # -------------------------------------------------------------------------------------------------
+# vrworks stuff
+# -------------------------------------------------------------------------------------------------
+
+VRWORKS_OBJ=
+VRWORKS_INC=
+VRWORKS_LIB=
+VRWORKS_PATH=
+vrworks=no
+vrworks_req=auto
+
+AC_ARG_ENABLE(vrworks,
+[  --disable-vrworks      disable vrworks (default is auto)]
+[                          Requires: vrworks],
+	[vrworks_req=$enableval])
+VRWORKS_INC=
+VRWORKS_DIR=$srcdir/../vrworks
+
+if test -z $VRWORKS_INC; then
+	VRWORKS_INC=" -I$VRWORKS_DIR/nvstitch/include -I$VRWORKS_DIR/utilities -I/usr/include/rapidxml"
+fi
+
+AC_CHECK_FILE(${VRWORKS_DIR}/nvstitch/include/nvstitch.h, FOUND_NVSTITCH_H=yes, FOUND_NVSTITCH_H=no)
+#AC_CHECK_LIB(DeckLinkAPI, main, FOUND_DECKLINK_L=yes, FOUND_DECKLINK_L=no)
+#if test $FOUND_DECKLINK_H = yes -a $FOUND_DECKLINK_SRC = yes -a $FOUND_DECKLINK_L = yes; then
+if test $FOUND_NVSTITCH_H = yes
+then
+	FOUND_VRWORKS=yes
+	VRWORKS_LIB="$VRWORKS_LIB -L$VRWORKS_DIR/nvstitch/binary -lnvss_video -lnvstitch $VRWORKS_DIR/libcommon_util.a"
+else
+	FOUND_VRWORKS=no
+fi
+
+if test $vrworks_req != no -a $FOUND_VRWORKS = yes
+then
+    VRWORKS_PATH=${VRWORKS_DIR}
+    VRWORKS_CAP_OBJ="src/video_capture/vrworks.o"
+    AC_DEFINE([HAVE_VRWORKS], [1], [Build with vrworks support])
+    ADD_MODULE("vidcap_vrworks", "$VRWORKS_CAP_OBJ", "$VRWORKS_LIB")
+    vrworks=yes
+    INC="$INC $VRWORKS_INC"
+else
+    VRWORKS_PATH=
+fi
+
+if test $vrworks_req = yes -a $vrworks = no; then
+        AC_MSG_ERROR([vrworks not found.])
+fi
+
+#AC_SUBST(VRWORKS_PATH)
+
+# -------------------------------------------------------------------------------------------------
 # Bluefish444 stuff
 # -------------------------------------------------------------------------------------------------
 BLUEFISH444_PATH=
@@ -3208,6 +3259,7 @@ RESULT=`add_column "$RESULT" "SDL (ver. $sdl_version)" $sdl $?`
 RESULT=`add_column "$RESULT" "SW video mix" $swmix $?`
 RESULT=`add_column "$RESULT" "V4L2" $v4l2 $?`
 RESULT=`add_column "$RESULT" "XIMEA" $ximea $?`
+RESULT=`add_column "$RESULT" "Vrworks" $vrworks $?`
 RESULT=`end_section "$RESULT"`
 
 # compressions
