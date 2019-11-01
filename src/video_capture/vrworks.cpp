@@ -306,7 +306,10 @@ static bool download_stitched(vidcap_vrworks_state *s){
 
         nvstitchResult res;
         res = nvssVideoGetOutputBuffer(s->stitcher, NVSTITCH_EYE_MONO, &output_image);
-        //TODO
+        if(res != NVSTITCH_SUCCESS){
+                std::cerr << "Failed to get output buffer" << std::endl;
+                return false;
+        }
 
         if(!s->frame){
                 video_desc desc{};
@@ -316,18 +319,21 @@ static bool download_stitched(vidcap_vrworks_state *s){
                 desc.tile_count = 1;
                 desc.fps = 30;
 
-                s->frame = vf_alloc_desc_data(desc);
+                s->frame = vf_alloc_desc(desc);
         }
         cudaStream_t out_stream = nullptr;
         res = nvssVideoGetOutputStream(s->stitcher, NVSTITCH_EYE_MONO, &out_stream);
-        //TODO
+        if(res != NVSTITCH_SUCCESS){
+                std::cerr << "Failed to get output stream" << std::endl;
+                return false;
+        }
 
         if (cudaMemcpy2DAsync(s->frame->tiles[0].data, output_image.row_bytes,
                                 output_image.dev_ptr, output_image.pitch,
                                 output_image.row_bytes, output_image.height,
                                 cudaMemcpyDeviceToHost, out_stream) != cudaSuccess)
         {
-                std::cout << "Error copying output panorama from CUDA buffer" << std::endl;
+                std::cerr << "Error copying output panorama from CUDA buffer" << std::endl;
                 return false;
         }
 #if 0
