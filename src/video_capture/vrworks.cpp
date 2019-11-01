@@ -83,11 +83,11 @@ struct vidcap_vrworks_state {
 
         int          audio_source_index;
         nvssVideoHandle stitcher;
-		nvssVideoStitcherProperties_t stitcher_properties;
-		std::vector<nvstitchCameraProperties_t> cam_properties;
-		nvstitchVideoRigProperties_t rig_properties;
+        nvssVideoStitcherProperties_t stitcher_properties;
+        std::vector<nvstitchCameraProperties_t> cam_properties;
+        nvstitchVideoRigProperties_t rig_properties;
 
-		unsigned char *tmpframe;
+        unsigned char *tmpframe;
 };
 
 
@@ -106,19 +106,82 @@ vidcap_vrworks_probe(bool verbose, void (**deleter)(void *))
 	return vt;
 }
 
+static bool init_stitcher(struct vidcap_vrworks_state *s){
+        int num_gpus;
+        cudaGetDeviceCount(&num_gpus);
+
+        int selected_gpu;
+
+        for (int gpu = 0; gpu < num_gpus; ++gpu)
+        {
+                cudaDeviceProp prop;
+                cudaGetDeviceProperties(&prop, gpu);
+
+                // Require minimum compute 5.2
+                if (prop.major > 5 || (prop.major == 5 && prop.minor >= 2))
+                {
+                        selected_gpu = gpu;
+                        break;
+                }
+        }
+
+        s->stitcher_properties.version = NVSTITCH_VERSION;
+        s->stitcher_properties.pano_width = 3840;
+        s->stitcher_properties.quality = NVSTITCH_STITCHER_QUALITY_HIGH;
+        s->stitcher_properties.num_gpus = 1;
+        s->stitcher_properties.ptr_gpus = &selected_gpu;
+        s->stitcher_properties.pipeline = NVSTITCH_STITCHER_PIPELINE_MONO;
+        s->stitcher_properties.projection = NVSTITCH_PANORAMA_PROJECTION_EQUIRECTANGULAR;
+        s->stitcher_properties.output_roi = nvstitchRect_t{ 0, 0, 0, 0 };
+
+        // Fetch rig parameters from XML file.
+        if (!xmlutil::readCameraRigXml("rig_spec.xml", s->cam_properties, &s->rig_properties))
+        {
+                std::cout << std::endl << "Failed to retrieve rig paramters from XML file." << std::endl;
+                return false;
+        }
+
+        nvstitchResult res;
+        res = nvssVideoCreateInstance(&s->stitcher_properties, &s->rig_properties, &s->stitcher);
+        if(res != NVSTITCH_SUCCESS){
+                std::cout << std::endl << "Failed to create stitcher instance." << std::endl;
+                return false;
+        }
+
+        return true;
+}
+
+static bool alloc_tmp_frame(struct vidcap_vrworks_state *s){
+        //Make sure every input can fit
+        size_t max_size = 0;
+        for(const auto &cam : s->cam_properties){
+                if(cam.image_size.x * cam.image_size.y > max_size){
+                        max_size = cam.image_size.x * cam.image_size.y;
+                }
+        }
+
+        const int bpp = 4; //RGBA
+        if(cudaMallocHost(&s->tmpframe, max_size*bpp) != cudaSuccess){
+                std::cout << std::endl << "Failed to allocate tmpframe" << std::endl;
+                return false;
+        }
+
+        return true;
+}
+
 static int
 vidcap_vrworks_init(struct vidcap_params *params, void **state)
 {
-	struct vidcap_vrworks_state *s;
+        struct vidcap_vrworks_state *s;
 
-	printf("vidcap_vrworks_init\n");
+        printf("vidcap_vrworks_init\n");
 
 
         s = (struct vidcap_vrworks_state *) calloc(1, sizeof(struct vidcap_vrworks_state));
-	if(s == NULL) {
-		printf("Unable to allocate vrworks capture state\n");
-		return VIDCAP_INIT_FAIL;
-	}
+        if(s == NULL) {
+                printf("Unable to allocate vrworks capture state\n");
+                return VIDCAP_INIT_FAIL;
+        }
 
         s->audio_source_index = -1;
         s->frames = 0;
@@ -158,62 +221,23 @@ vidcap_vrworks_init(struct vidcap_params *params, void **state)
 
         s->frame = nullptr;
 
-		int num_gpus;
-		cudaGetDeviceCount(&num_gpus);
+        if(!init_stitcher(s)){
+                goto error;
+        }
 
-		int selected_gpu;
+        if(!alloc_tmp_frame(s)){
+                goto error;
+        }
 
-		for (int gpu = 0; gpu < num_gpus; ++gpu)
-		{
-			cudaDeviceProp prop;
-			cudaGetDeviceProperties(&prop, gpu);
-
-			// Require minimum compute 5.2
-			if (prop.major > 5 || (prop.major == 5 && prop.minor >= 2))
-			{
-				selected_gpu = gpu;
-				break;
-			}
-		}
-
-		s->stitcher_properties.version = NVSTITCH_VERSION;
-		s->stitcher_properties.pano_width = 3840;
-		s->stitcher_properties.quality = NVSTITCH_STITCHER_QUALITY_HIGH;
-		s->stitcher_properties.num_gpus = 1;
-		s->stitcher_properties.ptr_gpus = &selected_gpu;
-		s->stitcher_properties.pipeline = NVSTITCH_STITCHER_PIPELINE_MONO;
-		s->stitcher_properties.projection = NVSTITCH_PANORAMA_PROJECTION_EQUIRECTANGULAR;
-		s->stitcher_properties.output_roi = nvstitchRect_t{ 0, 0, 0, 0 };
-
-		// Fetch rig parameters from XML file.
-		if (!xmlutil::readCameraRigXml("rig_spec.xml", s->cam_properties, &s->rig_properties))
-		{
-			std::cout << std::endl << "Failed to retrieve rig paramters from XML file." << std::endl;
-			return 1;
-		}
-
-		nvssVideoHandle stitcher;
-		nvstitchResult res;
-		res = nvssVideoCreateInstance(&s->stitcher_properties, &s->rig_properties, &s->stitcher);
-		if(res != NVSTITCH_SUCCESS){
-			std::cout << std::endl << "Failed to create stitcher instance." << std::endl;
-			return 1;
-		}
-
-		if(cudaMallocHost(&s->tmpframe, 1920*1080*4) != cudaSuccess){
-			std::cout << std::endl << "Failed to allocate tmpframe" << std::endl;
-			return 1;
-		}
-        
         *state = s;
-		return VIDCAP_INIT_OK;
+        return VIDCAP_INIT_OK;
 
 error:
         if(s->devices) {
                 int i;
                 for (i = 0u; i < s->devices_cnt; ++i) {
                         if(s->devices[i]) {
-                                 vidcap_done(s->devices[i]);
+                                vidcap_done(s->devices[i]);
                         }
                 }
         }
@@ -238,6 +262,45 @@ vidcap_vrworks_done(void *state)
         vf_free(s->frame);
 }
 
+static bool upload_frame(vidcap_vrworks_state *s, video_frame *in_frame, int i){
+        auto decoder = get_decoder_from_to(in_frame->color_spec, RGBA, false);
+        if(!decoder){
+                std::cerr << "Failed to get conversion function to RGBA" << std::endl;
+                return false;
+        }
+
+        unsigned int width = in_frame->tiles[0].width;
+        unsigned int height = in_frame->tiles[0].height;
+        int in_line_size = vc_get_linesize(width, in_frame->color_spec);
+        int out_line_size = vc_get_linesize(width, RGBA);
+
+        for(int i = 0; i < in_frame->tiles[0].height; i++){
+                decoder(s->tmpframe + out_line_size * i,
+                                (const unsigned char *)(in_frame->tiles[0].data + in_line_size * i),
+                                out_line_size,
+                                0, 8, 16);
+        }
+
+        nvstitchImageBuffer_t input_image;
+        nvstitchResult res;
+        res = nvssVideoGetInputBuffer(s->stitcher, i, &input_image);
+        if(res != NVSTITCH_SUCCESS){
+                std::cerr << std::endl << "Failed to get input buffer." << std::endl;
+                return false;
+        }
+        size_t row_bytes = out_line_size;
+        if (cudaMemcpy2D(input_image.dev_ptr, input_image.pitch,
+                                s->tmpframe, row_bytes,
+                                row_bytes, height,
+                                cudaMemcpyHostToDevice) != cudaSuccess)
+        {
+                std::cerr << "Error copying RGBA image bitmap to CUDA buffer" << std::endl;
+                return false;
+        }
+
+        return true;
+}
+
 static struct video_frame *
 vidcap_vrworks_grab(void *state, struct audio_frame **audio)
 {
@@ -251,7 +314,7 @@ vidcap_vrworks_grab(void *state, struct audio_frame **audio)
 
         *audio = NULL;
 
-		nvstitchResult res;
+        nvstitchResult res;
 
         for (int i = 0; i < s->devices_cnt; ++i) {
                 frame = NULL;
@@ -273,69 +336,50 @@ vidcap_vrworks_grab(void *state, struct audio_frame **audio)
                         return NULL;
                 }
 
-				auto RGBtoRGBA = get_decoder_from_to(RGB, RGBA, false);
-				for(int i = 0; i < frame->tiles[0].height; i++){
-					RGBtoRGBA(s->tmpframe + frame->tiles[0].width * i * 4,
-							(const unsigned char *)(frame->tiles[0].data + frame->tiles[0].width * i * 3),
-							frame->tiles[0].width * 4,
-							0, 8, 16);
-				}
+                if(!upload_frame(s, frame, i)){
+                        return NULL;
+                }
 
-				nvstitchImageBuffer_t input_image;
-				res = nvssVideoGetInputBuffer(s->stitcher, i, &input_image);
-				if(res != NVSTITCH_SUCCESS){
-					std::cout << std::endl << "Failed to get input buffer." << std::endl;
-					return NULL;
-				}
-				size_t row_bytes = frame->tiles[0].width * 4;
-				if (cudaMemcpy2D(input_image.dev_ptr, input_image.pitch,
-							s->tmpframe, row_bytes,
-							row_bytes, frame->tiles[0].height,
-							cudaMemcpyHostToDevice) != cudaSuccess)
-				{
-					std::cout << "Error copying RGBA image bitmap to CUDA buffer" << std::endl;
-					return NULL;
-				}
-				s->captured_frames[i] = frame;
+                s->captured_frames[i] = frame;
         }
 
-		res = nvssVideoStitch(s->stitcher);
-		if(res != NVSTITCH_SUCCESS){
-			std::cout << std::endl << "Failed to stitch." << std::endl;
-			return NULL;
-		}
-		nvstitchImageBuffer_t output_image;
+        res = nvssVideoStitch(s->stitcher);
+        if(res != NVSTITCH_SUCCESS){
+                std::cout << std::endl << "Failed to stitch." << std::endl;
+                return NULL;
+        }
+        nvstitchImageBuffer_t output_image;
 
         res = nvssVideoGetOutputBuffer(s->stitcher, NVSTITCH_EYE_MONO, &output_image);
-		//TODO
+        //TODO
 
-		if(!s->frame){
-			video_desc desc{};
-			desc.width = 3840;
-			desc.height = 1920;
-			desc.color_spec = RGBA;
-			desc.tile_count = 1;
-			desc.fps = 30;
+        if(!s->frame){
+                video_desc desc{};
+                desc.width = output_image.width;
+                desc.height = output_image.height;
+                desc.color_spec = RGBA;
+                desc.tile_count = 1;
+                desc.fps = 30;
 
-			s->frame = vf_alloc_desc_data(desc);
-		}
+                s->frame = vf_alloc_desc_data(desc);
+        }
         cudaStream_t out_stream = nullptr;
         res = nvssVideoGetOutputStream(s->stitcher, NVSTITCH_EYE_MONO, &out_stream);
-		//TODO
+        //TODO
 
         if (cudaMemcpy2DAsync(s->frame->tiles[0].data, output_image.row_bytes,
-                        output_image.dev_ptr, output_image.pitch,
-                        output_image.row_bytes, output_image.height,
-                        cudaMemcpyDeviceToHost, out_stream) != cudaSuccess)
+                                output_image.dev_ptr, output_image.pitch,
+                                output_image.row_bytes, output_image.height,
+                                cudaMemcpyDeviceToHost, out_stream) != cudaSuccess)
         {
-            std::cout << "Error copying output panorama from CUDA buffer" << std::endl;
-            return NULL;
+                std::cout << "Error copying output panorama from CUDA buffer" << std::endl;
+                return NULL;
         }
 #if 0
         if (cudaStreamSynchronize(out_stream) != cudaSuccess)
         {
-            std::cout << "Error synchronizing with the output CUDA stream" << std::endl;
-            return NVSTITCH_ERROR_GENERAL;
+                std::cout << "Error synchronizing with the output CUDA stream" << std::endl;
+                return NVSTITCH_ERROR_GENERAL;
         }
 #endif
 
@@ -343,13 +387,13 @@ vidcap_vrworks_grab(void *state, struct audio_frame **audio)
         gettimeofday(&s->t, NULL);
         double seconds = tv_diff(s->t, s->t0);    
         if (seconds >= 5) {
-            float fps  = s->frames / seconds;
-            log_msg(LOG_LEVEL_INFO, "[vrworks cap.] %d frames in %g seconds = %g FPS\n", s->frames, seconds, fps);
-            s->t0 = s->t;
-            s->frames = 0;
+                float fps  = s->frames / seconds;
+                log_msg(LOG_LEVEL_INFO, "[vrworks cap.] %d frames in %g seconds = %g FPS\n", s->frames, seconds, fps);
+                s->t0 = s->t;
+                s->frames = 0;
         }  
 
-	return s->frame;
+        return s->frame;
 }
 
 static const struct video_capture_info vidcap_vrworks_info = {
