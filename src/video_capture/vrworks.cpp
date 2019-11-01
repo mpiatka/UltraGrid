@@ -274,7 +274,7 @@ static bool upload_frame(vidcap_vrworks_state *s, video_frame *in_frame, int i){
         int in_line_size = vc_get_linesize(width, in_frame->color_spec);
         int out_line_size = vc_get_linesize(width, RGBA);
 
-        for(int i = 0; i < in_frame->tiles[0].height; i++){
+        for(unsigned i = 0; i < in_frame->tiles[0].height; i++){
                 decoder(s->tmpframe + out_line_size * i,
                                 (const unsigned char *)(in_frame->tiles[0].data + in_line_size * i),
                                 out_line_size,
