@@ -133,7 +133,7 @@ static bool init_stitcher(struct vidcap_vrworks_state *s){
         s->stitcher_properties.quality = NVSTITCH_STITCHER_QUALITY_HIGH;
         s->stitcher_properties.num_gpus = 1;
         s->stitcher_properties.ptr_gpus = &selected_gpu;
-        s->stitcher_properties.pipeline = NVSTITCH_STITCHER_PIPELINE_MONO;
+        s->stitcher_properties.pipeline = NVSTITCH_STITCHER_PIPELINE_MONO_EQ;
         s->stitcher_properties.projection = NVSTITCH_PANORAMA_PROJECTION_EQUIRECTANGULAR;
         s->stitcher_properties.output_roi = nvstitchRect_t{ 0, 0, 0, 0 };
 
@@ -180,7 +180,7 @@ vidcap_vrworks_init(struct vidcap_params *params, void **state)
         printf("vidcap_vrworks_init\n");
 
 
-        s = (struct vidcap_vrworks_state *) calloc(1, sizeof(struct vidcap_vrworks_state));
+        s = new vidcap_vrworks_state();
         if(s == NULL) {
                 printf("Unable to allocate vrworks capture state\n");
                 return VIDCAP_INIT_FAIL;
@@ -255,15 +255,24 @@ vidcap_vrworks_done(void *state)
 
 	assert(s != NULL);
 
-	if (s != NULL) {
-                int i;
-		for (i = 0; i < s->devices_cnt; ++i) {
-                         vidcap_done(s->devices[i]);
-		}
-	}
+        for (int i = 0; i < s->devices_cnt; ++i) {
+                VIDEO_FRAME_DISPOSE(s->captured_frames[i]);
+        }
+        free(s->captured_frames);
+
+        int i;
+        for (i = 0; i < s->devices_cnt; ++i) {
+                vidcap_done(s->devices[i]);
+        }
+
+        free(s->devices);
         
         vf_free(s->frame);
         cudaFreeHost(s->tmpframe);
+
+        nvssVideoDestroyInstance(s->stitcher);
+
+        delete s;
 }
 
 static bool upload_frame(vidcap_vrworks_state *s, video_frame *in_frame, int i){
