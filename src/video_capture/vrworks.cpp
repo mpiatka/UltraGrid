@@ -1,6 +1,7 @@
 /**
  * @file   video_capture/vrworks.c
- * @author Martin Piatka <piatka@cesnet.cz>
+ * @author Martin Piatka    <piatka@cesnet.cz>
+ *         Martin Pulec     <pulec@cesnet.cz>
  *
  * @brief Vrworks 360 video stitcher
  */
@@ -59,6 +60,8 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <xml_util/xml_utility_video.h>
+
+const char *log_str = "[vrworks] ";
 
 /* prototypes of functions defined in this module */
 static void show_help(void);
@@ -137,14 +140,14 @@ static bool init_stitcher(struct vidcap_vrworks_state *s){
         // Fetch rig parameters from XML file.
         if (!xmlutil::readCameraRigXml("rig_spec.xml", s->cam_properties, &s->rig_properties))
         {
-                std::cout << std::endl << "Failed to retrieve rig paramters from XML file." << std::endl;
+                std::cerr << log_str << "Failed to retrieve rig paramters from XML file." << std::endl;
                 return false;
         }
 
         nvstitchResult res;
         res = nvssVideoCreateInstance(&s->stitcher_properties, &s->rig_properties, &s->stitcher);
         if(res != NVSTITCH_SUCCESS){
-                std::cout << std::endl << "Failed to create stitcher instance." << std::endl;
+                std::cout << log_str << "Failed to create stitcher instance." << std::endl;
                 return false;
         }
 
@@ -162,7 +165,7 @@ static bool alloc_tmp_frame(struct vidcap_vrworks_state *s){
 
         const int bpp = 4; //RGBA
         if(cudaMallocHost(&s->tmpframe, max_size*bpp) != cudaSuccess){
-                std::cout << std::endl << "Failed to allocate tmpframe" << std::endl;
+                std::cerr << log_str << "Failed to allocate tmpframe" << std::endl;
                 return false;
         }
 
@@ -347,6 +350,27 @@ static bool download_stitched(vidcap_vrworks_state *s){
         return true;
 }
 
+static bool check_in_format(vidcap_vrworks_state *s, video_frame *in, int i){
+        if(in->tile_count != 1){
+                std::cerr << log_str << "Only frames with tile_count == 1 are supported" << std::endl;
+                return false;
+        }
+
+        unsigned int expected_w = s->cam_properties[i].image_size.x;
+        unsigned int expected_h = s->cam_properties[i].image_size.y;
+
+        if(in->tiles[0].width != expected_w
+                        || in->tiles[0].height != expected_h)
+        {
+                std::cerr << log_str << "Wrong resolution for input " << i << "!"
+                       << " Expected " << expected_w << "x" << expected_h
+                       << ", but got " << in->tiles[0].width << "x" << in->tiles[0].height << std::endl;
+                return false;
+        }
+
+        return true;
+}
+
 static struct video_frame *
 vidcap_vrworks_grab(void *state, struct audio_frame **audio)
 {
@@ -375,10 +399,7 @@ vidcap_vrworks_grab(void *state, struct audio_frame **audio)
                 if (s->audio_source_index == i) {
                         *audio = audio_frame;
                 }
-                if (false) {
-                        fprintf(stderr, "[vrworks] Different format detected: ");
-                        fprintf(stderr, "\n");
-                        
+                if (!check_in_format(s, frame, i)) {
                         return NULL;
                 }
 
