@@ -263,6 +263,7 @@ vidcap_vrworks_done(void *state)
 	}
         
         vf_free(s->frame);
+        cudaFreeHost(s->tmpframe);
 }
 
 static bool upload_frame(vidcap_vrworks_state *s, video_frame *in_frame, int i){
