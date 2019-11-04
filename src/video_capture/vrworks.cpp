@@ -311,6 +311,29 @@ static void result_data_delete(struct video_frame *buf){
         cudaFreeHost(buf->tiles[0].data);
 }
 
+static bool allocate_result_frame(vidcap_vrworks_state *s, unsigned width, unsigned height){
+        video_desc desc{};
+        desc.width = width;
+        desc.height = height;
+        desc.color_spec = RGBA;
+        desc.tile_count = 1;
+        desc.fps = 30;
+
+        s->frame = vf_alloc_desc(desc);
+        s->frame->tiles[0].data_len = vc_get_linesize(desc.width,
+                        desc.color_spec) * desc.height;
+
+        if(cudaMallocHost(&s->frame->tiles[0].data, s->frame->tiles[0].data_len) != cudaSuccess){
+                std::cerr << log_str << "Failed to allocate result frame" << std::endl;
+                return false;
+        }
+
+        s->frame->callbacks.data_deleter = result_data_delete;
+        s->frame->callbacks.recycle = NULL;
+
+        return true;
+}
+
 static bool download_stitched(vidcap_vrworks_state *s){
         nvstitchImageBuffer_t output_image;
 
@@ -322,23 +345,9 @@ static bool download_stitched(vidcap_vrworks_state *s){
         }
 
         if(!s->frame){
-                video_desc desc{};
-                desc.width = output_image.width;
-                desc.height = output_image.height;
-                desc.color_spec = RGBA;
-                desc.tile_count = 1;
-                desc.fps = 30;
-
-                s->frame = vf_alloc_desc(desc);
-                s->frame->tiles[0].data_len = vc_get_linesize(desc.width,
-                                desc.color_spec) * desc.height;
-
-                if(cudaMallocHost(&s->frame->tiles[0].data, s->frame->tiles[0].data_len) != cudaSuccess){
-                        std::cerr << log_str << "Failed to allocate result frame" << std::endl;
+                if(!allocate_result_frame(s, output_image.width, output_image.height)){
+                        return false;
                 }
-
-                s->frame->callbacks.data_deleter = result_data_delete;
-                s->frame->callbacks.recycle = NULL;
         }
         cudaStream_t out_stream = nullptr;
         res = nvssVideoGetOutputStream(s->stitcher, NVSTITCH_EYE_MONO, &out_stream);
