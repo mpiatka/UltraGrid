@@ -304,13 +304,20 @@ static bool upload_frame(vidcap_vrworks_state *s, video_frame *in_frame, int i){
         return true;
 }
 
+static void result_data_delete(struct video_frame *buf){
+        if(!buf)
+                return;
+
+        cudaFreeHost(buf->tiles[0].data);
+}
+
 static bool download_stitched(vidcap_vrworks_state *s){
         nvstitchImageBuffer_t output_image;
 
         nvstitchResult res;
         res = nvssVideoGetOutputBuffer(s->stitcher, NVSTITCH_EYE_MONO, &output_image);
         if(res != NVSTITCH_SUCCESS){
-                std::cerr << "Failed to get output buffer" << std::endl;
+                std::cerr << log_str << "Failed to get output buffer" << std::endl;
                 return false;
         }
 
@@ -323,11 +330,20 @@ static bool download_stitched(vidcap_vrworks_state *s){
                 desc.fps = 30;
 
                 s->frame = vf_alloc_desc(desc);
+                s->frame->tiles[0].data_len = vc_get_linesize(desc.width,
+                                desc.color_spec) * desc.height;
+
+                if(cudaMallocHost(&s->frame->tiles[0].data, s->frame->tiles[0].data_len) != cudaSuccess){
+                        std::cerr << log_str << "Failed to allocate result frame" << std::endl;
+                }
+
+                s->frame->callbacks.data_deleter = result_data_delete;
+                s->frame->callbacks.recycle = NULL;
         }
         cudaStream_t out_stream = nullptr;
         res = nvssVideoGetOutputStream(s->stitcher, NVSTITCH_EYE_MONO, &out_stream);
         if(res != NVSTITCH_SUCCESS){
-                std::cerr << "Failed to get output stream" << std::endl;
+                std::cerr << log_str << "Failed to get output stream" << std::endl;
                 return false;
         }
 
@@ -336,7 +352,7 @@ static bool download_stitched(vidcap_vrworks_state *s){
                                 output_image.row_bytes, output_image.height,
                                 cudaMemcpyDeviceToHost, out_stream) != cudaSuccess)
         {
-                std::cerr << "Error copying output panorama from CUDA buffer" << std::endl;
+                std::cerr << log_str << "Error copying output panorama from CUDA buffer" << std::endl;
                 return false;
         }
 #if 0
