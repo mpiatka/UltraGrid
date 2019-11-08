@@ -90,6 +90,11 @@ struct vidcap_vrworks_state {
         std::vector<nvstitchCameraProperties_t> cam_properties;
         nvstitchVideoRigProperties_t rig_properties;
 
+        nvstitchStitcherPipelineType pipeline;
+        nvstitchStitcherQuality quality;
+        unsigned width;
+        nvstitchRect_t roi;
+
         unsigned char *tmpframe;
 };
 
@@ -129,13 +134,13 @@ static bool init_stitcher(struct vidcap_vrworks_state *s){
         }
 
         s->stitcher_properties.version = NVSTITCH_VERSION;
-        s->stitcher_properties.pano_width = 3840;
-        s->stitcher_properties.quality = NVSTITCH_STITCHER_QUALITY_HIGH;
+        s->stitcher_properties.pano_width = s->width;
+        s->stitcher_properties.quality = s->quality;
         s->stitcher_properties.num_gpus = 1;
         s->stitcher_properties.ptr_gpus = &selected_gpu;
-        s->stitcher_properties.pipeline = NVSTITCH_STITCHER_PIPELINE_MONO_EQ;
+        s->stitcher_properties.pipeline = s->pipeline;
         s->stitcher_properties.projection = NVSTITCH_PANORAMA_PROJECTION_EQUIRECTANGULAR;
-        s->stitcher_properties.output_roi = nvstitchRect_t{ 0, 0, 0, 0 };
+        s->stitcher_properties.output_roi = s->roi;
 
         // Fetch rig parameters from XML file.
         if (!xmlutil::readCameraRigXml("rig_spec.xml", s->cam_properties, &s->rig_properties))
@@ -172,6 +177,57 @@ static bool alloc_tmp_frame(struct vidcap_vrworks_state *s){
         return true;
 }
 
+static void parse_fmt(vidcap_vrworks_state *s, const char * const fmt){
+        s->pipeline = NVSTITCH_STITCHER_PIPELINE_MONO_EQ;
+        s->quality = NVSTITCH_STITCHER_QUALITY_HIGH;
+        s->width = 3840;
+        s->roi = nvstitchRect_t{ 0, 0, 0, 0 };
+        //s->roi = nvstitchRect_t{ 900, 700, 2100, 500 };
+
+        if(!fmt)
+                return;
+
+        const nvstitchStitcherQuality quality_vals[] = {
+                NVSTITCH_STITCHER_QUALITY_LOW,
+                NVSTITCH_STITCHER_QUALITY_MEDIUM,
+                NVSTITCH_STITCHER_QUALITY_HIGH,
+        };
+
+        const nvstitchStitcherPipelineType pipelines[] = {
+                NVSTITCH_STITCHER_PIPELINE_MONO,
+                NVSTITCH_STITCHER_PIPELINE_MONO_EQ,
+        };
+
+        char *tmp = strdup(fmt);
+        char *init_fmt = tmp;
+        char *save_ptr = NULL;
+        char *item;
+#define FMT_CMP(param) (strncmp(item, (param), strlen((param))) == 0)
+        while((item = strtok_r(init_fmt, ":", &save_ptr))) {
+                if (FMT_CMP("width=")) {
+                        s->width = atoi(strchr(item, '=') + 1);
+                } else if(FMT_CMP("roi=")){
+                        unsigned left, top, width, height;
+                        int count = sscanf(strchr(item, '=') + 1, "%u,%u,%u,%u",
+                                        &left, &top, &width, &height); 
+                        if(count == 4){
+                                s->roi = nvstitchRect_t{left, top, width, height};
+                        }
+                } else if(FMT_CMP("quality=")){
+                        unsigned quality = atoi(strchr(item, '=') + 1);
+                        if(quality < sizeof(quality_vals) / sizeof(*quality_vals)){
+                                s->quality = quality_vals[quality];
+                        }
+                } else if(FMT_CMP("pipeline=")){
+                        unsigned pipeline = atoi(strchr(item, '=') + 1);
+                        if(pipeline < sizeof(pipelines) / sizeof(*pipelines)){
+                                s->pipeline = pipelines[pipeline];
+                        }
+                }
+                init_fmt = NULL;
+        }
+}
+
 static int
 vidcap_vrworks_init(struct vidcap_params *params, void **state)
 {
@@ -190,12 +246,13 @@ vidcap_vrworks_init(struct vidcap_params *params, void **state)
         s->frames = 0;
         gettimeofday(&s->t0, NULL);
 
-        if(vidcap_params_get_fmt(params) && strcmp(vidcap_params_get_fmt(params), "") != 0) {
-                show_help();
-                free(s);
-                return VIDCAP_INIT_NOERR;
+        if(vidcap_params_get_fmt(params) && strcmp(vidcap_params_get_fmt(params), "help") == 0) {
+               show_help(); 
+               free(s);
+               return VIDCAP_INIT_NOERR;
         }
 
+        parse_fmt(s, vidcap_params_get_fmt(params));
 
         s->devices_cnt = 0;
         struct vidcap_params *tmp = params;
@@ -253,18 +310,13 @@ vidcap_vrworks_done(void *state)
 {
 	struct vidcap_vrworks_state *s = (struct vidcap_vrworks_state *) state;
 
-	assert(s != NULL);
+        if(!s) return;
 
         for (int i = 0; i < s->devices_cnt; ++i) {
                 VIDEO_FRAME_DISPOSE(s->captured_frames[i]);
-        }
-        free(s->captured_frames);
-
-        int i;
-        for (i = 0; i < s->devices_cnt; ++i) {
                 vidcap_done(s->devices[i]);
         }
-
+        free(s->captured_frames);
         free(s->devices);
         
         vf_free(s->frame);
