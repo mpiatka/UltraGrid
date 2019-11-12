@@ -54,12 +54,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <vector>
+#include <cmath>
 #include <nvss_video.h>
 #include <nvstitch_common.h>
 #include <nvstitch_common_video.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <xml_util/xml_utility_video.h>
+
+#define PI 3.14159265
 
 const char *log_str = "[vrworks] ";
 
@@ -114,6 +117,52 @@ vidcap_vrworks_probe(bool verbose, void (**deleter)(void *))
 	return vt;
 }
 
+static void calculate_roi(vidcap_vrworks_state *s){
+        double left = 0;
+        double right = 0;
+        double top = 0;
+        double bottom = 0;
+        for(const auto &cam : s->cam_properties){
+                double vfov_half = std::atan((cam.image_size.x / 2) / cam.focal_length) * 180 / PI;
+                double hfov_half = std::atan((cam.image_size.y / 2) / cam.focal_length) * 180 / PI;
+
+                float r31 = cam.extrinsics.rotation[6];
+                float r32 = cam.extrinsics.rotation[7];
+                float r33 = cam.extrinsics.rotation[8];
+                double yaw = std::atan2(-r31, std::sqrt(r32*r32 + r33*r33)) * 180 / PI;
+                double pitch = std::atan2(r32, r33) * 180 / PI;
+                std::cout << vfov_half << " "
+                        << hfov_half << " "
+                        << yaw << " "
+                        << pitch << std::endl;
+
+                double left_edge = yaw - vfov_half;
+                double right_edge = yaw + vfov_half;
+                double top_edge = pitch - hfov_half;
+                double bottom_edge = pitch + hfov_half;
+                if(left_edge < left) left = left_edge;
+                if(right_edge > right) right = right_edge;
+                if(bottom_edge > bottom) bottom = bottom_edge;
+                if(top_edge < top) top = top_edge;
+        }
+
+        double px_per_deg = s->width / 360.0;
+
+        unsigned center_x = s->width / 2;
+        unsigned center_y = s->width / 4;
+
+        unsigned roi_left = center_x + left* px_per_deg;
+        unsigned roi_right = center_x + right* px_per_deg;
+        unsigned roi_top = center_y + top * px_per_deg;
+        unsigned roi_bottom = center_y + bottom* px_per_deg;
+
+        log_msg(LOG_LEVEL_INFO, "[vrworks cap.] Calculated roi: %u,%u %ux%u\n",
+                        roi_left,
+                        roi_top,
+                        roi_right - roi_left,
+                        roi_bottom - roi_top);
+}
+
 static bool init_stitcher(struct vidcap_vrworks_state *s){
         int num_gpus;
         cudaGetDeviceCount(&num_gpus);
@@ -141,6 +190,7 @@ static bool init_stitcher(struct vidcap_vrworks_state *s){
         s->stitcher_properties.pipeline = s->pipeline;
         s->stitcher_properties.projection = NVSTITCH_PANORAMA_PROJECTION_EQUIRECTANGULAR;
         s->stitcher_properties.output_roi = s->roi;
+        //s->stitcher_properties.mono_flags = NVSTITCH_MONO_FLAGS_ENABLE_DEPTH_ALIGNMENT;
 
         // Fetch rig parameters from XML file.
         if (!xmlutil::readCameraRigXml("rig_spec.xml", s->cam_properties, &s->rig_properties))
@@ -148,6 +198,8 @@ static bool init_stitcher(struct vidcap_vrworks_state *s){
                 std::cerr << log_str << "Failed to retrieve rig paramters from XML file." << std::endl;
                 return false;
         }
+
+        calculate_roi(s);
 
         nvstitchResult res;
         res = nvssVideoCreateInstance(&s->stitcher_properties, &s->rig_properties, &s->stitcher);
@@ -515,6 +567,43 @@ vidcap_vrworks_grab(void *state, struct audio_frame **audio)
                 log_msg(LOG_LEVEL_INFO, "[vrworks cap.] %d frames in %g seconds = %g FPS\n", s->frames, seconds, fps);
                 s->t0 = s->t;
                 s->frames = 0;
+
+                nvstitchOverlap_t overlap;
+                nvstitchSeam_t seam;
+                unsigned overlap_count;
+                nvssVideoGetOverlapCount(s->stitcher, &overlap_count);
+                log_msg(LOG_LEVEL_INFO, "[vrworks cap.] %u overlaps\n", overlap_count);
+
+                for(unsigned i = 0; i < overlap_count; i++){
+                        nvssVideoGetOverlapInfo(s->stitcher, i, &overlap, &seam);
+                        log_msg(LOG_LEVEL_INFO, "overlap(%u,%u): %ux%u %u,%u\n",
+                                        overlap.camera_left,
+                                        overlap.camera_right,
+                                        overlap.overlap_rect.left,
+                                        overlap.overlap_rect.top,
+                                        overlap.overlap_rect.width,
+                                        overlap.overlap_rect.height
+                               );
+
+                        log_msg(LOG_LEVEL_INFO, "seam %d ", seam.reproj_width);
+                        switch(seam.seam_type){
+                                case NVSTITCH_SEAM_TYPE_VERTICAL:
+                                        log_msg(LOG_LEVEL_INFO, "(vertical) %u\n", seam.properties.vertical.x_offset);
+                                        break;
+                                case NVSTITCH_SEAM_TYPE_HORIZONTAL:
+                                        log_msg(LOG_LEVEL_INFO, "(horizontal) %u\n", seam.properties.horizontal.y_offset);
+                                        break;
+                                case NVSTITCH_SEAM_TYPE_DIAGONAL:
+                                        log_msg(LOG_LEVEL_INFO, "(diagonal) %u,%u %u,%u\n",
+                                                        seam.properties.diagonal.p1.x,
+                                                        seam.properties.diagonal.p1.y,
+                                                        seam.properties.diagonal.p2.x,
+                                                        seam.properties.diagonal.p2.y
+                                                        );
+                                        break;
+
+                        }
+                }
         }  
 
         return s->frame;
