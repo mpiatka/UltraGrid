@@ -773,7 +773,7 @@ AC_CHECK_FILE(${VRWORKS_DIR}/nvstitch/include/nvstitch.h, FOUND_NVSTITCH_H=yes, 
 if test $FOUND_NVSTITCH_H = yes
 then
 	FOUND_VRWORKS=yes
-	VRWORKS_LIB="$VRWORKS_LIB -L$VRWORKS_DIR/nvstitch/binary -lnvss_video -lnvstitch $VRWORKS_DIR/libcommon_util.a"
+	VRWORKS_LIB="$VRWORKS_LIB -L$VRWORKS_DIR/nvstitch/binary -lnvss_video -lnvstitch $VRWORKS_DIR/libcommon_util.a $CUDA_LIB $CUDA_COMMON_LIB"
 else
 	FOUND_VRWORKS=no
 fi
@@ -781,7 +781,7 @@ fi
 if test $vrworks_req != no -a $FOUND_VRWORKS = yes
 then
     VRWORKS_PATH=${VRWORKS_DIR}
-    VRWORKS_CAP_OBJ="src/video_capture/vrworks.o"
+    VRWORKS_CAP_OBJ="src/video_capture/vrworks.o src/utils/cuda_rgb_rgba.$CU_OBJ_SUFFIX $CUDA_COMMON_OBJ"
     AC_DEFINE([HAVE_VRWORKS], [1], [Build with vrworks support])
     ADD_MODULE("vidcap_vrworks", "$VRWORKS_CAP_OBJ", "$VRWORKS_LIB")
     vrworks=yes
