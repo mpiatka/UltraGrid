@@ -292,6 +292,10 @@ static void grab_worker(grab_worker_state *gs, int id){
 
                 frame = vidcap_grab(gs->s->devices[id], &audio_frame);
 
+                if(!frame){
+                        continue;
+                }
+
                 if (!check_in_format(gs->s, frame, id)) {
                         return;
                 }
