@@ -85,7 +85,6 @@ static void show_help()
 struct grab_worker_state;
 
 struct vidcap_vrworks_state {
-        struct vidcap     **devices;
         int                 devices_cnt;
 
         struct video_frame      **captured_frames;
@@ -103,8 +102,6 @@ struct vidcap_vrworks_state {
         nvstitchStitcherQuality quality;
         unsigned width;
         nvstitchRect_t roi;
-
-        unsigned char *tmpframe;
 
         unsigned char *rgbFrames[4];
         
@@ -271,26 +268,37 @@ static bool upload_frame(grab_worker_state *gs, video_frame *in_frame, int i){
         return true;
 }
 
-static void grab_worker(grab_worker_state *gs, int id){
+static void grab_worker(grab_worker_state *gs, vidcap_params *param, int id){
         struct audio_frame *audio_frame = NULL;
         struct video_frame *frame = NULL;
         std::unique_lock<std::mutex> stitch_lk(gs->s->stitched_mut, std::defer_lock);
         std::unique_lock<std::mutex> grab_lk(gs->grabbed_mut, std::defer_lock);
         cudaMalloc(&gs->rgb_frame, 1920 * 1080 *3);
+
+        vidcap *device = nullptr;
+
+        int ret = initialize_video_capture(NULL, param, &device);
+        if(ret != 0) {
+                fprintf(stderr, "[vrworks] Unable to initialize device %d (%s:%s).\n",
+                                id, vidcap_params_get_driver(param),
+                                vidcap_params_get_fmt(param));
+                return;
+        }
+
         while(true){
                 stitch_lk.lock();
                 gs->s->stitched_cv.wait(stitch_lk,
                                 [gs]{return gs->s->stitched_count == gs->grabbed_count || gs->s->done;});
                 if(gs->s->done){
                         VIDEO_FRAME_DISPOSE(frame);
-                        vidcap_done(gs->s->devices[id]);
+                        vidcap_done(device);
                         return;
                 }
                 stitch_lk.unlock();
 
                 VIDEO_FRAME_DISPOSE(frame);
 
-                frame = vidcap_grab(gs->s->devices[id], &audio_frame);
+                frame = vidcap_grab(device, &audio_frame);
 
                 if(!frame){
                         continue;
@@ -352,33 +360,6 @@ static bool init_stitcher(struct vidcap_vrworks_state *s){
         res = nvssVideoCreateInstance(&s->stitcher_properties, &s->rig_properties, &s->stitcher);
         if(res != NVSTITCH_SUCCESS){
                 std::cout << log_str << "Failed to create stitcher instance." << std::endl;
-                return false;
-        }
-
-        size_t cam_count = s->cam_properties.size();
-        s->capture_workers = std::vector<grab_worker_state>(cam_count);
-        for(int i = 0; i < cam_count; i++){
-                s->capture_workers[i].s = s;
-                s->capture_workers[i].thread = 
-                        std::thread(grab_worker, &s->capture_workers[i], i);
-
-        }
-
-        return true;
-}
-
-static bool alloc_tmp_frame(struct vidcap_vrworks_state *s){
-        //Make sure every input can fit
-        size_t max_size = 0;
-        for(const auto &cam : s->cam_properties){
-                if(cam.image_size.x * cam.image_size.y > max_size){
-                        max_size = cam.image_size.x * cam.image_size.y;
-                }
-        }
-
-        const int bpp = 4; //RGBA
-        if(cudaMallocHost(&s->tmpframe, max_size*bpp) != cudaSuccess){
-                std::cerr << log_str << "Failed to allocate tmpframe" << std::endl;
                 return false;
         }
 
@@ -471,20 +452,6 @@ vidcap_vrworks_init(struct vidcap_params *params, void **state)
                         break;
         }
 
-        s->devices = (vidcap **) calloc(s->devices_cnt, sizeof(struct vidcap *));
-        tmp = params;
-        for (int i = 0; i < s->devices_cnt; ++i) {
-                tmp = vidcap_params_get_next(tmp);
-
-                int ret = initialize_video_capture(NULL, (struct vidcap_params *) tmp, &s->devices[i]);
-                if(ret != 0) {
-                        fprintf(stderr, "[vrworks] Unable to initialize device %d (%s:%s).\n",
-                                        i, vidcap_params_get_driver(tmp),
-                                        vidcap_params_get_fmt(tmp));
-                        goto error;
-                }
-        }
-
         s->captured_frames = (struct video_frame **) calloc(s->devices_cnt, sizeof(struct video_frame *));
 
         s->frame = nullptr;
@@ -493,22 +460,23 @@ vidcap_vrworks_init(struct vidcap_params *params, void **state)
                 goto error;
         }
 
-        if(!alloc_tmp_frame(s)){
-                goto error;
+        s->capture_workers = std::vector<grab_worker_state>(s->devices_cnt);
+        tmp = params;
+        for (int i = 0; i < s->devices_cnt; ++i) {
+                tmp = vidcap_params_get_next(tmp);
+
+                s->capture_workers[i].s = s;
+                s->capture_workers[i].thread = 
+                        std::thread(grab_worker, &s->capture_workers[i], tmp, i);
         }
+
+
 
         *state = s;
         return VIDCAP_INIT_OK;
 
 error:
-        if(s->devices) {
-                int i;
-                for (i = 0u; i < s->devices_cnt; ++i) {
-                        if(s->devices[i]) {
-                                vidcap_done(s->devices[i]);
-                        }
-                }
-        }
+        //TODO stop grab threads
         free(s);
         return VIDCAP_INIT_FAIL;
 }
@@ -531,10 +499,8 @@ vidcap_vrworks_done(void *state)
         }
 
         free(s->captured_frames);
-        free(s->devices);
         
         vf_free(s->frame);
-        cudaFreeHost(s->tmpframe);
 
         nvssVideoDestroyInstance(s->stitcher);
 
