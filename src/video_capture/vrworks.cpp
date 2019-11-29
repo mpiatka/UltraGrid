@@ -300,16 +300,14 @@ static void grab_worker(grab_worker_state *gs, vidcap_params *param, int id){
 
                 frame = vidcap_grab(device, &audio_frame);
 
-                if(!frame){
-                        continue;
-                }
+                if(frame){
+                        if (!check_in_format(gs->s, frame, id)) {
+                                return;
+                        }
 
-                if (!check_in_format(gs->s, frame, id)) {
-                        return;
-                }
-
-                if(!upload_frame(gs, frame, id)){
-                        return;
+                        if(!upload_frame(gs, frame, id)){
+                                return;
+                        }
                 }
 
                 grab_lk.lock();
