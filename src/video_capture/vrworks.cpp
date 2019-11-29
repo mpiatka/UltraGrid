@@ -417,6 +417,19 @@ static void parse_fmt(vidcap_vrworks_state *s, const char * const fmt){
         }
 }
 
+static void stop_grab_workers(vidcap_vrworks_state *s){
+        std::unique_lock<std::mutex> lk(s->stitched_mut);
+        s->done = true;
+        lk.unlock();
+
+        s->stitched_cv.notify_all();
+
+        for(auto& worker : s->capture_workers){
+                if(worker.thread.joinable())
+                        worker.thread.join();
+        }
+}
+
 static int
 vidcap_vrworks_init(struct vidcap_params *params, void **state)
 {
@@ -476,7 +489,7 @@ vidcap_vrworks_init(struct vidcap_params *params, void **state)
         return VIDCAP_INIT_OK;
 
 error:
-        //TODO stop grab threads
+        stop_grab_workers(s);
         free(s);
         return VIDCAP_INIT_FAIL;
 }
@@ -488,15 +501,7 @@ vidcap_vrworks_done(void *state)
 
         if(!s) return;
 
-        std::unique_lock<std::mutex> lk(s->stitched_mut);
-        s->done = true;
-        lk.unlock();
-
-        s->stitched_cv.notify_all();
-
-        for(auto& worker : s->capture_workers){
-                worker.thread.join();
-        }
+        stop_grab_workers(s);
 
         free(s->captured_frames);
         
