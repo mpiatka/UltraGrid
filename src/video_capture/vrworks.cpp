@@ -103,8 +103,6 @@ struct vidcap_vrworks_state {
         unsigned width;
         nvstitchRect_t roi;
 
-        unsigned char *rgbFrames[4];
-        
         std::mutex stitched_mut;
         unsigned stitched_count = 0;
         bool done = false;
@@ -121,7 +119,11 @@ struct grab_worker_state {
 
         vidcap_vrworks_state *s;
 
-        unsigned char *rgb_frame = nullptr;
+        unsigned width = 0;
+        unsigned height = 0;
+        unsigned char *tmp_frames[2] = {  };
+        void (*conv_func)(grab_worker_state *, nvstitchImageBuffer_t, int, cudaStream_t);
+        codec_t in_codec = VIDEO_CODEC_NONE;
 };
 
 static struct vidcap_type *
@@ -210,14 +212,25 @@ static void calculate_roi(vidcap_vrworks_state *s){
         s->roi = nvstitchRect_t{roi_left, roi_top, width, height};
 }
 
-static bool check_in_format(vidcap_vrworks_state *s, video_frame *in, int i){
+static void RGB_conv(grab_worker_state *gs,
+                nvstitchImageBuffer_t input_image,
+                int in_pitch,
+                cudaStream_t stream)
+{
+        cuda_RGBto_RGBA((unsigned char *) input_image.dev_ptr, input_image.pitch,
+                        gs->tmp_frames[0], in_pitch,
+                        gs->width, gs->height, stream);
+
+}
+
+static bool check_in_format(grab_worker_state *gs, video_frame *in, int i){
         if(in->tile_count != 1){
                 std::cerr << log_str << "Only frames with tile_count == 1 are supported" << std::endl;
                 return false;
         }
 
-        unsigned int expected_w = s->cam_properties[i].image_size.x;
-        unsigned int expected_h = s->cam_properties[i].image_size.y;
+        unsigned int expected_w = gs->width;
+        unsigned int expected_h = gs->height;
 
         if(in->tiles[0].width != expected_w
                         || in->tiles[0].height != expected_h)
@@ -226,6 +239,28 @@ static bool check_in_format(vidcap_vrworks_state *s, video_frame *in, int i){
                        << " Expected " << expected_w << "x" << expected_h
                        << ", but got " << in->tiles[0].width << "x" << in->tiles[0].height << std::endl;
                 return false;
+        }
+
+        if(gs->in_codec != in->color_spec){
+                printf("New codec detected! RECONF\n");
+                assert( in->color_spec == RGB
+                                || in->color_spec == RGBA
+                      );
+                gs->in_codec = in->color_spec;
+                for(auto& buf : gs->tmp_frames){
+                        cudaFree(buf);
+                        buf = nullptr;
+                }
+
+                int in_line_size = vc_get_linesize(expected_w, in->color_spec);
+                cudaMalloc(&gs->tmp_frames[0], in_line_size * expected_h);
+                switch(in->color_spec){
+                        case RGB:
+                                gs->conv_func = RGB_conv;
+                                break;
+                        default:
+                                gs->conv_func = nullptr;
+                }
         }
 
         return true;
@@ -252,18 +287,30 @@ static bool upload_frame(grab_worker_state *gs, video_frame *in_frame, int i){
         unsigned int height = in_frame->tiles[0].height;
         int in_line_size = vc_get_linesize(width, in_frame->color_spec);
 
-        if (cudaMemcpyAsync(gs->rgb_frame,
-                                (unsigned char *) in_frame->tiles[0].data,
-                                1920 * 1080 * 3,
-                                cudaMemcpyHostToDevice, stream) != cudaSuccess)
-        {
-                std::cerr << "Error copying RGBA image bitmap to CUDA buffer" << std::endl;
-                return false;
-        }
 
-        cuda_RGBto_RGBA((unsigned char *) input_image.dev_ptr, input_image.pitch,
-                        gs->rgb_frame, 1920 * 3,
-                        1920, 1080, stream);
+        if(gs->conv_func){
+                if (cudaMemcpyAsync(gs->tmp_frames[0],
+                                        (unsigned char *) in_frame->tiles[0].data,
+                                        in_line_size * height,
+                                        cudaMemcpyHostToDevice, stream) != cudaSuccess)
+                {
+                        std::cerr << "Error copying input image bitmap to CUDA buffer" << std::endl;
+                        return false;
+                }
+
+                gs->conv_func(gs, input_image, in_line_size, stream);
+        } else {
+                if (cudaMemcpy2D(input_image.dev_ptr, input_image.pitch,
+                                        (unsigned char *) in_frame->tiles[0].data,
+                                        in_line_size,
+                                        in_line_size, height,
+                                        cudaMemcpyHostToDevice) != cudaSuccess)
+                {
+                        std::cerr << "Error copying RGBA image bitmap to CUDA buffer" << std::endl;
+                        return false;
+
+                }
+        }
 
         return true;
 }
@@ -273,7 +320,9 @@ static void grab_worker(grab_worker_state *gs, vidcap_params *param, int id){
         struct video_frame *frame = NULL;
         std::unique_lock<std::mutex> stitch_lk(gs->s->stitched_mut, std::defer_lock);
         std::unique_lock<std::mutex> grab_lk(gs->grabbed_mut, std::defer_lock);
-        cudaMalloc(&gs->rgb_frame, 1920 * 1080 *3);
+
+        gs->width = gs->s->cam_properties[id].image_size.x;
+        gs->height = gs->s->cam_properties[id].image_size.y;
 
         vidcap *device = nullptr;
 
@@ -301,7 +350,7 @@ static void grab_worker(grab_worker_state *gs, vidcap_params *param, int id){
                 frame = vidcap_grab(device, &audio_frame);
 
                 if(frame){
-                        if (!check_in_format(gs->s, frame, id)) {
+                        if (!check_in_format(gs, frame, id)) {
                                 return;
                         }
 
