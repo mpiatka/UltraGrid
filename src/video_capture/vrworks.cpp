@@ -362,16 +362,16 @@ static void grab_worker(grab_worker_state *gs, vidcap_params *param, int id){
 
                 VIDEO_FRAME_DISPOSE(frame);
 
-                frame = vidcap_grab(device, &audio_frame);
+                frame = nullptr;
+                while(!frame){
+                        frame = vidcap_grab(device, &audio_frame);
+                }
+                if (!check_in_format(gs, frame, id)) {
+                        return;
+                }
 
-                if(frame){
-                        if (!check_in_format(gs, frame, id)) {
-                                return;
-                        }
-
-                        if(!upload_frame(gs, frame, id)){
-                                return;
-                        }
+                if(!upload_frame(gs, frame, id)){
+                        return;
                 }
 
                 grab_lk.lock();
