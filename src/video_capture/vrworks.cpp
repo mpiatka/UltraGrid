@@ -223,6 +223,17 @@ static void RGB_conv(grab_worker_state *gs,
 
 }
 
+static void UYVY_conv(grab_worker_state *gs,
+                nvstitchImageBuffer_t input_image,
+                int in_pitch,
+                cudaStream_t stream)
+{
+        cuda_UYVY_to_RGBA((unsigned char *) input_image.dev_ptr, input_image.pitch,
+                        gs->tmp_frames[0], in_pitch,
+                        gs->width, gs->height, stream);
+
+}
+
 static bool check_in_format(grab_worker_state *gs, video_frame *in, int i){
         if(in->tile_count != 1){
                 std::cerr << log_str << "Only frames with tile_count == 1 are supported" << std::endl;
@@ -245,6 +256,7 @@ static bool check_in_format(grab_worker_state *gs, video_frame *in, int i){
                 printf("New codec detected! RECONF\n");
                 assert( in->color_spec == RGB
                                 || in->color_spec == RGBA
+                                || in->color_spec == UYVY
                       );
                 gs->in_codec = in->color_spec;
                 for(auto& buf : gs->tmp_frames){
@@ -257,6 +269,9 @@ static bool check_in_format(grab_worker_state *gs, video_frame *in, int i){
                 switch(in->color_spec){
                         case RGB:
                                 gs->conv_func = RGB_conv;
+                                break;
+                        case UYVY:
+                                gs->conv_func = UYVY_conv;
                                 break;
                         default:
                                 gs->conv_func = nullptr;
@@ -572,6 +587,7 @@ static bool allocate_result_frame(vidcap_vrworks_state *s, unsigned width, unsig
         desc.height = height;
         desc.color_spec = RGBA;
         desc.tile_count = 1;
+        //TODO: Set correct fps
         desc.fps = 30;
 
         s->frame = vf_alloc_desc(desc);
