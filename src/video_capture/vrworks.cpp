@@ -605,7 +605,7 @@ static bool allocate_result_frame(vidcap_vrworks_state *s, unsigned width, unsig
         return true;
 }
 
-static bool download_stitched(vidcap_vrworks_state *s){
+static bool download_stitched(vidcap_vrworks_state *s, cudaStream_t out_stream){
         nvstitchImageBuffer_t output_image;
 
         nvstitchResult res;
@@ -620,12 +620,6 @@ static bool download_stitched(vidcap_vrworks_state *s){
                         return false;
                 }
         }
-        cudaStream_t out_stream = nullptr;
-        res = nvssVideoGetOutputStream(s->stitcher, NVSTITCH_EYE_MONO, &out_stream);
-        if(res != NVSTITCH_SUCCESS){
-                std::cerr << log_str << "Failed to get output stream" << std::endl;
-                return false;
-        }
 
         if (cudaMemcpy2DAsync(s->frame->tiles[0].data, output_image.row_bytes,
                                 output_image.dev_ptr, output_image.pitch,
@@ -635,13 +629,6 @@ static bool download_stitched(vidcap_vrworks_state *s){
                 std::cerr << log_str << "Error copying output panorama from CUDA buffer" << std::endl;
                 return false;
         }
-#if 0
-        if (cudaStreamSynchronize(out_stream) != cudaSuccess)
-        {
-                std::cerr << "Error synchronizing with the output CUDA stream" << std::endl;
-                return false;
-        }
-#endif
 
         return true;
 }
@@ -663,7 +650,14 @@ vidcap_vrworks_grab(void *state, struct audio_frame **audio)
                 return NULL;
         }
 
-        if(!download_stitched(s)){
+        cudaStream_t out_stream;
+        res = nvssVideoGetOutputStream(s->stitcher, NVSTITCH_EYE_MONO, &out_stream);
+        if(res != NVSTITCH_SUCCESS){
+                std::cerr << log_str << "Failed to get output stream" << std::endl;
+                return NULL;
+        }
+
+        if(!download_stitched(s, out_stream)){
                 return NULL;
         }
 
@@ -671,6 +665,14 @@ vidcap_vrworks_grab(void *state, struct audio_frame **audio)
         s->stitched_count += 1;
         stitch_lk.unlock();
         s->stitched_cv.notify_all();
+
+#if 1
+        if (cudaStreamSynchronize(out_stream) != cudaSuccess)
+        {
+                std::cerr << "Error synchronizing with the output CUDA stream" << std::endl;
+                return NULL;
+        }
+#endif
 
         s->frames++;
         gettimeofday(&s->t, NULL);
