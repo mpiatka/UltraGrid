@@ -781,7 +781,7 @@ fi
 if test $vrworks_req != no -a $FOUND_VRWORKS = yes
 then
     VRWORKS_PATH=${VRWORKS_DIR}
-    VRWORKS_CAP_OBJ="src/video_capture/vrworks.o src/utils/cuda_rgb_rgba.$CU_OBJ_SUFFIX $CUDA_COMMON_OBJ"
+    VRWORKS_CAP_OBJ="src/video_capture/vrworks.o src/utils/cuda_pix_conv.$CU_OBJ_SUFFIX $CUDA_COMMON_OBJ"
     AC_DEFINE([HAVE_VRWORKS], [1], [Build with vrworks support])
     ADD_MODULE("vidcap_vrworks", "$VRWORKS_CAP_OBJ", "$VRWORKS_LIB")
     vrworks=yes

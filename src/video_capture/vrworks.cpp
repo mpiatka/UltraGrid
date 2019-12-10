@@ -64,7 +64,7 @@
 #include <cuda_runtime.h>
 #include <xml_util/xml_utility_video.h>
 
-#include "utils/cuda_rgb_rgba.h"
+#include "utils/cuda_pix_conv.h"
 
 #define PI 3.14159265
 
