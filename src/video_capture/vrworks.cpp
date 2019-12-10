@@ -102,6 +102,8 @@ struct vidcap_vrworks_state {
         nvstitchStitcherQuality quality;
         unsigned width;
         nvstitchRect_t roi;
+        std::string spec_path;
+        double fps;
 
         std::mutex stitched_mut;
         unsigned stitched_count = 0;
@@ -400,7 +402,7 @@ static bool init_stitcher(struct vidcap_vrworks_state *s){
                 }
         }
         // Fetch rig parameters from XML file.
-        if (!xmlutil::readCameraRigXml("rig_spec.xml", s->cam_properties, &s->rig_properties))
+        if (!xmlutil::readCameraRigXml(s->spec_path, s->cam_properties, &s->rig_properties))
         {
                 std::cerr << log_str << "Failed to retrieve rig paramters from XML file." << std::endl;
                 return false;
@@ -434,6 +436,8 @@ static void parse_fmt(vidcap_vrworks_state *s, const char * const fmt){
         s->width = 3840;
         s->roi = nvstitchRect_t{ 0, 0, 0, 0 };
         //s->roi = nvstitchRect_t{ 900, 700, 2100, 500 };
+        s->spec_path = "rig_spec.xml";
+        s->fps = 30;
 
         if(!fmt)
                 return;
@@ -474,6 +478,10 @@ static void parse_fmt(vidcap_vrworks_state *s, const char * const fmt){
                         if(pipeline < sizeof(pipelines) / sizeof(*pipelines)){
                                 s->pipeline = pipelines[pipeline];
                         }
+                } else if(FMT_CMP("rig_spec=")){
+                        s->spec_path = strchr(item, '=') + 1;
+                } else if(FMT_CMP("fps=")){
+                        s->fps = strtod(strchr(item, '=') + 1, nullptr);
                 }
                 init_fmt = NULL;
         }
@@ -587,8 +595,7 @@ static bool allocate_result_frame(vidcap_vrworks_state *s, unsigned width, unsig
         desc.height = height;
         desc.color_spec = RGBA;
         desc.tile_count = 1;
-        //TODO: Set correct fps
-        desc.fps = 30;
+        desc.fps = s->fps;
 
         s->frame = vf_alloc_desc(desc);
         s->frame->tiles[0].data_len = vc_get_linesize(desc.width,
