@@ -104,6 +104,16 @@ struct vidcap_vrworks_state {
         nvstitchRect_t roi;
         std::string spec_path;
         double fps;
+        codec_t out_fmt;
+
+        unsigned char *conv_tmp_frame = nullptr;
+        void (*conv_func)(unsigned char *dst,
+                size_t dstPitch,
+                unsigned char *src,
+                size_t srcPitch,
+                size_t width,
+                size_t height,
+                struct CUstream_st *stream);
 
         std::mutex stitched_mut;
         unsigned stitched_count = 0;
@@ -384,6 +394,17 @@ static void grab_worker(grab_worker_state *gs, vidcap_params *param, int id){
 }
 
 static bool init_stitcher(struct vidcap_vrworks_state *s){
+        switch(s->out_fmt){
+                case RGBA:
+                        s->conv_func = nullptr;
+                        break;
+                case RGB:
+                        s->conv_func = cuda_RGBA_to_RGB;
+                        break;
+                default:
+                        assert(false && "Unsupported output pixel format!");
+        }
+
         int num_gpus;
         cudaGetDeviceCount(&num_gpus);
 
@@ -438,6 +459,7 @@ static void parse_fmt(vidcap_vrworks_state *s, const char * const fmt){
         //s->roi = nvstitchRect_t{ 900, 700, 2100, 500 };
         s->spec_path = "rig_spec.xml";
         s->fps = 30;
+        s->out_fmt = RGBA;
 
         if(!fmt)
                 return;
@@ -482,6 +504,8 @@ static void parse_fmt(vidcap_vrworks_state *s, const char * const fmt){
                         s->spec_path = strchr(item, '=') + 1;
                 } else if(FMT_CMP("fps=")){
                         s->fps = strtod(strchr(item, '=') + 1, nullptr);
+                } else if(FMT_CMP("fmt=")){
+                        s->out_fmt = get_codec_from_name(strchr(item, '=') + 1);
                 }
                 init_fmt = NULL;
         }
@@ -578,6 +602,7 @@ vidcap_vrworks_done(void *state)
         vf_free(s->frame);
 
         nvssVideoDestroyInstance(s->stitcher);
+        cudaFree(s->conv_tmp_frame);
 
         delete s;
 }
@@ -593,7 +618,7 @@ static bool allocate_result_frame(vidcap_vrworks_state *s, unsigned width, unsig
         video_desc desc{};
         desc.width = width;
         desc.height = height;
-        desc.color_spec = RGBA;
+        desc.color_spec = s->out_fmt;
         desc.tile_count = 1;
         desc.fps = s->fps;
 
@@ -604,6 +629,15 @@ static bool allocate_result_frame(vidcap_vrworks_state *s, unsigned width, unsig
         if(cudaMallocHost(&s->frame->tiles[0].data, s->frame->tiles[0].data_len) != cudaSuccess){
                 std::cerr << log_str << "Failed to allocate result frame" << std::endl;
                 return false;
+        }
+
+        if(s->conv_func){
+                size_t size = vc_get_linesize(desc.width, s->out_fmt) * desc.height;
+
+                if(cudaMalloc(&s->conv_tmp_frame, size) != cudaSuccess){
+                        std::cerr << log_str << "Failed to allocate tmp conv frame" << std::endl;
+                        return false;
+                }
         }
 
         s->frame->callbacks.data_deleter = result_data_delete;
@@ -628,9 +662,22 @@ static bool download_stitched(vidcap_vrworks_state *s, cudaStream_t out_stream){
                 }
         }
 
-        if (cudaMemcpy2DAsync(s->frame->tiles[0].data, output_image.row_bytes,
-                                output_image.dev_ptr, output_image.pitch,
-                                output_image.row_bytes, output_image.height,
+        void *src = output_image.dev_ptr;
+        size_t src_pitch = output_image.pitch;
+        size_t row_bytes = output_image.row_bytes;
+        if(s->conv_func){
+                s->conv_func(s->conv_tmp_frame, output_image.width * 3,
+                                (unsigned char *) src, src_pitch,
+                                output_image.width, output_image.height,
+                                out_stream);
+                src = s->conv_tmp_frame;
+                src_pitch = output_image.width * 3;
+                row_bytes = src_pitch;
+        }
+
+        if (cudaMemcpy2DAsync(s->frame->tiles[0].data, row_bytes,
+                                src, src_pitch,
+                                row_bytes, output_image.height,
                                 cudaMemcpyDeviceToHost, out_stream) != cudaSuccess)
         {
                 std::cerr << log_str << "Error copying output panorama from CUDA buffer" << std::endl;
