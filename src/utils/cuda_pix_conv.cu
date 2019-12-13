@@ -29,6 +29,31 @@ void kern_RGBtoRGBA(unsigned char *dst,
         *dst_px = make_uchar4(px.x, px.y, px.z, 0);
 }
 
+        __global__
+void kern_RGBAtoRGB(unsigned char *dst,
+                size_t dstPitch,
+                unsigned char *src,
+                size_t srcPitch,
+                size_t width,
+                size_t height)
+{
+        const int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+        const int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+
+        if(x >= width)
+                return;
+
+        if(y >= height)
+                return;
+
+        uchar4 *src_px = (uchar4 *) (src + y * srcPitch) + x;
+        uchar3 *dst_px = (uchar3 *) (dst + y * dstPitch) + x;
+
+        const uchar4 px = *src_px;
+
+        *dst_px = make_uchar3(px.x, px.y, px.z);
+}
+
 #define max(a, b)      (((a) > (b))? (a): (b))
 #define min(a, b)      (((a) < (b))? (a): (b))
 
@@ -122,6 +147,21 @@ void cuda_RGB_to_RGBA(unsigned char *dst,
                         (height + blockSize.y - 1) / blockSize.y);
 
         kern_RGBtoRGBA<<<numBlocks, blockSize, 0, stream>>>(dst, dstPitch, src, srcPitch, width, height);
+}
+
+void cuda_RGBA_to_RGB(unsigned char *dst,
+                size_t dstPitch,
+                unsigned char *src,
+                size_t srcPitch,
+                size_t width,
+                size_t height,
+                CUstream_st *stream){
+
+        dim3 blockSize(32,32);
+        dim3 numBlocks((width + blockSize.x - 1) / blockSize.x,
+                        (height + blockSize.y - 1) / blockSize.y);
+
+        kern_RGBAtoRGB<<<numBlocks, blockSize, 0, stream>>>(dst, dstPitch, src, srcPitch, width, height);
 }
 
 void cuda_UYVY_to_RGBA(unsigned char *dst,
