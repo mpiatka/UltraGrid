@@ -164,6 +164,21 @@ void cuda_RGBA_to_RGB(unsigned char *dst,
         kern_RGBAtoRGB<<<numBlocks, blockSize, 0, stream>>>(dst, dstPitch, src, srcPitch, width, height);
 }
 
+void cuda_RGBA_to_UYVY(unsigned char *dst,
+                size_t dstPitch,
+                unsigned char *src,
+                size_t srcPitch,
+                size_t width,
+                size_t height,
+                CUstream_st *stream){
+
+        dim3 blockSize(32,32);
+        dim3 numBlocks((width / 2 + blockSize.x - 1) / blockSize.x,
+                        (height + blockSize.y - 1) / blockSize.y);
+
+        kern_RGBAtoRGB<<<numBlocks, blockSize, 0, stream>>>(dst, dstPitch, src, srcPitch, width, height);
+}
+
 void cuda_UYVY_to_RGBA(unsigned char *dst,
                 size_t dstPitch,
                 unsigned char *src,
