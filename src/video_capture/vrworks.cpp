@@ -669,16 +669,16 @@ static bool download_stitched(vidcap_vrworks_state *s, cudaStream_t out_stream){
         size_t src_pitch = output_image.pitch;
         size_t row_bytes = output_image.row_bytes;
         if(s->conv_func){
-                s->conv_func(s->conv_tmp_frame, vc_get_linesize(output_image.width, UYVY),
+                s->conv_func(s->conv_tmp_frame, vc_get_linesize(output_image.width, s->out_fmt),
                                 (unsigned char *) src, src_pitch,
                                 output_image.width, output_image.height,
                                 out_stream);
                 src = s->conv_tmp_frame;
-                src_pitch = output_image.width * 2;
+                src_pitch = vc_get_linesize(output_image.width, s->out_fmt);
                 row_bytes = src_pitch;
         }
 
-        if (cudaMemcpy2DAsync(s->frame->tiles[0].data, vc_get_linesize(output_image.width, UYVY),
+        if (cudaMemcpy2DAsync(s->frame->tiles[0].data, row_bytes,
                                 src, src_pitch,
                                 row_bytes, output_image.height,
                                 cudaMemcpyDeviceToHost, out_stream) != cudaSuccess)
