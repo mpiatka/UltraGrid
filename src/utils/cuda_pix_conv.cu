@@ -176,7 +176,7 @@ void cuda_RGBA_to_UYVY(unsigned char *dst,
         dim3 numBlocks((width / 2 + blockSize.x - 1) / blockSize.x,
                         (height + blockSize.y - 1) / blockSize.y);
 
-        kern_RGBAtoRGB<<<numBlocks, blockSize, 0, stream>>>(dst, dstPitch, src, srcPitch, width, height);
+        kern_RGBAtoUYVY<<<numBlocks, blockSize, 0, stream>>>(dst, dstPitch, src, srcPitch, width, height);
 }
 
 void cuda_UYVY_to_RGBA(unsigned char *dst,
