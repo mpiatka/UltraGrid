@@ -154,6 +154,8 @@ vidcap_vrworks_probe(bool verbose, void (**deleter)(void *))
 }
 
 static void calculate_roi(vidcap_vrworks_state *s){
+        const int round_to_px = 32;
+
         double left = 0;
         double right = 0;
         double top = 0;
@@ -165,15 +167,8 @@ static void calculate_roi(vidcap_vrworks_state *s){
                 float r11 = cam.extrinsics.rotation[0];
                 float r12 = cam.extrinsics.rotation[1];
                 float r13 = cam.extrinsics.rotation[2];
-                float r21 = cam.extrinsics.rotation[3];
                 float r23 = cam.extrinsics.rotation[5];
-                float r31 = cam.extrinsics.rotation[6];
-                float r32 = cam.extrinsics.rotation[7];
                 float r33 = cam.extrinsics.rotation[8];
-                for(int i = 0; i < 9; i++){
-                        std::cout << cam.extrinsics.rotation[i] << " ";
-                }
-                std::cout << std::endl;
 
                 double yaw = std::asin(r13) * 180 / PI;
                 double pitch = std::atan2(-r23, r33) * 180 / PI;
@@ -183,14 +178,6 @@ static void calculate_roi(vidcap_vrworks_state *s){
                         << yaw << " "
                         << pitch << " "
                         << roll << std::endl;
-                double yaw2= std::atan2(r31, r32) * 180 / PI;
-                double pitch2 = std::acos(r33) * 180 / PI;
-                double roll2 = std::atan2(r13, r23) * 180 / PI;
-                std::cout << vfov_half << " "
-                        << hfov_half << " "
-                        << yaw2 << " "
-                        << pitch2 << " "
-                        << roll2 << std::endl;
 
                 double left_edge = yaw - vfov_half;
                 double right_edge = yaw + vfov_half;
@@ -205,15 +192,15 @@ static void calculate_roi(vidcap_vrworks_state *s){
         double px_per_deg = s->width / 360.0;
 
         unsigned center_x = s->width / 2;
-        unsigned center_y = s->width / 4;
+        unsigned center_y = s->width / 4; //height is half of width
 
         unsigned roi_left = center_x + left* px_per_deg;
         unsigned roi_right = center_x + right* px_per_deg;
         unsigned roi_top = center_y + top * px_per_deg;
         unsigned roi_bottom = center_y + bottom * px_per_deg;
 
-        unsigned width = ((roi_right - roi_left + 32 - 1) / 32) * 32;
-        unsigned height = ((roi_bottom - roi_top + 32 - 1) / 32) * 32;
+        unsigned width = ((roi_right - roi_left + round_to_px - 1) / round_to_px) * round_to_px;
+        unsigned height = ((roi_bottom - roi_top + round_to_px - 1) / round_to_px) * round_to_px;
 
         log_msg(LOG_LEVEL_INFO, "[vrworks cap.] Calculated roi: %u,%u %ux%u\n",
                         roi_left,
