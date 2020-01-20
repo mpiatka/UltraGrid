@@ -134,7 +134,13 @@ struct grab_worker_state {
         unsigned width = 0;
         unsigned height = 0;
         unsigned char *tmp_frames[2] = {  };
-        void (*conv_func)(grab_worker_state *, nvstitchImageBuffer_t, int, cudaStream_t);
+        void (*conv_func)(unsigned char *dst,
+                size_t dstPitch,
+                unsigned char *src,
+                size_t srcPitch,
+                size_t width,
+                size_t height,
+                struct CUstream_st *stream);
         codec_t in_codec = VIDEO_CODEC_NONE;
 };
 
@@ -211,28 +217,6 @@ static void calculate_roi(vidcap_vrworks_state *s){
         s->roi = nvstitchRect_t{roi_left, roi_top, width, height};
 }
 
-static void RGB_conv(grab_worker_state *gs,
-                nvstitchImageBuffer_t input_image,
-                int in_pitch,
-                cudaStream_t stream)
-{
-        cuda_RGBto_RGBA((unsigned char *) input_image.dev_ptr, input_image.pitch,
-                        gs->tmp_frames[0], in_pitch,
-                        gs->width, gs->height, stream);
-
-}
-
-static void UYVY_conv(grab_worker_state *gs,
-                nvstitchImageBuffer_t input_image,
-                int in_pitch,
-                cudaStream_t stream)
-{
-        cuda_UYVY_to_RGBA((unsigned char *) input_image.dev_ptr, input_image.pitch,
-                        gs->tmp_frames[0], in_pitch,
-                        gs->width, gs->height, stream);
-
-}
-
 static bool check_in_format(grab_worker_state *gs, video_frame *in, int i){
         if(in->tile_count != 1){
                 std::cerr << log_str << "Only frames with tile_count == 1 are supported" << std::endl;
@@ -267,10 +251,10 @@ static bool check_in_format(grab_worker_state *gs, video_frame *in, int i){
                 cudaMalloc(&gs->tmp_frames[0], in_line_size * expected_h);
                 switch(in->color_spec){
                         case RGB:
-                                gs->conv_func = RGB_conv;
+                                gs->conv_func = cuda_RGB_to_RGBA;
                                 break;
                         case UYVY:
-                                gs->conv_func = UYVY_conv;
+                                gs->conv_func = cuda_UYVY_to_RGBA;
                                 break;
                         default:
                                 gs->conv_func = nullptr;
@@ -312,7 +296,9 @@ static bool upload_frame(grab_worker_state *gs, video_frame *in_frame, int i){
                         return false;
                 }
 
-                gs->conv_func(gs, input_image, in_line_size, stream);
+                gs->conv_func((unsigned char *) input_image.dev_ptr, input_image.pitch,
+                                gs->tmp_frames[0], in_line_size,
+                                gs->width, gs->height, stream);
         } else {
                 if (cudaMemcpy2D(input_image.dev_ptr, input_image.pitch,
                                         (unsigned char *) in_frame->tiles[0].data,

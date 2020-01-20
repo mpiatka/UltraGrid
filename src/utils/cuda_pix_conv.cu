@@ -134,7 +134,7 @@ void kern_RGBAtoUYVY(unsigned char *dst,
 }
 
 
-void cuda_RGBto_RGBA(unsigned char *dst,
+void cuda_RGB_to_RGBA(unsigned char *dst,
                 size_t dstPitch,
                 unsigned char *src,
                 size_t srcPitch,
