@@ -135,7 +135,7 @@ struct grab_worker_state {
 
         unsigned width = 0;
         unsigned height = 0;
-        unsigned char *tmp_frames[2] = {  };
+        unsigned char *tmp_frame;
         void (*conv_func)(unsigned char *dst,
                 size_t dstPitch,
                 unsigned char *src,
@@ -244,13 +244,11 @@ static bool check_in_format(grab_worker_state *gs, video_frame *in, int i){
                                 || in->color_spec == UYVY
                       );
                 gs->in_codec = in->color_spec;
-                for(auto& buf : gs->tmp_frames){
-                        cudaFree(buf);
-                        buf = nullptr;
-                }
+                cudaFree(gs->tmp_frame);
+                gs->tmp_frame = nullptr;
 
                 int in_line_size = vc_get_linesize(expected_w, in->color_spec);
-                cudaMalloc(&gs->tmp_frames[0], in_line_size * expected_h);
+                cudaMalloc(&gs->tmp_frame, in_line_size * expected_h);
                 switch(in->color_spec){
                         case RGB:
                                 gs->conv_func = cuda_RGB_to_RGBA;
@@ -289,7 +287,7 @@ static bool upload_frame(grab_worker_state *gs, video_frame *in_frame, int i){
 
 
         if(gs->conv_func){
-                if (cudaMemcpyAsync(gs->tmp_frames[0],
+                if (cudaMemcpyAsync(gs->tmp_frame,
                                         (unsigned char *) in_frame->tiles[0].data,
                                         in_line_size * height,
                                         cudaMemcpyHostToDevice, stream) != cudaSuccess)
@@ -299,7 +297,7 @@ static bool upload_frame(grab_worker_state *gs, video_frame *in_frame, int i){
                 }
 
                 gs->conv_func((unsigned char *) input_image.dev_ptr, input_image.pitch,
-                                gs->tmp_frames[0], in_line_size,
+                                gs->tmp_frame, in_line_size,
                                 gs->width, gs->height, stream);
         } else {
                 if (cudaMemcpy2D(input_image.dev_ptr, input_image.pitch,
@@ -486,6 +484,7 @@ static void parse_fmt(vidcap_vrworks_state *s, const char * const fmt){
                 }
                 init_fmt = NULL;
         }
+        free(tmp);
 }
 
 static void stop_grab_workers(vidcap_vrworks_state *s){
