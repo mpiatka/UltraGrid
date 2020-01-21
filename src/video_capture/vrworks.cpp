@@ -55,6 +55,7 @@
 #include <stdlib.h>
 #include <vector>
 #include <cmath>
+#include <limits>
 #include <thread>
 #include <condition_variable>
 #include <nvss_video.h>
@@ -127,6 +128,7 @@ struct grab_worker_state {
         std::thread thread;
         std::mutex grabbed_mut;
         unsigned grabbed_count = 0;
+        double grabbed_fps = -1;
         std::condition_variable grabbed_cv;
 
         vidcap_vrworks_state *s;
@@ -358,6 +360,8 @@ static void grab_worker(grab_worker_state *gs, vidcap_params *param, int id){
 
                 grab_lk.lock();
                 gs->grabbed_count += 1;
+                if(frame)
+                        gs->grabbed_fps = frame->fps;
                 grab_lk.unlock();
                 gs->grabbed_cv.notify_one();
         }
@@ -431,7 +435,7 @@ static void parse_fmt(vidcap_vrworks_state *s, const char * const fmt){
         s->roi = nvstitchRect_t{ 0, 0, 0, 0 };
         //s->roi = nvstitchRect_t{ 900, 700, 2100, 500 };
         s->spec_path = "rig_spec.xml";
-        s->fps = 30;
+        s->fps = -1;
         s->out_fmt = RGBA;
 
         if(!fmt)
@@ -666,9 +670,12 @@ vidcap_vrworks_grab(void *state, struct audio_frame **audio)
 	struct vidcap_vrworks_state *s = (struct vidcap_vrworks_state *) state;
         nvstitchResult res;
 
+        double fps = std::numeric_limits<double>::max();
         for (auto& worker : s->capture_workers) {
                 std::unique_lock<std::mutex> lk(worker.grabbed_mut);
                 worker.grabbed_cv.wait(lk, [&]{return worker.grabbed_count > s->stitched_count;});
+                if(worker.grabbed_fps != -1 && worker.grabbed_fps < fps)
+                        fps = worker.grabbed_fps;
         }
 
         res = nvssVideoStitch(s->stitcher);
@@ -692,6 +699,14 @@ vidcap_vrworks_grab(void *state, struct audio_frame **audio)
         s->stitched_count += 1;
         stitch_lk.unlock();
         s->stitched_cv.notify_all();
+
+        //If s->fps == -1 it means it was not set by user so we use the fps
+        //of the slowest grabber
+        if(s->fps <= 0){
+                s->frame->fps = fps;
+        } else {
+                s->frame->fps = s->fps;
+        }
 
 #if 1
         if (cudaStreamSynchronize(out_stream) != cudaSuccess)
