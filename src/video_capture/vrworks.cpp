@@ -214,7 +214,7 @@ static void calculate_roi(vidcap_vrworks_state *s){
                         roi_left,
                         roi_top,
                         width,
-                        roi_bottom - roi_top);
+                        height);
 
         s->roi = nvstitchRect_t{roi_left, roi_top, width, height};
 }
@@ -404,7 +404,9 @@ static bool init_stitcher(struct vidcap_vrworks_state *s){
                 return false;
         }
 
-        calculate_roi(s);
+        if(s->roi.width == 0 || s->roi.height == 0){
+                calculate_roi(s);
+        }
 
         s->stitcher_properties.version = NVSTITCH_VERSION;
         s->stitcher_properties.pano_width = s->width;
