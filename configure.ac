@@ -1199,6 +1199,37 @@ then
 fi
 
 # ------------------------------------------------------------------------------
+# VR display
+# ------------------------------------------------------------------------------
+vr_disp=no
+AC_ARG_ENABLE(vr_disp,
+[  --disable-vr_disp            disable VR display (default is auto]
+[                          Requires:  glew sdl2 gl],
+    [vr_disp_req=$enableval],
+    [vr_disp_req=$build_default]
+    )
+
+PKG_CHECK_MODULES([SDL2], [sdl2], [found_sdl2=yes], [found_sdl2=no])
+if test $vr_disp_req = yes -a $found_sdl2 = no; then
+        AC_MSG_ERROR([SDL2 not found]);
+fi
+
+if test $vr_disp_req != no -a $found_sdl2 = yes
+then
+        VRDISP_OBJ="src/video_display/vr_disp.o"
+        AC_DEFINE([HAVE_VR_DISP], [1],  [Build with VR disp support])
+        # on Win override libs from pkg-config because those contain
+        # "-mwindows" which causes output to be scratched by cmd.exe
+        # (but not MSYS2!)
+        if test $system = Windows; then
+                VRDISP_LIBS="-lSDL2"
+        fi
+        ADD_MODULE("display_sdl2", "$VRDISP_OBJ", "$VRDISP_LIBS")
+        VRDISP_LIB=$SDL2_LIB
+        vr_disp=yes
+fi
+
+# ------------------------------------------------------------------------------
 # SDL1/2 Stuff
 # ------------------------------------------------------------------------------
 sdl=no
@@ -3221,6 +3252,7 @@ RESULT=`add_column "$RESULT" "SDL (ver. $sdl_version)" $sdl $?`
 RESULT=`add_column "$RESULT" "SW video mix" $swmix $?`
 RESULT=`add_column "$RESULT" "V4L2" $v4l2 $?`
 RESULT=`add_column "$RESULT" "XIMEA" $ximea $?`
+RESULT=`add_column "$RESULT" "VR Display" $vr_disp $?`
 RESULT=`end_section "$RESULT"`
 
 # compressions
