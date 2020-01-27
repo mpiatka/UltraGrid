@@ -7,6 +7,8 @@
 
 #include <assert.h>
 #include <SDL2/SDL.h>
+#include <GL/glew.h>
+#include <SDL2/SDL_opengl.h>
 
 #include "debug.h"
 #include "host.h"
@@ -32,12 +34,24 @@ struct Window{
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
 
+		//TODO: Error handling
 		sdl_window = SDL_CreateWindow("UltraGrid VR",
 				x,
 				y,
 				w,
 				h,
 				SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+
+		//TODO: Error handling
+		sdl_gl_context = SDL_GL_CreateContext(sdl_window);
+
+		glewExperimental = GL_TRUE;
+		//TODO: Error handling
+		GLenum glewError = glewInit();
+
+		glClearColor(0,0,0,1);
+		glClear(GL_COLOR_BUFFER_BIT);
+		SDL_GL_SwapWindow(sdl_window);
 	}
 
 
@@ -48,6 +62,7 @@ struct Window{
 
 
 	SDL_Window *sdl_window;
+	SDL_GLContext sdl_gl_context;
 };
 
 struct state_vr{
@@ -56,6 +71,8 @@ struct state_vr{
 
 static void * display_vr_init(struct module *parent, const char *fmt, unsigned int flags) {
 	state_vr *s = new state_vr();
+
+
 
 	return s;
 }
