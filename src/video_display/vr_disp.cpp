@@ -20,6 +20,8 @@
 #include "video_display.h"
 #include "video_display/splashscreen.h"
 
+#define MAX_BUFFER_SIZE   1
+
 struct Window{
 	Window() : Window("UltraGrid VR",
 			SDL_WINDOWPOS_CENTERED,
@@ -41,6 +43,8 @@ struct Window{
 				w,
 				h,
 				SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+
+		SDL_SetWindowMinimumSize(sdl_window, 200, 200);
 
 		//TODO: Error handling
 		sdl_gl_context = SDL_GL_CreateContext(sdl_window);
@@ -67,18 +71,63 @@ struct Window{
 
 struct state_vr{
 	Window window;
+
+	int sdl_frame_event;
+
+	video_desc current_desc;
+	int buffered_frames_count;
+
+	std::mutex lock;
+	std::condition_variable frame_consumed_cv;
+	std::queue<video_frame *> free_frame_queue;
 };
 
 static void * display_vr_init(struct module *parent, const char *fmt, unsigned int flags) {
 	state_vr *s = new state_vr();
-
-
+	s->sdl_frame_event = SDL_RegisterEvents(1);
 
 	return s;
 }
 
-static void display_vr_run(void *arg) {
+static void draw(state_vr *s){
+	glClear(GL_COLOR_BUFFER_BIT);
+	SDL_GL_SwapWindow(s->window.sdl_window);
+}
 
+static void handle_window_event(state_vr *s, SDL_Event *event){
+	if(event->window.event == SDL_WINDOWEVENT_RESIZED){
+		draw(s);
+	}
+}
+
+static void handle_user_event(state_vr *s, SDL_Event *event){
+
+}
+
+static void display_vr_run(void *state) {
+	state_vr *s = static_cast<state_vr *>(state);
+
+	bool running = true;
+	while(running){
+		SDL_Event event;
+		if (!SDL_WaitEvent(&event)) {
+			continue;
+		}
+
+		switch(event.type){
+			case SDL_WINDOWEVENT:
+				handle_window_event(s, &event);
+				break;
+			case SDL_QUIT:
+				running = false;
+				exit_uv(0);
+				break;
+			default: 
+				if(event.type >= SDL_USEREVENT)
+					handle_user_event(s, &event);
+				break;
+		}
+	}
 }
 
 static void display_vr_done(void *state) {
@@ -88,29 +137,101 @@ static void display_vr_done(void *state) {
 }
 
 static struct video_frame * display_vr_getf(void *state) {
+	struct state_vr *s = static_cast<state_vr *>(state);
 
+	std::lock_guard<std::mutex> lock(s->lock);
+
+	while (s->free_frame_queue.size() > 0) {
+		struct video_frame *buffer = s->free_frame_queue.front();
+		s->free_frame_queue.pop();
+		if (video_desc_eq(video_desc_from_frame(buffer), s->current_desc)) {
+			return buffer;
+		} else {
+			vf_free(buffer);
+		}
+	}
+
+	return vf_alloc_desc_data(s->current_desc);
 }
 
 static int display_vr_putf(void *state, struct video_frame *frame, int nonblock) {
+	struct state_vr *s = static_cast<state_vr *>(state);
 
+
+	if (nonblock == PUTF_DISCARD) {
+		vf_free(frame);
+		return 0;
+	}
+
+	std::unique_lock<std::mutex> lk(s->lock);
+	if (s->buffered_frames_count >= MAX_BUFFER_SIZE && nonblock == PUTF_NONBLOCK
+			&& frame != NULL) {
+		vf_free(frame);
+		printf("1 frame(s) dropped!\n");
+		return 1;
+	}
+	s->frame_consumed_cv.wait(lk, [s]{return s->buffered_frames_count < MAX_BUFFER_SIZE;});
+	s->buffered_frames_count += 1;
+	lk.unlock();
+	SDL_Event event;
+	event.type = s->sdl_frame_event;
+	event.user.data1 = frame;
+	SDL_PushEvent(&event);
+
+	return 0;
 }
 
 static int display_vr_reconfigure(void *state, struct video_desc desc) {
+	state_vr *s = static_cast<state_vr *>(state);
 
+	s->current_desc = desc;
+	return 1;
 }
 
 static int display_vr_get_property(void *state, int property, void *val, size_t *len) {
+	UNUSED(state);
+	codec_t codecs[] = {
+		RGBA,
+		RGB,
+	};
+	enum interlacing_t supported_il_modes[] = {PROGRESSIVE};
+	int rgb_shift[] = {0, 8, 16};
 
+	switch (property) {
+		case DISPLAY_PROPERTY_CODECS:
+			if(sizeof(codecs) <= *len) {
+				memcpy(val, codecs, sizeof(codecs));
+			} else {
+				return FALSE;
+			}
+
+			*len = sizeof(codecs);
+			break;
+		case DISPLAY_PROPERTY_RGB_SHIFT:
+			if(sizeof(rgb_shift) > *len) {
+				return FALSE;
+			}
+			memcpy(val, rgb_shift, sizeof(rgb_shift));
+			*len = sizeof(rgb_shift);
+			break;
+		case DISPLAY_PROPERTY_BUF_PITCH:
+			*(int *) val = PITCH_DEFAULT;
+			*len = sizeof(int);
+			break;
+		case DISPLAY_PROPERTY_SUPPORTED_IL_MODES:
+			if(sizeof(supported_il_modes) <= *len) {
+				memcpy(val, supported_il_modes, sizeof(supported_il_modes));
+			} else {
+				return FALSE;
+			}
+			*len = sizeof(supported_il_modes);
+			break;
+		default:
+			return FALSE;
+	}
+	return TRUE;
 }
 
-static void display_vr_put_audio_frame(void *state, struct audio_frame *frame) {
-
-}
-
-static int display_vr_reconfigure_audio(void *state, int quant_samples, int channels,
-                int sample_rate) {
-
-}
 
 static const struct video_display_info display_vr_info = {
         [](struct device_info **available_cards, int *count, void (**deleter)(void *)) {
@@ -128,8 +249,8 @@ static const struct video_display_info display_vr_info = {
         display_vr_putf,
         display_vr_reconfigure,
         display_vr_get_property,
-        display_vr_put_audio_frame,
-        display_vr_reconfigure_audio,
+        NULL,
+        NULL,
 };
 
 REGISTER_MODULE(vr_disp, &display_vr_info, LIBRARY_CLASS_VIDEO_DISPLAY, VIDEO_DISPLAY_ABI_VERSION);
