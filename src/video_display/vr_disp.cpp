@@ -22,6 +22,64 @@
 
 #define MAX_BUFFER_SIZE   1
 
+static const GLfloat rectangle[] = {
+	 1.0f,  1.0f,  1.0f,  0.0f,
+	-1.0f,  1.0f,  0.0f,  0.0f,
+	-1.0f, -1.0f,  0.0f,  1.0f,
+
+	 1.0f,  1.0f,  1.0f,  0.0f,
+	-1.0f, -1.0f,  0.0f,  1.0f,
+	 1.0f, -1.0f,  1.0f,  1.0f
+};
+
+static unsigned char pixels[] = {
+	255, 0, 0,   0, 255, 0,   0, 0, 255,   255, 255, 255,
+	255, 0, 0,   0, 255, 0,   0, 0, 255,   255, 255, 255,
+	255, 0, 0,   0, 255, 0,   0, 0, 255,   255, 255, 255,
+	255, 0, 0,   0, 255, 0,   0, 0, 255,   255, 255, 255
+};
+
+static const char *vert_src = R"END(
+#version 330 core
+layout(location = 0) in vec2 vert_pos;
+layout(location = 1) in vec2 vert_uv;
+
+out vec2 UV;
+
+uniform vec2 scale_vec;
+
+void main(){
+	gl_Position = vec4(vert_pos, 0.0f, 1.0f);
+	UV = vert_uv;
+}
+)END";
+
+static const char *frag_src = R"END(
+#version 330 core
+in vec2 UV;
+out vec3 color;
+uniform sampler2D tex;
+void main(){
+	color = texture(tex, UV).rgb;
+}
+)END";
+
+static void compileShader(GLuint shaderId){
+	glCompileShader(shaderId);
+
+	GLint ret = GL_FALSE;
+	int len;
+
+	glGetShaderiv(shaderId, GL_COMPILE_STATUS, &ret);
+	glGetShaderiv(shaderId, GL_INFO_LOG_LENGTH, &len);
+	if (len > 0){
+		std::vector<char> errorMsg(len+1);
+		glGetShaderInfoLog(shaderId, len, NULL, &errorMsg[0]);
+		printf("%s\n", errorMsg.data());
+	}
+}
+
+
 struct Window{
 	Window() : Window("UltraGrid VR",
 			SDL_WINDOWPOS_CENTERED,
@@ -77,6 +135,11 @@ struct state_vr{
 	video_desc current_desc;
 	int buffered_frames_count;
 
+	GLuint vao = 0;
+	GLuint vbo = 0;
+	GLuint program = 0;
+	GLuint gl_texture = 0;
+
 	std::mutex lock;
 	std::condition_variable frame_consumed_cv;
 	std::queue<video_frame *> free_frame_queue;
@@ -90,12 +153,21 @@ static void * display_vr_init(struct module *parent, const char *fmt, unsigned i
 }
 
 static void draw(state_vr *s){
+	glUseProgram(s->program);
+	glBindVertexArray(s->vao);
 	glClear(GL_COLOR_BUFFER_BIT);
+
+	glBindTexture(GL_TEXTURE_2D, s->gl_texture);
+	glDrawArrays(GL_TRIANGLES, 0, 6);
+
+	glBindVertexArray(0);
+
 	SDL_GL_SwapWindow(s->window.sdl_window);
 }
 
 static void handle_window_event(state_vr *s, SDL_Event *event){
 	if(event->window.event == SDL_WINDOWEVENT_RESIZED){
+		glViewport(0, 0, event->window.data1, event->window.data2);
 		draw(s);
 	}
 }
@@ -104,8 +176,69 @@ static void handle_user_event(state_vr *s, SDL_Event *event){
 
 }
 
+static void initialize_scene(state_vr *s){
+	glGenVertexArrays(1, &s->vao);
+	glBindVertexArray(s->vao);
+
+
+	glGenBuffers(1, &s->vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(rectangle), rectangle, GL_STATIC_DRAW);
+
+	GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
+	GLuint fragShader = glCreateShader(GL_FRAGMENT_SHADER);
+
+	glShaderSource(vertexShader, 1, &vert_src, NULL);
+	compileShader(vertexShader);
+	glShaderSource(fragShader, 1, &frag_src, NULL);
+	compileShader(fragShader);
+
+	s->program = glCreateProgram();
+	glAttachShader(s->program, vertexShader);
+	glAttachShader(s->program, fragShader);
+	glLinkProgram(s->program);
+	glUseProgram(s->program);
+
+	glDetachShader(s->program, vertexShader);
+	glDetachShader(s->program, fragShader);
+	glDeleteShader(vertexShader);
+	glDeleteShader(fragShader);
+
+	glGenTextures(1, &s->gl_texture);
+	glBindTexture(GL_TEXTURE_2D, s->gl_texture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 4, 4, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+	glEnableVertexAttribArray(0);
+	glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
+	glVertexAttribPointer(
+			0,
+			2,
+			GL_FLOAT,
+			GL_FALSE,
+			4 * sizeof(float),
+			(void*)0
+			);
+	glEnableVertexAttribArray(1);
+	glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
+	glVertexAttribPointer(
+			1,
+			2,
+			GL_FLOAT,
+			GL_FALSE,
+			4 * sizeof(float),
+			(void*)(2 * sizeof(float))
+			);
+
+	glBindVertexArray(0);
+}
+
 static void display_vr_run(void *state) {
 	state_vr *s = static_cast<state_vr *>(state);
+
+	initialize_scene(s);
+	draw(s);
 
 	bool running = true;
 	while(running){
