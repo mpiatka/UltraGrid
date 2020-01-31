@@ -173,7 +173,25 @@ static void handle_window_event(state_vr *s, SDL_Event *event){
 }
 
 static void handle_user_event(state_vr *s, SDL_Event *event){
+	if(event->type == s->sdl_frame_event){
+		std::unique_lock<std::mutex> lk(s->lock);
+		s->buffered_frames_count -= 1;
+		lk.unlock();
+		s->frame_consumed_cv.notify_one();
 
+		video_frame *frame = static_cast<video_frame *>(event->user.data1);
+
+		if(frame){
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, frame->tiles[0].width, frame->tiles[0].height, 0, GL_RGB, GL_UNSIGNED_BYTE, frame->tiles[0].data);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+			lk.lock();
+			s->free_frame_queue.push(frame);
+			lk.unlock();
+		}
+		draw(s);
+
+	}
 }
 
 static void initialize_scene(state_vr *s){
@@ -289,7 +307,6 @@ static struct video_frame * display_vr_getf(void *state) {
 
 static int display_vr_putf(void *state, struct video_frame *frame, int nonblock) {
 	struct state_vr *s = static_cast<state_vr *>(state);
-
 
 	if (nonblock == PUTF_DISCARD) {
 		vf_free(frame);
