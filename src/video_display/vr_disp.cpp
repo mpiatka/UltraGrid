@@ -22,6 +22,8 @@
 
 #define MAX_BUFFER_SIZE   1
 
+static const float PI_F=3.14159265358979f;
+
 static const GLfloat rectangle[] = {
 	 1.0f,  1.0f,  1.0f,  0.0f,
 	-1.0f,  1.0f,  0.0f,  0.0f,
@@ -144,6 +146,63 @@ struct state_vr{
 	std::condition_variable frame_consumed_cv;
 	std::queue<video_frame *> free_frame_queue;
 };
+
+static std::vector<float> gen_sphere_vertices(int r, int latitude_n, int longtitude_n){
+	std::vector<float> verts;
+
+	float lat_step = PI_F / latitude_n;
+	float long_step = 2 * PI_F / longtitude_n;
+
+	for(int i = 0; i < latitude_n; i++){
+		float z = std::cos(i * lat_step) * r;
+		float z_slice_r = std::sin(i * lat_step) * r;
+
+		//The first and last vertex on the z slice circle are in the same place
+		for(int j = 0; j < longtitude_n + 1; j++){
+			float x = std::sin(j * long_step) * z_slice_r;
+			float y = std::cos(j * long_step) * z_slice_r;
+			verts.push_back(x);
+			verts.push_back(y);
+
+			float u = static_cast<float>(j) / (longtitude_n - 1);
+			float v = static_cast<float>(i) / latitude_n;
+			verts.push_back(u);
+			verts.push_back(v);
+		}
+	}
+
+	return verts;
+}
+
+//Generate indices for sphere
+//Faces facing inwards have counter-clockwise vertex order
+static std::vector<unsigned> gen_sphere_indices(int latitude_n, int longtitude_n){
+	std::vector<unsigned int> indices;
+
+	//there are n-1 surfaces between n circles
+	for(int i = 0; i < latitude_n - 1; i++){
+		int slice_idx = i * (latitude_n + 1);
+		int next_slice_idx = (i + 1) * (latitude_n + 1);
+
+		for(int j = 0; j < longtitude_n; j++){
+			//Since the top and bottom slices are circles with radius 0,
+			//we only need one triangle for those
+			if(i != 0){
+				indices.push_back(slice_idx + j + 1);
+				indices.push_back(next_slice_idx + j);
+				indices.push_back(next_slice_idx + j + 1);
+			}
+
+			if(i != latitude_n - 2){
+				indices.push_back(slice_idx + j + 1);
+				indices.push_back(slice_idx + j);
+				indices.push_back(next_slice_idx + j);
+			}
+		}
+	}
+
+	return indices;
+}
 
 static void * display_vr_init(struct module *parent, const char *fmt, unsigned int flags) {
 	state_vr *s = new state_vr();
