@@ -1175,6 +1175,7 @@ fi
 # ------------------------------------------------------------------------------
 # VR display
 # ------------------------------------------------------------------------------
+GLM_INC=-I$srcdir/glm
 vr_disp=no
 AC_ARG_ENABLE(vr_disp,
 [  --disable-vr_disp            disable VR display (default is auto]
@@ -1200,6 +1201,7 @@ then
         fi
         ADD_MODULE("display_sdl2", "$VRDISP_OBJ", "$VRDISP_LIBS")
         VRDISP_LIB=$SDL2_LIB
+		INC="$INC $GLM_INC"
         vr_disp=yes
 fi
 
