@@ -153,18 +153,19 @@ static std::vector<float> gen_sphere_vertices(int r, int latitude_n, int longtit
 	float lat_step = PI_F / latitude_n;
 	float long_step = 2 * PI_F / longtitude_n;
 
-	for(int i = 0; i < latitude_n; i++){
-		float z = std::cos(i * lat_step) * r;
-		float z_slice_r = std::sin(i * lat_step) * r;
+	for(int i = 0; i < latitude_n + 1; i++){
+		float y = std::cos(i * lat_step) * r;
+		float y_slice_r = std::sin(i * lat_step) * r;
 
-		//The first and last vertex on the z slice circle are in the same place
+		//The first and last vertex on the y slice circle are in the same place
 		for(int j = 0; j < longtitude_n + 1; j++){
-			float x = std::sin(j * long_step) * z_slice_r;
-			float y = std::cos(j * long_step) * z_slice_r;
+			float x = std::sin(j * long_step) * y_slice_r;
+			float z = std::cos(j * long_step) * y_slice_r;
 			verts.push_back(x);
 			verts.push_back(y);
+			verts.push_back(z);
 
-			float u = static_cast<float>(j) / (longtitude_n - 1);
+			float u = 1 - static_cast<float>(j) / longtitude_n;
 			float v = static_cast<float>(i) / latitude_n;
 			verts.push_back(u);
 			verts.push_back(v);
@@ -179,21 +180,20 @@ static std::vector<float> gen_sphere_vertices(int r, int latitude_n, int longtit
 static std::vector<unsigned> gen_sphere_indices(int latitude_n, int longtitude_n){
 	std::vector<unsigned int> indices;
 
-	//there are n-1 surfaces between n circles
-	for(int i = 0; i < latitude_n - 1; i++){
+	for(int i = 0; i < latitude_n; i++){
 		int slice_idx = i * (latitude_n + 1);
 		int next_slice_idx = (i + 1) * (latitude_n + 1);
 
 		for(int j = 0; j < longtitude_n; j++){
 			//Since the top and bottom slices are circles with radius 0,
 			//we only need one triangle for those
-			if(i != 0){
+			if(i != latitude_n - 1){
 				indices.push_back(slice_idx + j + 1);
 				indices.push_back(next_slice_idx + j);
 				indices.push_back(next_slice_idx + j + 1);
 			}
 
-			if(i != latitude_n - 2){
+			if(i != 0){
 				indices.push_back(slice_idx + j + 1);
 				indices.push_back(slice_idx + j);
 				indices.push_back(next_slice_idx + j);
