@@ -5,10 +5,16 @@
 #include "config_win32.h"
 #endif
 
+#include <chrono>
+
 #include <assert.h>
 #include <SDL2/SDL.h>
 #include <GL/glew.h>
 #include <SDL2/SDL_opengl.h>
+
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 #include "debug.h"
 #include "host.h"
@@ -66,6 +72,31 @@ void main(){
 }
 )END";
 
+static const char *persp_vert_src = R"END(
+#version 330 core
+layout(location = 0) in vec3 vert_pos;
+layout(location = 1) in vec2 vert_uv;
+
+out vec2 UV;
+
+uniform mat4 pv_mat;
+
+void main(){
+	gl_Position = pv_mat * vec4(vert_pos, 1.0f);
+	UV = vert_uv;
+}
+)END";
+
+static const char *persp_frag_src = R"END(
+#version 330 core
+in vec2 UV;
+out vec3 color;
+uniform sampler2D tex;
+void main(){
+	color = texture(tex, UV).rgb;
+}
+)END";
+
 static void compileShader(GLuint shaderId){
 	glCompileShader(shaderId);
 
@@ -90,7 +121,9 @@ struct Window{
 			480,
 			SDL_WINDOW_OPENGL) {  }
 
-	Window(const char *title, int x, int y, int w, int h, SDL_WindowFlags flags){
+	Window(const char *title, int x, int y, int w, int h, SDL_WindowFlags flags) :
+	width(w), height(h)
+	{
 		SDL_InitSubSystem(SDL_INIT_VIDEO);
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
@@ -127,6 +160,8 @@ struct Window{
 
 	SDL_Window *sdl_window;
 	SDL_GLContext sdl_gl_context;
+	int width;
+	int height;
 };
 
 struct state_vr{
@@ -139,8 +174,16 @@ struct state_vr{
 
 	GLuint vao = 0;
 	GLuint vbo = 0;
+	GLuint elem_buf = 0;
 	GLuint program = 0;
 	GLuint gl_texture = 0;
+	GLsizei indices_num = 0;
+
+	float rot_x = 0;
+	float rot_y = 0;
+	float fov = 55;
+
+	std::chrono::steady_clock::time_point last_frame;
 
 	std::mutex lock;
 	std::condition_variable frame_consumed_cv;
@@ -212,12 +255,35 @@ static void * display_vr_init(struct module *parent, const char *fmt, unsigned i
 }
 
 static void draw(state_vr *s){
+	auto now = std::chrono::steady_clock::now();
+	if(std::chrono::duration_cast<std::chrono::milliseconds>(now - s->last_frame).count() < 16)
+		return;
+
+	s->last_frame = now;
+
 	glUseProgram(s->program);
 	glBindVertexArray(s->vao);
 	glClear(GL_COLOR_BUFFER_BIT);
 
 	glBindTexture(GL_TEXTURE_2D, s->gl_texture);
-	glDrawArrays(GL_TRIANGLES, 0, 6);
+	if(s->elem_buf != 0){
+
+		glm::mat4 projMat = glm::perspective(glm::radians(s->fov),
+				static_cast<float>(s->window.width)/s->window.height,
+				0.1f,
+				300.0f);
+		glm::mat4 viewMat(1.f);
+		viewMat = glm::rotate(viewMat, glm::radians(s->rot_y), {1.f, 0, 0});
+		viewMat = glm::rotate(viewMat, glm::radians(s->rot_x), {0.f, 1, 0});
+		glm::mat4 pvMat = projMat * viewMat;
+
+		GLuint pvLoc;
+		pvLoc = glGetUniformLocation(s->program, "pv_mat");
+		glUniformMatrix4fv(pvLoc, 1, GL_FALSE, glm::value_ptr(pvMat));
+		glDrawElements(GL_TRIANGLES, s->indices_num, GL_UNSIGNED_INT, (void *) 0);
+	} else {
+		glDrawArrays(GL_TRIANGLES, 0, s->indices_num);
+	}
 
 	glBindVertexArray(0);
 
@@ -227,6 +293,8 @@ static void draw(state_vr *s){
 static void handle_window_event(state_vr *s, SDL_Event *event){
 	if(event->window.event == SDL_WINDOWEVENT_RESIZED){
 		glViewport(0, 0, event->window.data1, event->window.data2);
+		s->window.width = event->window.data1;
+		s->window.height = event->window.data2;
 		draw(s);
 	}
 }
@@ -253,15 +321,7 @@ static void handle_user_event(state_vr *s, SDL_Event *event){
 	}
 }
 
-static void initialize_scene(state_vr *s){
-	glGenVertexArrays(1, &s->vao);
-	glBindVertexArray(s->vao);
-
-
-	glGenBuffers(1, &s->vbo);
-	glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(rectangle), rectangle, GL_STATIC_DRAW);
-
+static void initialize_program(state_vr *s, const char *vert_src, const char *frag_src){
 	GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
 	GLuint fragShader = glCreateShader(GL_FRAGMENT_SHADER);
 
@@ -280,12 +340,27 @@ static void initialize_scene(state_vr *s){
 	glDetachShader(s->program, fragShader);
 	glDeleteShader(vertexShader);
 	glDeleteShader(fragShader);
+}
 
+static void initialize_texture(state_vr *s){
 	glGenTextures(1, &s->gl_texture);
 	glBindTexture(GL_TEXTURE_2D, s->gl_texture);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 4, 4, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+}
+
+static void initialize_scene(state_vr *s){
+	glGenVertexArrays(1, &s->vao);
+	glBindVertexArray(s->vao);
+
+	initialize_program(s, vert_src, frag_src);
+
+	glGenBuffers(1, &s->vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(rectangle), rectangle, GL_STATIC_DRAW);
+
+	initialize_texture(s);
 
 	glEnableVertexAttribArray(0);
 	glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
@@ -309,12 +384,57 @@ static void initialize_scene(state_vr *s){
 			);
 
 	glBindVertexArray(0);
+	s->indices_num = 6;
+}
+
+static void initialize_persp_scene(state_vr *s){
+	glGenVertexArrays(1, &s->vao);
+	glBindVertexArray(s->vao);
+
+	initialize_program(s, persp_vert_src, persp_frag_src);
+
+	auto vertices = gen_sphere_vertices(1, 64, 64);
+	auto indices = gen_sphere_indices(64, 64);
+
+	glGenBuffers(1, &s->vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
+	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW);
+
+	glGenBuffers(1, &s->elem_buf);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s->elem_buf);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned), indices.data(), GL_STATIC_DRAW);
+
+	initialize_texture(s);
+
+	glEnableVertexAttribArray(0);
+	glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
+	glVertexAttribPointer(
+			0,
+			3,
+			GL_FLOAT,
+			GL_FALSE,
+			5 * sizeof(float),
+			(void*)0
+			);
+	glEnableVertexAttribArray(1);
+	glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
+	glVertexAttribPointer(
+			1,
+			2,
+			GL_FLOAT,
+			GL_FALSE,
+			5 * sizeof(float),
+			(void*)(3 * sizeof(float))
+			);
+
+	glBindVertexArray(0);
+	s->indices_num = indices.size();
 }
 
 static void display_vr_run(void *state) {
 	state_vr *s = static_cast<state_vr *>(state);
 
-	initialize_scene(s);
+	initialize_persp_scene(s);
 	draw(s);
 
 	bool running = true;
@@ -325,6 +445,20 @@ static void display_vr_run(void *state) {
 		}
 
 		switch(event.type){
+			case SDL_MOUSEMOTION:
+				if(event.motion.state & SDL_BUTTON_LMASK){
+					s->rot_x -= event.motion.xrel / 8.f;
+					s->rot_y -= event.motion.yrel / 8.f;
+
+					if(s->rot_y > 90) s->rot_y = 90;
+					if(s->rot_y < -90) s->rot_y = -90;
+					draw(s);
+				}
+				break;
+			case SDL_MOUSEWHEEL:
+				s->fov -= event.wheel.y;
+				draw(s);
+				break;
 			case SDL_WINDOWEVENT:
 				handle_window_event(s, &event);
 				break;
