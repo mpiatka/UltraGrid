@@ -167,6 +167,8 @@ struct Window{
 struct state_vr{
 	Window window;
 
+	bool running = false;
+
 	int sdl_frame_event;
 
 	video_desc current_desc;
@@ -315,9 +317,11 @@ static void handle_user_event(state_vr *s, SDL_Event *event){
 			lk.lock();
 			s->free_frame_queue.push(frame);
 			lk.unlock();
+		} else {
+			//poison
+			s->running = false;
 		}
 		draw(s);
-
 	}
 }
 
@@ -437,8 +441,8 @@ static void display_vr_run(void *state) {
 	initialize_persp_scene(s);
 	draw(s);
 
-	bool running = true;
-	while(running){
+	s->running = true;
+	while(s->running){
 		SDL_Event event;
 		if (!SDL_WaitEvent(&event)) {
 			continue;
@@ -463,7 +467,6 @@ static void display_vr_run(void *state) {
 				handle_window_event(s, &event);
 				break;
 			case SDL_QUIT:
-				running = false;
 				exit_uv(0);
 				break;
 			default: 
