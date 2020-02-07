@@ -170,6 +170,7 @@ struct state_vr{
 	bool running = false;
 
 	int sdl_frame_event;
+	int sdl_redraw_event;
 
 	video_desc current_desc;
 	int buffered_frames_count;
@@ -184,6 +185,11 @@ struct state_vr{
 	float rot_x = 0;
 	float rot_y = 0;
 	float fov = 55;
+
+	int max_fps = 60;
+
+	SDL_TimerID redraw_timer = 0;
+	bool redraw_needed = false;
 
 	std::chrono::steady_clock::time_point last_frame;
 
@@ -252,6 +258,7 @@ static std::vector<unsigned> gen_sphere_indices(int latitude_n, int longtitude_n
 static void * display_vr_init(struct module *parent, const char *fmt, unsigned int flags) {
 	state_vr *s = new state_vr();
 	s->sdl_frame_event = SDL_RegisterEvents(1);
+	s->sdl_redraw_event = SDL_RegisterEvents(1);
 
 	return s;
 }
@@ -292,12 +299,30 @@ static void draw(state_vr *s){
 	SDL_GL_SwapWindow(s->window.sdl_window);
 }
 
+Uint32 redraw_callback(Uint32 interval, void *param){
+	int event_id = *static_cast<int *>(param);
+	SDL_Event event;
+	event.type = event_id;
+	SDL_PushEvent(&event);
+
+	return interval;
+}
+
+static void redraw(state_vr *s){
+	if(!s->redraw_timer){
+		s->redraw_timer = SDL_AddTimer(1000 / s->max_fps, redraw_callback, &s->sdl_redraw_event);
+		draw(s);
+	} else {
+		s->redraw_needed = true;
+	}
+}
+
 static void handle_window_event(state_vr *s, SDL_Event *event){
 	if(event->window.event == SDL_WINDOWEVENT_RESIZED){
 		glViewport(0, 0, event->window.data1, event->window.data2);
 		s->window.width = event->window.data1;
 		s->window.height = event->window.data2;
-		draw(s);
+		redraw(s);
 	}
 }
 
@@ -321,7 +346,15 @@ static void handle_user_event(state_vr *s, SDL_Event *event){
 			//poison
 			s->running = false;
 		}
-		draw(s);
+		redraw(s);
+	} else if(event->type == s->sdl_redraw_event){
+		if(s->redraw_needed){
+			draw(s);
+			s->redraw_needed = false;
+		} else {
+			SDL_RemoveTimer(s->redraw_timer);
+			s->redraw_timer = 0;
+		}
 	}
 }
 
@@ -456,12 +489,12 @@ static void display_vr_run(void *state) {
 
 					if(s->rot_y > 90) s->rot_y = 90;
 					if(s->rot_y < -90) s->rot_y = -90;
-					draw(s);
+					redraw(s);
 				}
 				break;
 			case SDL_MOUSEWHEEL:
 				s->fov -= event.wheel.y;
-				draw(s);
+				redraw(s);
 				break;
 			case SDL_WINDOWEVENT:
 				handle_window_event(s, &event);
