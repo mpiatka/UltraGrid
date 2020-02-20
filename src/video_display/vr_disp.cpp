@@ -164,6 +164,93 @@ struct Window{
 	int height;
 };
 
+static std::vector<float> gen_sphere_vertices(int r, int latitude_n, int longtitude_n);
+static std::vector<unsigned> gen_sphere_indices(int latitude_n, int longtitude_n);
+
+class Model{
+public:
+	Model(const Model&) = delete;
+	Model(Model&&) = default;
+	Model& operator=(const Model&) = delete;
+	Model& operator=(Model&&) = default;
+	~Model(){
+		glDeleteBuffers(1, &vbo);
+		glDeleteBuffers(1, &elem_buf);
+		glDeleteVertexArrays(1, &vao);
+	}
+
+	GLuint get_vao() { return vao; }
+
+	void render(){
+		glBindVertexArray(vao);
+		if(elem_buf != 0){
+			glDrawElements(GL_TRIANGLES, indices_num, GL_UNSIGNED_INT, (void *) 0);
+		} else {
+			glDrawArrays(GL_TRIANGLES, 0, indices_num);
+		}
+
+		glBindVertexArray(0);
+	}
+
+	static Model get_sphere(){
+		Model model;
+		glGenVertexArrays(1, &model.vao);
+		glBindVertexArray(model.vao);
+
+		auto vertices = gen_sphere_vertices(1, 64, 64);
+		auto indices = gen_sphere_indices(64, 64);
+
+		glGenBuffers(1, &model.vbo);
+		glBindBuffer(GL_ARRAY_BUFFER, model.vbo);
+		glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW);
+
+		glGenBuffers(1, &model.elem_buf);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, model.elem_buf);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned), indices.data(), GL_STATIC_DRAW);
+
+		glEnableVertexAttribArray(0);
+		glBindBuffer(GL_ARRAY_BUFFER, model.vbo);
+		glVertexAttribPointer(
+				0,
+				3,
+				GL_FLOAT,
+				GL_FALSE,
+				5 * sizeof(float),
+				(void*)0
+				);
+		glEnableVertexAttribArray(1);
+		glBindBuffer(GL_ARRAY_BUFFER, model.vbo);
+		glVertexAttribPointer(
+				1,
+				2,
+				GL_FLOAT,
+				GL_FALSE,
+				5 * sizeof(float),
+				(void*)(3 * sizeof(float))
+				);
+
+		glBindVertexArray(0);
+		model.indices_num = indices.size();
+
+		return model;
+	}
+
+private:
+	Model() = default;
+	GLuint vao = 0;
+	GLuint vbo = 0;
+	GLuint elem_buf = 0;
+	GLsizei indices_num = 0;
+};
+
+struct Scene{
+	void render(){
+		model.render();
+	}
+
+	Model model = Model::get_sphere();
+};
+
 struct state_vr{
 	Window window;
 
@@ -175,11 +262,14 @@ struct state_vr{
 	video_desc current_desc;
 	int buffered_frames_count;
 
+	GLuint program = 0;
+	GLuint gl_texture = 0;
+
+	Scene scene;
+
 	GLuint vao = 0;
 	GLuint vbo = 0;
 	GLuint elem_buf = 0;
-	GLuint program = 0;
-	GLuint gl_texture = 0;
 	GLsizei indices_num = 0;
 
 	float rot_x = 0;
@@ -271,30 +361,25 @@ static void draw(state_vr *s){
 	s->last_frame = now;
 
 	glUseProgram(s->program);
-	glBindVertexArray(s->vao);
 	glClear(GL_COLOR_BUFFER_BIT);
 
 	glBindTexture(GL_TEXTURE_2D, s->gl_texture);
-	if(s->elem_buf != 0){
 
-		glm::mat4 projMat = glm::perspective(glm::radians(s->fov),
-				static_cast<float>(s->window.width)/s->window.height,
-				0.1f,
-				300.0f);
-		glm::mat4 viewMat(1.f);
-		viewMat = glm::rotate(viewMat, glm::radians(s->rot_y), {1.f, 0, 0});
-		viewMat = glm::rotate(viewMat, glm::radians(s->rot_x), {0.f, 1, 0});
-		glm::mat4 pvMat = projMat * viewMat;
+	glm::mat4 projMat = glm::perspective(glm::radians(s->fov),
+			static_cast<float>(s->window.width)/s->window.height,
+			0.1f,
+			300.0f);
+	glm::mat4 viewMat(1.f);
+	viewMat = glm::rotate(viewMat, glm::radians(s->rot_y), {1.f, 0, 0});
+	viewMat = glm::rotate(viewMat, glm::radians(s->rot_x), {0.f, 1, 0});
+	glm::mat4 pvMat = projMat * viewMat;
 
-		GLuint pvLoc;
-		pvLoc = glGetUniformLocation(s->program, "pv_mat");
-		glUniformMatrix4fv(pvLoc, 1, GL_FALSE, glm::value_ptr(pvMat));
-		glDrawElements(GL_TRIANGLES, s->indices_num, GL_UNSIGNED_INT, (void *) 0);
-	} else {
-		glDrawArrays(GL_TRIANGLES, 0, s->indices_num);
-	}
+	GLuint pvLoc;
+	pvLoc = glGetUniformLocation(s->program, "pv_mat");
+	glUniformMatrix4fv(pvLoc, 1, GL_FALSE, glm::value_ptr(pvMat));
+	
+	s->scene.render();
 
-	glBindVertexArray(0);
 
 	SDL_GL_SwapWindow(s->window.sdl_window);
 }
