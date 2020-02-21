@@ -291,6 +291,34 @@ private:
 	GLsizei indices_num = 0;
 };
 
+class Texture{
+public:
+	Texture(){
+		glGenTextures(1, &tex_id);
+		glBindTexture(GL_TEXTURE_2D, tex_id);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 4, 4, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	}
+
+	~Texture(){
+		glDeleteTextures(1, &tex_id);
+	}
+
+	GLuint get() { return tex_id; }
+
+	Texture(const Texture&) = delete;
+	Texture(Texture&& o) { swap(o); }
+	Texture& operator=(const Texture&) = delete;
+	Texture& operator=(Texture&& o) { swap(o); return *this; }
+
+private:
+	void swap(Texture& o){
+		std::swap(tex_id, o.tex_id);
+	}
+	GLuint tex_id = 0;
+};
+
 struct Scene{
 	void render(){
 		glUseProgram(program.get());
@@ -306,6 +334,8 @@ struct Scene{
 		GLuint pvLoc;
 		pvLoc = glGetUniformLocation(program.get(), "pv_mat");
 		glUniformMatrix4fv(pvLoc, 1, GL_FALSE, glm::value_ptr(pvMat));
+
+		glBindTexture(GL_TEXTURE_2D, texture.get());
 		model.render();
 	}
 
@@ -319,6 +349,7 @@ struct Scene{
 
 	GlProgram program = GlProgram(persp_vert_src, persp_frag_src);
 	Model model = Model::get_sphere();
+	Texture texture;
 	float aspect_ratio = 4.f/3;
 	float rot_x = 0;
 	float rot_y = 0;
@@ -335,9 +366,6 @@ struct state_vr{
 
 	video_desc current_desc;
 	int buffered_frames_count;
-
-	GLuint program = 0;
-	GLuint gl_texture = 0;
 
 	Scene scene;
 
@@ -426,8 +454,6 @@ static void draw(state_vr *s){
 	s->last_frame = now;
 
 	glClear(GL_COLOR_BUFFER_BIT);
-
-	glBindTexture(GL_TEXTURE_2D, s->gl_texture);
 	
 	s->scene.render();
 
@@ -457,6 +483,7 @@ static void handle_window_event(state_vr *s, SDL_Event *event){
 		glViewport(0, 0, event->window.data1, event->window.data2);
 		s->window.width = event->window.data1;
 		s->window.height = event->window.data2;
+		s->scene.aspect_ratio = static_cast<float>(s->window.width) / s->window.height;
 		redraw(s);
 	}
 }
@@ -471,6 +498,7 @@ static void handle_user_event(state_vr *s, SDL_Event *event){
 		video_frame *frame = static_cast<video_frame *>(event->user.data1);
 
 		if(frame){
+			glBindTexture(GL_TEXTURE_2D, s->scene.texture.get());
 			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, frame->tiles[0].width, frame->tiles[0].height, 0, GL_RGB, GL_UNSIGNED_BYTE, frame->tiles[0].data);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -493,14 +521,6 @@ static void handle_user_event(state_vr *s, SDL_Event *event){
 			s->redraw_timer = 0;
 		}
 	}
-}
-
-static void initialize_texture(state_vr *s){
-	glGenTextures(1, &s->gl_texture);
-	glBindTexture(GL_TEXTURE_2D, s->gl_texture);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 4, 4, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 }
 
 static void initialize_scene(state_vr *s){
@@ -537,16 +557,9 @@ static void initialize_scene(state_vr *s){
 #endif
 }
 
-static void initialize_persp_scene(state_vr *s){
-
-	initialize_texture(s);
-
-}
-
 static void display_vr_run(void *state) {
 	state_vr *s = static_cast<state_vr *>(state);
 
-	initialize_persp_scene(s);
 	draw(s);
 
 	s->running = true;
