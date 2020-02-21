@@ -167,12 +167,54 @@ struct Window{
 static std::vector<float> gen_sphere_vertices(int r, int latitude_n, int longtitude_n);
 static std::vector<unsigned> gen_sphere_indices(int latitude_n, int longtitude_n);
 
+class GlProgram{
+public:
+	GlProgram(const char *vert_src, const char *frag_src){
+		GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
+		GLuint fragShader = glCreateShader(GL_FRAGMENT_SHADER);
+
+		glShaderSource(vertexShader, 1, &vert_src, NULL);
+		compileShader(vertexShader);
+		glShaderSource(fragShader, 1, &frag_src, NULL);
+		compileShader(fragShader);
+
+		program = glCreateProgram();
+		glAttachShader(program, vertexShader);
+		glAttachShader(program, fragShader);
+		glLinkProgram(program);
+		//glUseProgram(program);
+
+		glDetachShader(program, vertexShader);
+		glDetachShader(program, fragShader);
+		glDeleteShader(vertexShader);
+		glDeleteShader(fragShader);
+	}
+
+	~GlProgram() {
+		glUseProgram(0);
+		glDeleteProgram(program);
+	}
+
+	GLuint get() { return program; }
+
+	GlProgram(const GlProgram&) = delete;
+	GlProgram(GlProgram&& o) { swap(o); }
+	GlProgram& operator=(const GlProgram&) = delete;
+	GlProgram& operator=(GlProgram&& o) { swap(o); return *this; }
+
+private:
+	void swap(GlProgram& o){
+		std::swap(program, o.program);
+	}
+	GLuint program = 0;
+};
+
 class Model{
 public:
 	Model(const Model&) = delete;
-	Model(Model&&) = default;
+	Model(Model&& o) { swap(o); }
 	Model& operator=(const Model&) = delete;
-	Model& operator=(Model&&) = default;
+	Model& operator=(Model&& o) { swap(o); return *this; }
 	~Model(){
 		glDeleteBuffers(1, &vbo);
 		glDeleteBuffers(1, &elem_buf);
@@ -237,6 +279,12 @@ public:
 
 private:
 	Model() = default;
+	void swap(Model& o){
+		std::swap(vao, o.vao);
+		std::swap(vbo, o.vbo);
+		std::swap(elem_buf, o.elem_buf);
+		std::swap(indices_num, o.indices_num);
+	}
 	GLuint vao = 0;
 	GLuint vbo = 0;
 	GLuint elem_buf = 0;
@@ -245,10 +293,36 @@ private:
 
 struct Scene{
 	void render(){
+		glUseProgram(program.get());
+		glm::mat4 projMat = glm::perspective(glm::radians(fov),
+				aspect_ratio,
+				0.1f,
+				300.0f);
+		glm::mat4 viewMat(1.f);
+		viewMat = glm::rotate(viewMat, glm::radians(rot_y), {1.f, 0, 0});
+		viewMat = glm::rotate(viewMat, glm::radians(rot_x), {0.f, 1, 0});
+		glm::mat4 pvMat = projMat * viewMat;
+
+		GLuint pvLoc;
+		pvLoc = glGetUniformLocation(program.get(), "pv_mat");
+		glUniformMatrix4fv(pvLoc, 1, GL_FALSE, glm::value_ptr(pvMat));
 		model.render();
 	}
 
+	void rotate(float dx, float dy){
+		rot_x -= dx;
+		rot_y -= dy;
+
+		if(rot_y > 90) rot_y = 90;
+		if(rot_y < -90) rot_y = -90;
+	}
+
+	GlProgram program = GlProgram(persp_vert_src, persp_frag_src);
 	Model model = Model::get_sphere();
+	float aspect_ratio = 4.f/3;
+	float rot_x = 0;
+	float rot_y = 0;
+	float fov = 55;
 };
 
 struct state_vr{
@@ -266,15 +340,6 @@ struct state_vr{
 	GLuint gl_texture = 0;
 
 	Scene scene;
-
-	GLuint vao = 0;
-	GLuint vbo = 0;
-	GLuint elem_buf = 0;
-	GLsizei indices_num = 0;
-
-	float rot_x = 0;
-	float rot_y = 0;
-	float fov = 55;
 
 	int max_fps = 60;
 
@@ -360,26 +425,11 @@ static void draw(state_vr *s){
 
 	s->last_frame = now;
 
-	glUseProgram(s->program);
 	glClear(GL_COLOR_BUFFER_BIT);
 
 	glBindTexture(GL_TEXTURE_2D, s->gl_texture);
-
-	glm::mat4 projMat = glm::perspective(glm::radians(s->fov),
-			static_cast<float>(s->window.width)/s->window.height,
-			0.1f,
-			300.0f);
-	glm::mat4 viewMat(1.f);
-	viewMat = glm::rotate(viewMat, glm::radians(s->rot_y), {1.f, 0, 0});
-	viewMat = glm::rotate(viewMat, glm::radians(s->rot_x), {0.f, 1, 0});
-	glm::mat4 pvMat = projMat * viewMat;
-
-	GLuint pvLoc;
-	pvLoc = glGetUniformLocation(s->program, "pv_mat");
-	glUniformMatrix4fv(pvLoc, 1, GL_FALSE, glm::value_ptr(pvMat));
 	
 	s->scene.render();
-
 
 	SDL_GL_SwapWindow(s->window.sdl_window);
 }
@@ -445,27 +495,6 @@ static void handle_user_event(state_vr *s, SDL_Event *event){
 	}
 }
 
-static void initialize_program(state_vr *s, const char *vert_src, const char *frag_src){
-	GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
-	GLuint fragShader = glCreateShader(GL_FRAGMENT_SHADER);
-
-	glShaderSource(vertexShader, 1, &vert_src, NULL);
-	compileShader(vertexShader);
-	glShaderSource(fragShader, 1, &frag_src, NULL);
-	compileShader(fragShader);
-
-	s->program = glCreateProgram();
-	glAttachShader(s->program, vertexShader);
-	glAttachShader(s->program, fragShader);
-	glLinkProgram(s->program);
-	glUseProgram(s->program);
-
-	glDetachShader(s->program, vertexShader);
-	glDetachShader(s->program, fragShader);
-	glDeleteShader(vertexShader);
-	glDeleteShader(fragShader);
-}
-
 static void initialize_texture(state_vr *s){
 	glGenTextures(1, &s->gl_texture);
 	glBindTexture(GL_TEXTURE_2D, s->gl_texture);
@@ -475,11 +504,7 @@ static void initialize_texture(state_vr *s){
 }
 
 static void initialize_scene(state_vr *s){
-	glGenVertexArrays(1, &s->vao);
-	glBindVertexArray(s->vao);
-
-	initialize_program(s, vert_src, frag_src);
-
+#if 0
 	glGenBuffers(1, &s->vbo);
 	glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(rectangle), rectangle, GL_STATIC_DRAW);
@@ -509,50 +534,13 @@ static void initialize_scene(state_vr *s){
 
 	glBindVertexArray(0);
 	s->indices_num = 6;
+#endif
 }
 
 static void initialize_persp_scene(state_vr *s){
-	glGenVertexArrays(1, &s->vao);
-	glBindVertexArray(s->vao);
-
-	initialize_program(s, persp_vert_src, persp_frag_src);
-
-	auto vertices = gen_sphere_vertices(1, 64, 64);
-	auto indices = gen_sphere_indices(64, 64);
-
-	glGenBuffers(1, &s->vbo);
-	glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
-	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW);
-
-	glGenBuffers(1, &s->elem_buf);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s->elem_buf);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned), indices.data(), GL_STATIC_DRAW);
 
 	initialize_texture(s);
 
-	glEnableVertexAttribArray(0);
-	glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
-	glVertexAttribPointer(
-			0,
-			3,
-			GL_FLOAT,
-			GL_FALSE,
-			5 * sizeof(float),
-			(void*)0
-			);
-	glEnableVertexAttribArray(1);
-	glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
-	glVertexAttribPointer(
-			1,
-			2,
-			GL_FLOAT,
-			GL_FALSE,
-			5 * sizeof(float),
-			(void*)(3 * sizeof(float))
-			);
-
-	glBindVertexArray(0);
-	s->indices_num = indices.size();
 }
 
 static void display_vr_run(void *state) {
@@ -571,16 +559,14 @@ static void display_vr_run(void *state) {
 		switch(event.type){
 			case SDL_MOUSEMOTION:
 				if(event.motion.state & SDL_BUTTON_LMASK){
-					s->rot_x -= event.motion.xrel / 8.f;
-					s->rot_y -= event.motion.yrel / 8.f;
+					s->scene.rotate(event.motion.xrel / 8.f,
+							event.motion.yrel / 8.f);
 
-					if(s->rot_y > 90) s->rot_y = 90;
-					if(s->rot_y < -90) s->rot_y = -90;
 					redraw(s);
 				}
 				break;
 			case SDL_MOUSEWHEEL:
-				s->fov -= event.wheel.y;
+				s->scene.fov -= event.wheel.y;
 				redraw(s);
 				break;
 			case SDL_WINDOWEVENT:
