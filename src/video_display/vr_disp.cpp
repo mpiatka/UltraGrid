@@ -130,7 +130,7 @@ struct Window{
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
 
 		//TODO: Error handling
-		sdl_window = SDL_CreateWindow("UltraGrid VR",
+		sdl_window = SDL_CreateWindow(title,
 				x,
 				y,
 				w,
@@ -277,6 +277,42 @@ public:
 		return model;
 	}
 
+	static Model get_quad(){
+		Model model;
+		glGenVertexArrays(1, &model.vao);
+		glBindVertexArray(model.vao);
+
+		glGenBuffers(1, &model.vbo);
+		glBindBuffer(GL_ARRAY_BUFFER, model.vbo);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(rectangle), rectangle, GL_STATIC_DRAW);
+
+		glEnableVertexAttribArray(0);
+		glBindBuffer(GL_ARRAY_BUFFER, model.vbo);
+		glVertexAttribPointer(
+				0,
+				2,
+				GL_FLOAT,
+				GL_FALSE,
+				4 * sizeof(float),
+				(void*)0
+				);
+		glEnableVertexAttribArray(1);
+		glBindBuffer(GL_ARRAY_BUFFER, model.vbo);
+		glVertexAttribPointer(
+				1,
+				2,
+				GL_FLOAT,
+				GL_FALSE,
+				4 * sizeof(float),
+				(void*)(2 * sizeof(float))
+				);
+
+		glBindVertexArray(0);
+		model.indices_num = 6;
+
+		return model;
+	}
+
 private:
 	Model() = default;
 	void swap(Model& o){
@@ -361,8 +397,8 @@ struct state_vr{
 
 	bool running = false;
 
-	int sdl_frame_event;
-	int sdl_redraw_event;
+	unsigned sdl_frame_event;
+	unsigned sdl_redraw_event;
 
 	video_desc current_desc;
 	int buffered_frames_count;
@@ -460,7 +496,7 @@ static void draw(state_vr *s){
 	SDL_GL_SwapWindow(s->window.sdl_window);
 }
 
-Uint32 redraw_callback(Uint32 interval, void *param){
+static Uint32 redraw_callback(Uint32 interval, void *param){
 	int event_id = *static_cast<int *>(param);
 	SDL_Event event;
 	event.type = event_id;
@@ -521,40 +557,6 @@ static void handle_user_event(state_vr *s, SDL_Event *event){
 			s->redraw_timer = 0;
 		}
 	}
-}
-
-static void initialize_scene(state_vr *s){
-#if 0
-	glGenBuffers(1, &s->vbo);
-	glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(rectangle), rectangle, GL_STATIC_DRAW);
-
-	initialize_texture(s);
-
-	glEnableVertexAttribArray(0);
-	glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
-	glVertexAttribPointer(
-			0,
-			2,
-			GL_FLOAT,
-			GL_FALSE,
-			4 * sizeof(float),
-			(void*)0
-			);
-	glEnableVertexAttribArray(1);
-	glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
-	glVertexAttribPointer(
-			1,
-			2,
-			GL_FLOAT,
-			GL_FALSE,
-			4 * sizeof(float),
-			(void*)(2 * sizeof(float))
-			);
-
-	glBindVertexArray(0);
-	s->indices_num = 6;
-#endif
 }
 
 static void display_vr_run(void *state) {
