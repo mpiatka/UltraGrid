@@ -97,6 +97,11 @@ void main(){
 }
 )END";
 
+static const char *yuv_conv_frag_src = R"END(
+#version 330 core
+out vec4 FragColor;
+)END";
+
 static void compileShader(GLuint shaderId){
 	glCompileShader(shaderId);
 
@@ -221,7 +226,7 @@ public:
 		glDeleteVertexArrays(1, &vao);
 	}
 
-	GLuint get_vao() { return vao; }
+	GLuint get_vao() const { return vao; }
 
 	void render(){
 		glBindVertexArray(vao);
@@ -341,7 +346,7 @@ public:
 		glDeleteTextures(1, &tex_id);
 	}
 
-	GLuint get() { return tex_id; }
+	GLuint get() const { return tex_id; }
 
 	Texture(const Texture&) = delete;
 	Texture(Texture&& o) { swap(o); }
@@ -353,6 +358,52 @@ private:
 		std::swap(tex_id, o.tex_id);
 	}
 	GLuint tex_id = 0;
+};
+
+class Framebuffer{
+public:
+	Framebuffer(){
+		glGenFramebuffers(1, &fbo);
+	}
+
+	~Framebuffer(){
+		glDeleteFramebuffers(1, &fbo);
+	}
+
+	Framebuffer(const Framebuffer&) = delete;
+	Framebuffer(Framebuffer&& o) { swap(o); }
+	Framebuffer& operator=(const Framebuffer&) = delete;
+	Framebuffer& operator=(Framebuffer&& o) { swap(o); return *this; }
+
+	void attachTexture(const Texture& tex){
+		glBindTexture(GL_TEXTURE_2D, tex.get());
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glBindTexture(GL_TEXTURE_2D, 0);
+
+		glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex.get(), 0);
+		assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	}
+
+private:
+	void swap(Framebuffer& o){
+		std::swap(fbo, o.fbo);
+	}
+
+	GLuint fbo = 0;
+};
+
+class Yuv_convertor{
+public:
+	void put_frame(const video_frame *f){
+
+	}
+
+private:
+	GlProgram program;
+	Framebuffer fbuf;
 };
 
 struct Scene{
@@ -375,6 +426,15 @@ struct Scene{
 		model.render();
 	}
 
+	void put_frame(const video_frame *f){
+		glBindTexture(GL_TEXTURE_2D, texture.get());
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, f->tiles[0].width, f->tiles[0].height, 0, GL_RGB, GL_UNSIGNED_BYTE, f->tiles[0].data);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	}
+
 	void rotate(float dx, float dy){
 		rot_x -= dx;
 		rot_y -= dy;
@@ -386,6 +446,7 @@ struct Scene{
 	GlProgram program = GlProgram(persp_vert_src, persp_frag_src);
 	Model model = Model::get_sphere();
 	Texture texture;
+	Framebuffer framebuffer;
 	float aspect_ratio = 4.f/3;
 	float rot_x = 0;
 	float rot_y = 0;
@@ -534,12 +595,8 @@ static void handle_user_event(state_vr *s, SDL_Event *event){
 		video_frame *frame = static_cast<video_frame *>(event->user.data1);
 
 		if(frame){
-			glBindTexture(GL_TEXTURE_2D, s->scene.texture.get());
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, frame->tiles[0].width, frame->tiles[0].height, 0, GL_RGB, GL_UNSIGNED_BYTE, frame->tiles[0].data);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			s->scene.put_frame(frame);
+
 			lk.lock();
 			s->free_frame_queue.push(frame);
 			lk.unlock();
