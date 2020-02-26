@@ -31,13 +31,13 @@
 static const float PI_F=3.14159265358979f;
 
 static const GLfloat rectangle[] = {
-	 1.0f,  1.0f,  1.0f,  0.0f,
-	-1.0f,  1.0f,  0.0f,  0.0f,
-	-1.0f, -1.0f,  0.0f,  1.0f,
+	 1.0f,  1.0f,  1.0f,  1.0f,
+	-1.0f,  1.0f,  0.0f,  1.0f,
+	-1.0f, -1.0f,  0.0f,  0.0f,
 
-	 1.0f,  1.0f,  1.0f,  0.0f,
-	-1.0f, -1.0f,  0.0f,  1.0f,
-	 1.0f, -1.0f,  1.0f,  1.0f
+	 1.0f,  1.0f,  1.0f,  1.0f,
+	-1.0f, -1.0f,  0.0f,  0.0f,
+	 1.0f, -1.0f,  1.0f,  0.0f
 };
 
 static unsigned char pixels[] = {
@@ -99,7 +99,28 @@ void main(){
 
 static const char *yuv_conv_frag_src = R"END(
 #version 330 core
-out vec4 FragColor;
+layout(location = 0) out vec4 color;
+in vec2 UV;
+uniform sampler2D tex;
+uniform float width;
+
+void main(){
+	vec4 yuv;
+	yuv.rgba  = texture2D(tex, UV).grba;
+	if(UV.x * width / 2.0 - floor(UV.x * width / 2.0) > 0.5)
+		yuv.r = yuv.a;
+
+	yuv.r = 1.1643 * (yuv.r - 0.0625);
+	yuv.g = yuv.g - 0.5;
+	yuv.b = yuv.b - 0.5;
+	float tmp; // this is a workaround over broken Gallium3D with Nouveau in U14.04 (and perhaps others)
+	tmp = -0.2664 * yuv.b;
+	tmp = 2.0 * tmp;
+	color.r = yuv.r + 1.7926 * yuv.b;
+	color.g = yuv.r - 0.2132 * yuv.g - 0.5328 * yuv.b;
+	color.b = yuv.r + 2.1124 * yuv.g;
+	color.a = 1.0;
+}
 )END";
 
 static void compileShader(GLuint shaderId){
@@ -375,7 +396,9 @@ public:
 	Framebuffer& operator=(const Framebuffer&) = delete;
 	Framebuffer& operator=(Framebuffer&& o) { swap(o); return *this; }
 
-	void attachTexture(const Texture& tex){
+	GLuint get() { return fbo; }
+
+	void attach_texture(const Texture& tex){
 		glBindTexture(GL_TEXTURE_2D, tex.get());
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -398,17 +421,42 @@ private:
 class Yuv_convertor{
 public:
 	void put_frame(const video_frame *f){
+		glUseProgram(program.get());
+		glBindFramebuffer(GL_FRAMEBUFFER, fbuf.get());
+		glViewport(0, 0, f->tiles[0].width, f->tiles[0].height);
+		glClear(GL_COLOR_BUFFER_BIT);
 
+		glBindTexture(GL_TEXTURE_2D, yuv_tex.get());
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
+				f->tiles[0].width / 2, f->tiles[0].height, 0,
+				GL_RGBA, GL_UNSIGNED_BYTE,
+				f->tiles[0].data);
+
+		GLuint w_loc = glGetUniformLocation(program.get(), "width");
+		glUniform1f(w_loc, f->tiles[0].width);
+
+		quad.render();
+
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		glUseProgram(0);
+	}
+
+	void attach_texture(const Texture& tex){
+		fbuf.attach_texture(tex);
 	}
 
 private:
-	GlProgram program;
+	GlProgram program = GlProgram(vert_src, yuv_conv_frag_src);
+	Model quad = Model::get_quad();
 	Framebuffer fbuf;
+	Texture yuv_tex;
 };
 
 struct Scene{
-	void render(){
+	void render(int width, int height){
 		glUseProgram(program.get());
+		float aspect_ratio = static_cast<float>(width) / height;
+		glViewport(0, 0, width, height);
 		glm::mat4 projMat = glm::perspective(glm::radians(fov),
 				aspect_ratio,
 				0.1f,
@@ -427,12 +475,23 @@ struct Scene{
 	}
 
 	void put_frame(const video_frame *f){
+#if 0
 		glBindTexture(GL_TEXTURE_2D, texture.get());
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, f->tiles[0].width, f->tiles[0].height, 0, GL_RGB, GL_UNSIGNED_BYTE, f->tiles[0].data);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+#else
+		glBindTexture(GL_TEXTURE_2D, texture.get());
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, f->tiles[0].width, f->tiles[0].height, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		conv.attach_texture(texture);
+		conv.put_frame(f);
+#endif
 	}
 
 	void rotate(float dx, float dy){
@@ -447,10 +506,12 @@ struct Scene{
 	Model model = Model::get_sphere();
 	Texture texture;
 	Framebuffer framebuffer;
-	float aspect_ratio = 4.f/3;
+	Yuv_convertor conv;
 	float rot_x = 0;
 	float rot_y = 0;
 	float fov = 55;
+
+	int width, height;
 };
 
 struct state_vr{
@@ -552,7 +613,7 @@ static void draw(state_vr *s){
 
 	glClear(GL_COLOR_BUFFER_BIT);
 	
-	s->scene.render();
+	s->scene.render(s->window.width, s->window.height);
 
 	SDL_GL_SwapWindow(s->window.sdl_window);
 }
@@ -580,7 +641,6 @@ static void handle_window_event(state_vr *s, SDL_Event *event){
 		glViewport(0, 0, event->window.data1, event->window.data2);
 		s->window.width = event->window.data1;
 		s->window.height = event->window.data2;
-		s->scene.aspect_ratio = static_cast<float>(s->window.width) / s->window.height;
 		redraw(s);
 	}
 }
