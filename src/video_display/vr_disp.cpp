@@ -369,6 +369,21 @@ public:
 
 	GLuint get() const { return tex_id; }
 
+	void allocate(int w, int h, GLenum fmt) {
+		if(w != width || h != height || fmt != format){
+			Profile_timer t(Profiler_thread_inst::get_instance(), "Tex allocate");
+			width = w;
+			height = h;
+			format = fmt;
+
+			glBindTexture(GL_TEXTURE_2D, tex_id);
+			glTexImage2D(GL_TEXTURE_2D, 0, format,
+					width, height, 0,
+					format, GL_UNSIGNED_BYTE,
+					nullptr);
+		}
+	}
+
 	Texture(const Texture&) = delete;
 	Texture(Texture&& o) { swap(o); }
 	Texture& operator=(const Texture&) = delete;
@@ -379,6 +394,9 @@ private:
 		std::swap(tex_id, o.tex_id);
 	}
 	GLuint tex_id = 0;
+	int width = 0;
+	int height = 0;
+	GLenum format = 0;
 };
 
 class Framebuffer{
@@ -427,10 +445,14 @@ public:
 		glClear(GL_COLOR_BUFFER_BIT);
 
 		glBindTexture(GL_TEXTURE_2D, yuv_tex.get());
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
-				f->tiles[0].width / 2, f->tiles[0].height, 0,
-				GL_RGBA, GL_UNSIGNED_BYTE,
-				f->tiles[0].data);
+		yuv_tex.allocate(f->tiles[0].width / 2, f->tiles[0].height, GL_RGBA);
+
+		{
+		Profile_timer t2(Profiler_thread_inst::get_instance(), "TexSubImage");
+		glTexSubImage2D(GL_TEXTURE_2D, 0,
+				0, 0, f->tiles[0].width / 2, f->tiles[0].height,
+						GL_RGBA, GL_UNSIGNED_BYTE, f->tiles[0].data);
+		}
 
 		GLuint w_loc = glGetUniformLocation(program.get(), "width");
 		glUniform1f(w_loc, f->tiles[0].width);
@@ -484,7 +506,7 @@ struct Scene{
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 #else
 		glBindTexture(GL_TEXTURE_2D, texture.get());
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, f->tiles[0].width, f->tiles[0].height, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+		texture.allocate(f->tiles[0].width, f->tiles[0].height, GL_RGB);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
