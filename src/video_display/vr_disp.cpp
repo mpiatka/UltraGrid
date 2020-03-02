@@ -497,23 +497,30 @@ struct Scene{
 	}
 
 	void put_frame(const video_frame *f){
-#if 0
-		glBindTexture(GL_TEXTURE_2D, texture.get());
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, f->tiles[0].width, f->tiles[0].height, 0, GL_RGB, GL_UNSIGNED_BYTE, f->tiles[0].data);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-#else
+
 		glBindTexture(GL_TEXTURE_2D, texture.get());
 		texture.allocate(f->tiles[0].width, f->tiles[0].height, GL_RGB);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		conv.attach_texture(texture);
-		conv.put_frame(f);
-#endif
+		switch(f->color_spec){
+			case UYVY:
+				conv.attach_texture(texture);
+				conv.put_frame(f);
+				break;
+			case RGB:
+				glTexSubImage2D(GL_TEXTURE_2D, 0,
+						0, 0, f->tiles[0].width, f->tiles[0].height,
+						GL_RGB, GL_UNSIGNED_BYTE, f->tiles[0].data);
+				break;
+			case RGBA:
+				glTexSubImage2D(GL_TEXTURE_2D, 0,
+						0, 0, f->tiles[0].width, f->tiles[0].height,
+						GL_RGBA, GL_UNSIGNED_BYTE, f->tiles[0].data);
+			default:
+				break;
+		}
 	}
 
 	void rotate(float dx, float dy){
