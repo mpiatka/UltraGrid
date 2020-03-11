@@ -1206,6 +1206,41 @@ then
 fi
 
 # ------------------------------------------------------------------------------
+# OpenXR VR gl display
+# ------------------------------------------------------------------------------
+GLM_INC=-I$srcdir/glm
+xrgl_disp=no
+AC_ARG_ENABLE(xrgl_disp,
+[  --disable-xrgl_disp            disable OpenXR VR display (default is auto]
+[                          Requires:  glew gl openxr],
+    [xrgl_disp_req=$enableval],
+    [xrgl_disp_req=$build_default]
+    )
+
+define(xrgl_deps, [sdl2 openxr])
+
+PKG_CHECK_MODULES([XRGLDISP], [xrgl_deps], [FOUND_XRGL_DEPS=yes], [FOUND_XRGL_DEPS=no])
+if test $xrgl_disp_req = yes -a $FOUND_XRGL_DEPS = no; then
+        AC_MSG_ERROR([XRGL deps not found]);
+fi
+
+if test $xrgl_disp_req != no -a $FOUND_XRGL_DEPS = yes
+then
+        XRGLDISP_OBJ="src/video_display/openxr_gl.o"
+        AC_DEFINE([HAVE_XRGL_DISP], [1],  [Build with OpenXR VR disp support])
+        # on Win override libs from pkg-config because those contain
+        # "-mwindows" which causes output to be scratched by cmd.exe
+        # (but not MSYS2!)
+        if test $system = Windows; then
+                XRGLDISP_LIBS="-lSDL2"
+        fi
+        ADD_MODULE("display_xrgl", "$XRGLDISP_OBJ", "$XRGLDISP_LIBS")
+        XRGLDISP_LIB=$SDL2_LIB
+		INC="$INC $GLM_INC"
+        xrgl_disp=yes
+fi
+
+# ------------------------------------------------------------------------------
 # SDL1/2 Stuff
 # ------------------------------------------------------------------------------
 sdl=no
@@ -3250,6 +3285,7 @@ RESULT=`add_column "$RESULT" "SW video mix" $swmix $?`
 RESULT=`add_column "$RESULT" "V4L2" $v4l2 $?`
 RESULT=`add_column "$RESULT" "XIMEA" $ximea $?`
 RESULT=`add_column "$RESULT" "VR Display" $vr_disp $?`
+RESULT=`add_column "$RESULT" "OpenXR VR Display" $xrgl_disp $?`
 RESULT=`end_section "$RESULT"`
 
 # compressions
