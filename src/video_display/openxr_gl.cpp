@@ -9,7 +9,10 @@
 #include <assert.h>
 //#include <GL/glew.h>
 #include <X11/Xlib.h>
+#include <GL/glew.h>
 #include <GL/glx.h>
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_opengl.h>
 #define XR_USE_PLATFORM_XLIB
 #define XR_USE_GRAPHICS_API_OPENGL
 #include <openxr/openxr.h>
@@ -34,6 +37,93 @@
 #define MAX_BUFFER_SIZE   1
 
 static const float PI_F=3.14159265358979f;
+
+struct Sdl_window{
+	Sdl_window() : Sdl_window("UltraGrid VR",
+			SDL_WINDOWPOS_CENTERED,
+			SDL_WINDOWPOS_CENTERED,
+			640,
+			480,
+			SDL_WINDOW_OPENGL) {  }
+
+	Sdl_window(const char *title, int x, int y, int w, int h, SDL_WindowFlags flags) :
+	width(w), height(h)
+	{
+		SDL_InitSubSystem(SDL_INIT_VIDEO);
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+
+		SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 0);
+
+		//TODO: Error handling
+		sdl_window = SDL_CreateWindow(title,
+				x,
+				y,
+				w,
+				h,
+				SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+
+		SDL_SetWindowMinimumSize(sdl_window, 200, 200);
+
+		//TODO: Error handling
+		sdl_gl_context = SDL_GL_CreateContext(sdl_window);
+
+		glewExperimental = GL_TRUE;
+		//TODO: Error handling
+		GLenum glewError = glewInit();
+
+		glClearColor(0,0,0,1);
+		glClear(GL_COLOR_BUFFER_BIT);
+		SDL_GL_SwapWindow(sdl_window);
+	}
+
+
+	~Sdl_window(){
+		SDL_DestroyWindow(sdl_window);
+		SDL_QuitSubSystem(SDL_INIT_VIDEO);
+	}
+
+	void getXlibHandles(Display  **xDisplay,
+			GLXContext *glxContext,
+			GLXDrawable *glxDrawable)
+	{
+		SDL_GL_MakeCurrent(sdl_window, sdl_gl_context);
+		*xDisplay = XOpenDisplay(NULL);
+		*glxContext = glXGetCurrentContext();
+		*glxDrawable = glXGetCurrentDrawable();
+	}
+
+
+	SDL_Window *sdl_window;
+	SDL_GLContext sdl_gl_context;
+	int width;
+	int height;
+};
+
+class Openxr_session{
+public:
+	Openxr_session(XrInstance instance,
+			XrSystemId systemId,
+			Display *xDisplay,
+			GLXContext glxContext,
+			GLXDrawable glxDrawable)
+	{
+		XrGraphicsBindingOpenGLXlibKHR graphics_binding_gl = {};
+	    graphics_binding_gl.type = XR_TYPE_GRAPHICS_BINDING_OPENGL_XLIB_KHR;
+
+		XrSessionCreateInfo session_create_info = {};
+		session_create_info.type = XR_TYPE_SESSION_CREATE_INFO;
+		session_create_info.next = &self->graphics_binding_gl;
+		session_create_info.systemId = systemId;
+
+
+		XrResult result = xrCreateSession(instance, &session_create_info, &session);
+		//TODO Error check
+	}
+private:
+	XrSession session;
+};
 
 class Openxr_state{
 public:
@@ -89,6 +179,7 @@ struct state_xrgl{
 	video_desc current_desc;
 	int buffered_frames_count;
 
+	Sdl_window window;
 	Openxr_state xr_state;
 
 	std::chrono::steady_clock::time_point last_frame;

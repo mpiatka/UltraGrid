@@ -26,6 +26,8 @@
 #include "video_display.h"
 #include "video_display/splashscreen.h"
 
+#include "utils/profile_timer.hpp"
+
 #define MAX_BUFFER_SIZE   1
 
 static const float PI_F=3.14159265358979f;
@@ -250,6 +252,7 @@ public:
 	GLuint get_vao() const { return vao; }
 
 	void render(){
+		Profile_timer t(Profiler_thread_inst::get_instance(), "Model render");
 		glBindVertexArray(vao);
 		if(elem_buf != 0){
 			glDrawElements(GL_TRIANGLES, indices_num, GL_UNSIGNED_INT, (void *) 0);
@@ -439,6 +442,7 @@ private:
 class Yuv_convertor{
 public:
 	void put_frame(const video_frame *f){
+		Profile_timer t(Profiler_thread_inst::get_instance(), "Yuv put_frame");
 		glUseProgram(program.get());
 		glBindFramebuffer(GL_FRAMEBUFFER, fbuf.get());
 		glViewport(0, 0, f->tiles[0].width, f->tiles[0].height);
@@ -476,6 +480,7 @@ private:
 
 struct Scene{
 	void render(int width, int height){
+		Profile_timer t(Profiler_thread_inst::get_instance(), "Scene render");
 		glUseProgram(program.get());
 		float aspect_ratio = static_cast<float>(width) / height;
 		glViewport(0, 0, width, height);
@@ -497,6 +502,7 @@ struct Scene{
 	}
 
 	void put_frame(const video_frame *f){
+		Profile_timer t(Profiler_thread_inst::get_instance(), "Scene put_frame");
 
 		glBindTexture(GL_TEXTURE_2D, texture.get());
 		texture.allocate(f->tiles[0].width, f->tiles[0].height, GL_RGB);

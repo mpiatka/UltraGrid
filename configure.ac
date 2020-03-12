@@ -2675,7 +2675,7 @@ AC_ARG_ENABLE(static-qt,
     )
 
 # Check for Qt libraries
-QT_GUI_DEP="Qt5Core >= 5.4 Qt5Widgets Qt5Gui"
+QT_GUI_DEP="Qt5Core Qt5Widgets Qt5Gui"
 
 SAVED_PKG_CONFIG=$PKG_CONFIG
 if test $static_qt = yes; then
