@@ -114,7 +114,7 @@ public:
 
 		XrSessionCreateInfo session_create_info = {};
 		session_create_info.type = XR_TYPE_SESSION_CREATE_INFO;
-		session_create_info.next = &self->graphics_binding_gl;
+		session_create_info.next = &graphics_binding_gl;
 		session_create_info.systemId = systemId;
 
 
@@ -125,9 +125,9 @@ private:
 	XrSession session;
 };
 
-class Openxr_state{
+class Openxr_instance{
 public:
-	Openxr_state(){
+	Openxr_instance(){
 		//TODO Check if opengl extension is supported
 
 		const char* const enabledExtensions[] = {XR_KHR_OPENGL_ENABLE_EXTENSION_NAME};
@@ -162,17 +162,23 @@ public:
 
 	}
 
-	~Openxr_state(){
+	~Openxr_instance(){
 		xrDestroyInstance(instance);
 	}
 
-	Openxr_state(const Openxr_state&) = delete;
-	Openxr_state(Openxr_state&&) = delete;
-	Openxr_state& operator=(const Openxr_state&) = delete;
-	Openxr_state& operator=(Openxr_state&&) = delete;
+	Openxr_instance(const Openxr_instance&) = delete;
+	Openxr_instance(Openxr_instance&&) = delete;
+	Openxr_instance& operator=(const Openxr_instance&) = delete;
+	Openxr_instance& operator=(Openxr_instance&&) = delete;
+
+	XrInstance get() { return instance; }
 private:
 	XrInstance instance;
-	XrSession session;
+};
+
+struct Openxr_state{
+	Openxr_instance instance;
+	//Openxr_session session;	
 };
 
 struct state_xrgl{
@@ -296,17 +302,45 @@ static int display_xrgl_get_property(void *state, int property, void *val, size_
 	return TRUE;
 }
 
+static void display_xrgl_probe(struct device_info **available_cards, int *count, void (**deleter)(void *)){
+	UNUSED(deleter);
+	*count = 0;
+	*available_cards = nullptr;
+
+	Openxr_instance instance;
+
+	XrSystemGetInfo systemGetInfo;
+	systemGetInfo.type = XR_TYPE_SYSTEM_GET_INFO;
+	systemGetInfo.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+	systemGetInfo.next = NULL;
+
+	XrSystemId systemId;
+	XrResult result = xrGetSystem(instance.get(), &systemGetInfo, &systemId);
+	if(!XR_SUCCEEDED(result)){
+		return;
+	}
+
+	XrSystemProperties systemProperties;
+	systemProperties.type = XR_TYPE_SYSTEM_PROPERTIES;
+	systemProperties.next = NULL;
+	systemProperties.graphicsProperties = {0};
+	systemProperties.trackingProperties = {0};
+
+	result = xrGetSystemProperties(instance.get(), systemId, &systemProperties);
+	if(!XR_SUCCEEDED(result)){
+		return;
+	}
+
+	*available_cards = (struct device_info *) calloc(1, sizeof(struct device_info));
+	*count = 1;
+	snprintf((*available_cards)[0].id, sizeof((*available_cards)[0].id), "openxr_gl:system=%lu", systemId);
+	snprintf((*available_cards)[0].name, sizeof((*available_cards)[0].name), "OpenXr: %s", systemProperties.systemName);
+	(*available_cards)[0].repeatable = false;
+}
+
 
 static const struct video_display_info openxr_gl_info = {
-        [](struct device_info **available_cards, int *count, void (**deleter)(void *)) {
-                UNUSED(deleter);
-                *count = 1;
-                *available_cards = (struct device_info *) calloc(1, sizeof(struct device_info));
-				//TODO: hmd querying
-                strcpy((*available_cards)[0].id, "xrgl");
-                strcpy((*available_cards)[0].name, "OpenXR gl display");
-                (*available_cards)[0].repeatable = true;
-        },
+		display_xrgl_probe,
         display_xrgl_init,
         display_xrgl_run,
         display_xrgl_done,
