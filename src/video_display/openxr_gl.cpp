@@ -111,6 +111,9 @@ public:
 	{
 		XrGraphicsBindingOpenGLXlibKHR graphics_binding_gl = {};
 	    graphics_binding_gl.type = XR_TYPE_GRAPHICS_BINDING_OPENGL_XLIB_KHR;
+		graphics_binding_gl.xDisplay = xDisplay;
+		graphics_binding_gl.glxContext = glxContext;
+		graphics_binding_gl.glxDrawable = glxDrawable;
 
 		XrSessionCreateInfo session_create_info = {};
 		session_create_info.type = XR_TYPE_SESSION_CREATE_INFO;
@@ -120,6 +123,19 @@ public:
 
 		XrResult result = xrCreateSession(instance, &session_create_info, &session);
 		//TODO Error check
+	}
+
+	~Openxr_session(){
+		xrDestroySession(session);
+	}
+
+	void begin(){
+		XrSessionBeginInfo session_begin_info;
+		session_begin_info.type = XR_TYPE_SESSION_BEGIN_INFO;
+		session_begin_info.next = NULL;
+		session_begin_info.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+		XrResult result = xrBeginSession(session, &session_begin_info);
+		printf("Session started!\n");
 	}
 private:
 	XrSession session;
@@ -178,6 +194,7 @@ private:
 
 struct Openxr_state{
 	Openxr_instance instance;
+	XrSystemId system_id;
 	//Openxr_session session;	
 };
 
@@ -197,10 +214,27 @@ struct state_xrgl{
 
 static void display_xrgl_run(void *state){
 	state_xrgl *s = static_cast<state_xrgl *>(state);
+
+	Display *xDisplay = nullptr;
+	GLXContext glxContext;
+	GLXDrawable glxDrawable;
+
+	s->window.getXlibHandles(&xDisplay, &glxContext, &glxDrawable);
+
+	Openxr_session session(s->xr_state.instance.get(),
+			s->xr_state.system_id,
+			xDisplay,
+			glxContext,
+			glxDrawable);
+
+	session.begin();
+
 }
 
 static void * display_xrgl_init(struct module *parent, const char *fmt, unsigned int flags) {
 	state_xrgl *s = new state_xrgl();
+
+	s->xr_state.system_id = 1; //TODO
 
 	return s;
 }
