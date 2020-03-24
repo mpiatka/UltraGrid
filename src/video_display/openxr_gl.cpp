@@ -101,6 +101,88 @@ struct Sdl_window{
 	int height;
 };
 
+class Texture{
+public:
+	Texture(){
+		glGenTextures(1, &tex_id);
+		glBindTexture(GL_TEXTURE_2D, tex_id);
+		//glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 4, 4, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	}
+
+	~Texture(){
+		glDeleteTextures(1, &tex_id);
+	}
+
+	GLuint get() const { return tex_id; }
+
+	void allocate(int w, int h, GLenum fmt) {
+		if(w != width || h != height || fmt != format){
+			width = w;
+			height = h;
+			format = fmt;
+
+			glBindTexture(GL_TEXTURE_2D, tex_id);
+			glTexImage2D(GL_TEXTURE_2D, 0, format,
+					width, height, 0,
+					format, GL_UNSIGNED_BYTE,
+					nullptr);
+		}
+	}
+
+	Texture(const Texture&) = delete;
+	Texture(Texture&& o) { swap(o); }
+	Texture& operator=(const Texture&) = delete;
+	Texture& operator=(Texture&& o) { swap(o); return *this; }
+
+private:
+	void swap(Texture& o){
+		std::swap(tex_id, o.tex_id);
+	}
+	GLuint tex_id = 0;
+	int width = 0;
+	int height = 0;
+	GLenum format = 0;
+};
+
+class Framebuffer{
+public:
+	Framebuffer(){
+		glGenFramebuffers(1, &fbo);
+	}
+
+	~Framebuffer(){
+		glDeleteFramebuffers(1, &fbo);
+	}
+
+	Framebuffer(const Framebuffer&) = delete;
+	Framebuffer(Framebuffer&& o) { swap(o); }
+	Framebuffer& operator=(const Framebuffer&) = delete;
+	Framebuffer& operator=(Framebuffer&& o) { swap(o); return *this; }
+
+	GLuint get() { return fbo; }
+
+	void attach_texture(const Texture& tex){
+		glBindTexture(GL_TEXTURE_2D, tex.get());
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glBindTexture(GL_TEXTURE_2D, 0);
+
+		glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex.get(), 0);
+		assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	}
+
+private:
+	void swap(Framebuffer& o){
+		std::swap(fbo, o.fbo);
+	}
+
+	GLuint fbo = 0;
+};
+
 class Openxr_session{
 public:
 	Openxr_session(XrInstance instance,
@@ -128,6 +210,8 @@ public:
 	~Openxr_session(){
 		xrDestroySession(session);
 	}
+
+	XrSession get(){ return session; }
 
 	void begin(){
 		XrSessionBeginInfo session_begin_info;
@@ -192,6 +276,72 @@ private:
 	XrInstance instance;
 };
 
+class Openxr_swapchain{
+public:
+	Openxr_swapchain(XrSession session, const XrSwapchainCreateInfo *info) :
+		session(session)
+	{
+		xrCreateSwapchain(session, info, &swapchain);
+	}
+
+	~Openxr_swapchain(){
+		xrDestroySwapchain(swapchain);
+	}
+
+	Openxr_swapchain(const Openxr_swapchain&) = delete;
+	Openxr_swapchain(Openxr_swapchain&& o) { swap(o); }
+	Openxr_swapchain& operator=(const Openxr_swapchain&) = delete;
+	Openxr_swapchain& operator=(Openxr_swapchain&& o) { swap(o); return *this; }
+
+	uint32_t get_length(){
+		uint32_t len = 0;
+		//TODO error check
+		xrEnumerateSwapchainImages(swapchain, 0, &len, nullptr);
+
+		return len;
+	}
+
+	void swap(Openxr_swapchain& o){
+		std::swap(swapchain, o.swapchain);
+		std::swap(session, o.session);
+	}
+
+	XrSwapchain get(){ return swapchain; }
+
+private:
+	XrSwapchain swapchain;
+	XrSession session;
+};
+
+class Gl_interop_swapchain{
+public:
+	Gl_interop_swapchain(XrSession session, const XrSwapchainCreateInfo *info) :
+		xr_swapchain(session, info)
+	{
+		uint32_t length = xr_swapchain.get_length();
+		images.resize(length);
+		framebuffers.resize(length);
+
+		xrEnumerateSwapchainImages(xr_swapchain.get(),
+				length, &length,
+				(XrSwapchainImageBaseHeader *)(images.data()));
+	}
+
+	~Gl_interop_swapchain(){
+
+	}
+
+	Gl_interop_swapchain(const Gl_interop_swapchain&) = delete;
+	Gl_interop_swapchain(Gl_interop_swapchain&&) = delete;
+	Gl_interop_swapchain& operator=(const Gl_interop_swapchain&) = delete;
+	Gl_interop_swapchain& operator=(Gl_interop_swapchain&&) = delete;
+
+private:
+	Openxr_swapchain xr_swapchain;
+	std::vector<Framebuffer> framebuffers;
+	std::vector<XrSwapchainImageOpenGLKHR> images;
+};
+
 struct Openxr_state{
 	Openxr_instance instance;
 	XrSystemId system_id;
@@ -215,6 +365,24 @@ struct state_xrgl{
 static void display_xrgl_run(void *state){
 	state_xrgl *s = static_cast<state_xrgl *>(state);
 
+	unsigned view_count;
+	XrResult result = xrEnumerateViewConfigurationViews(s->xr_state.instance.get(),
+			s->xr_state.system_id,
+			XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
+			0,
+			&view_count,
+			nullptr);
+
+	std::vector<XrViewConfigurationView> config_views(view_count);
+	for(auto& view : config_views) view.type = XR_TYPE_VIEW_CONFIGURATION_VIEW;
+
+	result = xrEnumerateViewConfigurationViews(s->xr_state.instance.get(),
+			s->xr_state.system_id,
+			XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
+			view_count,
+			&view_count,
+			config_views.data());
+
 	Display *xDisplay = nullptr;
 	GLXContext glxContext;
 	GLXDrawable glxDrawable;
@@ -228,6 +396,41 @@ static void display_xrgl_run(void *state){
 			glxDrawable);
 
 	session.begin();
+
+	unsigned swapchain_format_count;
+	result = xrEnumerateSwapchainFormats(session.get(),
+			0,
+			&swapchain_format_count,
+			nullptr);
+
+	printf("Runtime supports %d swapchain formats\n", swapchain_format_count);
+	std::vector<int64_t> swapchain_formats(swapchain_format_count);
+	result = xrEnumerateSwapchainFormats(session.get(),
+			swapchain_format_count,
+			&swapchain_format_count,
+			swapchain_formats.data());
+
+	int64_t selected_swapchain_format = swapchain_formats[0];
+
+	std::vector<Openxr_swapchain> swapchains;
+	for(unsigned i = 0; i < view_count; i++){
+		XrSwapchainCreateInfo swapchain_create_info;
+		swapchain_create_info.type = XR_TYPE_SWAPCHAIN_CREATE_INFO;
+		swapchain_create_info.usageFlags = XR_SWAPCHAIN_USAGE_SAMPLED_BIT |
+			XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
+		swapchain_create_info.createFlags = 0;
+		swapchain_create_info.format = selected_swapchain_format;
+		swapchain_create_info.sampleCount = 1;
+		swapchain_create_info.width = config_views[i].recommendedImageRectWidth;
+		swapchain_create_info.height = config_views[i].recommendedImageRectHeight;
+		swapchain_create_info.faceCount = 1;
+		swapchain_create_info.arraySize = 1;
+		swapchain_create_info.mipCount = 1;
+		swapchain_create_info.next = nullptr;
+
+		swapchains.emplace_back(session.get(), &swapchain_create_info);
+	}
+
 
 }
 
