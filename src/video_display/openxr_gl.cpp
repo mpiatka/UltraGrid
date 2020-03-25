@@ -283,6 +283,8 @@ private:
 
 class Openxr_swapchain{
 public:
+	Openxr_swapchain() = default;
+
 	Openxr_swapchain(XrSession session, const XrSwapchainCreateInfo *info) :
 		session(session)
 	{
@@ -313,11 +315,15 @@ public:
 	}
 
 	~Openxr_swapchain(){
-		xrDestroySwapchain(swapchain);
+		if(swapchain != XR_NULL_HANDLE){
+			xrDestroySwapchain(swapchain);
+		}
 	}
 
 	Openxr_swapchain(const Openxr_swapchain&) = delete;
-	Openxr_swapchain(Openxr_swapchain&& o) { swap(o); }
+	Openxr_swapchain(Openxr_swapchain&& o) noexcept : Openxr_swapchain() {
+		swap(o);
+	}
 	Openxr_swapchain& operator=(const Openxr_swapchain&) = delete;
 	Openxr_swapchain& operator=(Openxr_swapchain&& o) { swap(o); return *this; }
 
@@ -329,7 +335,7 @@ public:
 		return len;
 	}
 
-	void swap(Openxr_swapchain& o){
+	void swap(Openxr_swapchain& o) noexcept{
 		std::swap(swapchain, o.swapchain);
 		std::swap(session, o.session);
 	}
@@ -337,8 +343,8 @@ public:
 	XrSwapchain get(){ return swapchain; }
 
 private:
-	XrSwapchain swapchain;
-	XrSession session;
+	XrSwapchain swapchain = XR_NULL_HANDLE;
+	XrSession session = XR_NULL_HANDLE;
 };
 
 class Gl_interop_swapchain{
