@@ -372,6 +372,8 @@ public:
 		return framebuffers[idx];
 	}
 
+	XrSwapchain get() { return xr_swapchain.get(); }
+
 	Gl_interop_swapchain(const Gl_interop_swapchain&) = delete;
 	Gl_interop_swapchain(Gl_interop_swapchain&&) = default;
 	Gl_interop_swapchain& operator=(const Gl_interop_swapchain&) = delete;
@@ -400,6 +402,36 @@ private:
 	Openxr_swapchain xr_swapchain;
 	std::vector<Framebuffer> framebuffers;
 	std::vector<XrSwapchainImageOpenGLKHR> images;
+};
+
+class Openxr_local_space {
+public:
+	Openxr_local_space(XrSession session){
+		XrPosef origin{};
+	   	origin.orientation.w = 1.0;
+
+		XrReferenceSpaceCreateInfo space_create_info;
+		space_create_info.type = XR_TYPE_REFERENCE_SPACE_CREATE_INFO;
+		space_create_info.next = NULL;
+		space_create_info.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
+		space_create_info.poseInReferenceSpace = origin;
+
+		xrCreateReferenceSpace(session, &space_create_info, &space);
+	}
+
+	~Openxr_local_space(){
+		xrDestroySpace(space);
+	}
+
+	Openxr_local_space(const Openxr_local_space&) = delete;
+	Openxr_local_space(Openxr_local_space&&) = delete;
+	Openxr_local_space& operator=(const Openxr_local_space&) = delete;
+	Openxr_local_space& operator=(Openxr_local_space&&) = delete;
+
+	XrSpace get() { return space; }
+
+private:
+	XrSpace space;
 };
 
 struct Openxr_state{
@@ -479,6 +511,8 @@ static void display_xrgl_run(void *state){
 
 	std::vector<XrViewConfigurationView> config_views = get_views(s->xr_state);
 
+	Openxr_local_space space(session.get());
+
 	session.begin();
 
 	std::vector<int64_t> swapchain_formats = get_swapchain_formats(session.get());
@@ -492,6 +526,200 @@ static void display_xrgl_run(void *state){
 				view.recommendedImageRectHeight);
 	}
 
+	size_t view_count = config_views.size();
+	std::vector<XrCompositionLayerProjectionView> projection_views(view_count);
+
+	XrCompositionLayerProjection projection_layer;
+	projection_layer.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION;
+	projection_layer.next = nullptr;
+	projection_layer.layerFlags;
+	projection_layer.space = space.get();
+	projection_layer.viewCount = view_count;
+	projection_layer.views = projection_views.data();
+
+	std::vector<XrView> views(view_count);
+
+	for(auto& view : views){
+		view.type = XR_TYPE_VIEW;
+		view.next = nullptr;
+	}
+
+	bool running = true;
+	while(running){
+		XrResult result;
+
+		XrFrameState frame_state{};
+		frame_state.type = XR_TYPE_FRAME_STATE;
+		frame_state.next = nullptr;
+
+		XrFrameWaitInfo frame_wait_info{};
+		frame_wait_info.type = XR_TYPE_FRAME_WAIT_INFO;
+		frame_wait_info.next = nullptr;
+
+		result = xrWaitFrame(session.get(), &frame_wait_info, &frame_state);
+		if (!XR_SUCCEEDED(result)){
+			log_msg(LOG_LEVEL_ERROR, "Failed to xrWaitFrame\n");
+			break;
+		}
+
+		XrEventDataBuffer xr_event{};
+		xr_event.type = XR_TYPE_EVENT_DATA_BUFFER;
+		xr_event.next = nullptr;
+
+		result = xrPollEvent(s->xr_state.instance.get(), &xr_event);
+		//TODO process events
+
+		XrViewLocateInfo view_locate_info;
+	   	view_locate_info.type = XR_TYPE_VIEW_LOCATE_INFO;
+		view_locate_info.displayTime = frame_state.predictedDisplayTime;
+		view_locate_info.space = space.get();
+
+		XrViewState view_state;
+	   	view_state.type = XR_TYPE_VIEW_STATE;
+	   	view_state.next = nullptr;
+
+		uint32_t located_views = 0;
+		result = xrLocateViews(session.get(),
+				&view_locate_info,
+				&view_state,
+				view_count,
+				&located_views,
+				views.data());
+
+		if (!XR_SUCCEEDED(result)){
+			log_msg(LOG_LEVEL_ERROR, "Failed to locate views!\n");
+			break;
+		}
+
+		printf("View: %f %f %f %f, %f %f %f, fov = %f %f %f %f\n",
+				views[1].pose.orientation.x,
+				views[1].pose.orientation.y,
+				views[1].pose.orientation.z,
+				views[1].pose.orientation.w,
+				views[1].pose.position.x,
+				views[1].pose.position.y,
+				views[1].pose.position.z,
+				views[1].fov.angleLeft,
+				views[1].fov.angleRight,
+				views[1].fov.angleUp,
+				views[1].fov.angleDown);
+
+		XrFrameBeginInfo frame_begin_info;
+		frame_begin_info.type = XR_TYPE_FRAME_BEGIN_INFO;
+		frame_begin_info.next = nullptr;
+
+		result = xrBeginFrame(session.get(), &frame_begin_info);
+		if (!XR_SUCCEEDED(result)){
+			log_msg(LOG_LEVEL_ERROR, "Failed to begin frame!\n");
+			break;
+		}
+
+		for(unsigned i = 0; i < view_count; i++){
+			XrSwapchainImageAcquireInfo swapchain_image_acquire_info;
+			swapchain_image_acquire_info.type = XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO;
+			swapchain_image_acquire_info.next = nullptr;
+
+			uint32_t buf_idx;
+			result = xrAcquireSwapchainImage(
+					swapchains[i].get(),
+					&swapchain_image_acquire_info,
+					&buf_idx);
+
+			if(!XR_SUCCEEDED(result)){
+				log_msg(LOG_LEVEL_ERROR, "Failed to acquire swapchain image!\n");
+				break;
+			}
+
+			XrSwapchainImageWaitInfo swapchain_image_wait_info;
+			swapchain_image_wait_info.type = XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO;
+			swapchain_image_wait_info.next = nullptr;
+			swapchain_image_wait_info.timeout = 1000;
+
+			result = xrWaitSwapchainImage(swapchains[i].get(), &swapchain_image_wait_info);
+			if(!XR_SUCCEEDED(result)){
+				log_msg(LOG_LEVEL_ERROR, "failed to wait for swapchain image!\n");
+				break;
+			}
+
+			projection_views[i].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
+			projection_views[i].next = nullptr;
+			projection_views[i].pose = views[i].pose;
+			projection_views[i].fov = views[i].fov;
+			projection_views[i].subImage.swapchain = swapchains[i].get();
+			projection_views[i].subImage.imageArrayIndex = buf_idx;
+			projection_views[i].subImage.imageRect.offset.x = 0;
+			projection_views[i].subImage.imageRect.offset.y = 0;
+			projection_views[i].subImage.imageRect.extent.width =
+				config_views[i].recommendedImageRectWidth;
+			projection_views[i].subImage.imageRect.extent.height =
+				config_views[i].recommendedImageRectHeight;
+
+
+			//TODO Render frame
+	
+			unsigned w = config_views[i].recommendedImageRectWidth;
+			unsigned h = config_views[i].recommendedImageRectHeight;
+
+			auto framebuffer = swapchains[i].get_framebuffer(buf_idx).get();
+			glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+			if(i % 2){
+				glClearColor(0.f, 0.f, 1.f, 1.f);
+			} else {
+				glClearColor(0.f, 1.f, 0.f, 1.0f);
+			}
+			glClear(GL_COLOR_BUFFER_BIT);
+
+			glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+			if(i % 2){
+				glBlitNamedFramebuffer((GLuint)framebuffer, // readFramebuffer
+						(GLuint)0,    // backbuffer     // drawFramebuffer
+						(GLint)0,     // srcX0
+						(GLint)0,     // srcY0
+						(GLint)w,     // srcX1
+						(GLint)h,     // srcY1
+						(GLint)0,     // dstX0
+						(GLint)0,     // dstY0
+						(GLint)w / 2, // dstX1
+						(GLint)h / 2, // dstY1
+						(GLbitfield)GL_COLOR_BUFFER_BIT, // mask
+						(GLenum)GL_LINEAR);              // filter
+
+				//SDL_GL_SwapWindow(mainwindow);
+			}
+
+			glFinish();
+
+			XrSwapchainImageReleaseInfo swapchain_image_release_info;
+			swapchain_image_release_info.type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO;
+			swapchain_image_release_info.next = nullptr;
+
+			result = xrReleaseSwapchainImage(
+					swapchains[i].get(),
+					&swapchain_image_release_info);
+
+			if (!XR_SUCCEEDED(result)){
+				log_msg(LOG_LEVEL_ERROR, "Failed to release swapchain image!\n");
+				break;
+			}
+		}
+
+		const XrCompositionLayerBaseHeader *composition_layers = (const XrCompositionLayerBaseHeader *) &projection_layer; 
+		XrFrameEndInfo frame_end_info;
+		frame_end_info.type = XR_TYPE_FRAME_END_INFO;
+		frame_end_info.displayTime = frame_state.predictedDisplayTime;
+		frame_end_info.layerCount = 1;
+		frame_end_info.layers = &composition_layers;
+		frame_end_info.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+		frame_end_info.next = nullptr;
+
+		result = xrEndFrame(session.get(), &frame_end_info);
+		if (!XR_SUCCEEDED(result)){
+			log_msg(LOG_LEVEL_ERROR, "Failed to end frame!\n");
+			break;
+		}
+
+	}
 
 }
 
