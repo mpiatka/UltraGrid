@@ -902,7 +902,9 @@ struct state_xrgl{
 
 	std::mutex lock;
 	std::condition_variable frame_consumed_cv;
+	std::condition_variable new_frame_ready_cv;
 	std::queue<video_frame *> free_frame_queue;
+        std::queue<video_frame *> frame_queue;
 };
 
 static std::vector<XrViewConfigurationView> get_views(Openxr_state& xr_state){
@@ -1016,6 +1018,27 @@ static void display_xrgl_run(void *state){
 
 	bool running = true;
 	while(running){
+
+		std::unique_lock<std::mutex> lk(s->lock);
+                video_frame *frame = nullptr;
+                if(s->frame_queue.size() > 0){
+                        frame = s->frame_queue.front();
+                        s->frame_queue.pop();
+                        s->frame_consumed_cv.notify_one();
+                        if(!frame){
+                                running = false;
+                        }
+                }
+		lk.unlock();
+
+		if(frame){
+			s->scene.put_frame(frame);
+
+			lk.lock();
+			s->free_frame_queue.push(frame);
+			lk.unlock();
+		} 
+
 		XrResult result;
 
 		XrFrameState frame_state{};
@@ -1128,11 +1151,11 @@ static void display_xrgl_run(void *state){
 			unsigned w = config_views[i].recommendedImageRectWidth;
 			unsigned h = config_views[i].recommendedImageRectHeight;
 
-			//glm::mat4 projMat = get_proj_mat(views[i].fov, 0.05f, 100.f);
-			glm::mat4 projMat = glm::perspective(glm::radians(70.f), (float) w /h, 0.1f, 300.f);
+			glm::mat4 projMat = get_proj_mat(views[i].fov, 0.05f, 100.f);
+			//glm::mat4 projMat = glm::perspective(glm::radians(70.f), (float) w /h, 0.1f, 300.f);
 			const auto& rot = views[i].pose.orientation;
 			glm::mat4 viewMat = glm::mat4_cast(glm::quat(rot.w, rot.x, rot.y, rot.z));
-			glm::mat4 pvMat = projMat * viewMat;
+			glm::mat4 pvMat = projMat * glm::inverse(viewMat);
 
 			//TODO Render frame
 
@@ -1220,39 +1243,53 @@ static struct video_frame * display_xrgl_getf(void *state) {
 
 	std::lock_guard<std::mutex> lock(s->lock);
 
-	while (s->free_frame_queue.size() > 0) {
-		struct video_frame *buffer = s->free_frame_queue.front();
-		s->free_frame_queue.pop();
-		if (video_desc_eq(video_desc_from_frame(buffer), s->current_desc)) {
-			return buffer;
-		} else {
-			vf_free(buffer);
-		}
-	}
+        while (s->free_frame_queue.size() > 0) {
+                struct video_frame *buffer = s->free_frame_queue.front();
+                s->free_frame_queue.pop();
+                if (video_desc_eq(video_desc_from_frame(buffer), s->current_desc)) {
+                        return buffer;
+                } else {
+                        vf_free(buffer);
+                }
+        }
 
-	return vf_alloc_desc_data(s->current_desc);
+        struct video_frame *buffer = vf_alloc_desc_data(s->current_desc);
+        clear_video_buffer(reinterpret_cast<unsigned char *>(buffer->tiles[0].data),
+                        vc_get_linesize(buffer->tiles[0].width, buffer->color_spec),
+                        vc_get_linesize(buffer->tiles[0].width, buffer->color_spec),
+                        buffer->tiles[0].height,
+                        buffer->color_spec);
+        return buffer;
 }
 
 static int display_xrgl_putf(void *state, struct video_frame *frame, int nonblock) {
-	struct state_xrgl *s = static_cast<state_xrgl *>(state);
+        struct state_xrgl *s = static_cast<state_xrgl *>(state);
 
-	if (nonblock == PUTF_DISCARD) {
-		vf_free(frame);
-		return 0;
-	}
+        std::unique_lock<std::mutex> lk(s->lock);
 
-	std::unique_lock<std::mutex> lk(s->lock);
-	if (s->buffered_frames_count >= MAX_BUFFER_SIZE && nonblock == PUTF_NONBLOCK
-			&& frame != NULL) {
-		vf_free(frame);
-		printf("1 frame(s) dropped!\n");
-		return 1;
-	}
-	s->frame_consumed_cv.wait(lk, [s]{return s->buffered_frames_count < MAX_BUFFER_SIZE;});
-	s->buffered_frames_count += 1;
-	lk.unlock();
+        if(!frame) {
+                s->frame_queue.push(frame);
+                lk.unlock();
+                s->new_frame_ready_cv.notify_one();
+                return 0;
+        }
 
-	return 0;
+        if (nonblock == PUTF_DISCARD) {
+                vf_recycle(frame);
+                return 0;
+        }
+        if (s->frame_queue.size() >= MAX_BUFFER_SIZE && nonblock == PUTF_NONBLOCK) {
+                vf_recycle(frame);
+                s->free_frame_queue.push(frame);
+                return 1;
+        }
+        s->frame_consumed_cv.wait(lk, [s]{return s->frame_queue.size() < MAX_BUFFER_SIZE;});
+        s->frame_queue.push(frame);
+
+        lk.unlock();
+        s->new_frame_ready_cv.notify_one();
+
+        return 0;
 }
 
 static int display_xrgl_reconfigure(void *state, struct video_desc desc) {
