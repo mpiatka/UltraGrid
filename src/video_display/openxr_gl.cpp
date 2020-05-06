@@ -1304,6 +1304,7 @@ static int display_xrgl_get_property(void *state, int property, void *val, size_
 	codec_t codecs[] = {
 		RGBA,
 		RGB,
+		UYVY,
 	};
 	enum interlacing_t supported_il_modes[] = {PROGRESSIVE};
 	int rgb_shift[] = {0, 8, 16};
