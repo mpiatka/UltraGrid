@@ -1217,7 +1217,8 @@ fi
 
 if test $vr_disp_req != no -a $found_sdl2 = yes
 then
-        VRDISP_OBJ="src/video_display/vr_disp.o"
+        VRDISP_OBJ="src/video_display/vr_disp.o src/video_display/opengl_utils.o"
+        vr_common=yes
         AC_DEFINE([HAVE_VR_DISP], [1],  [Build with VR disp support])
         # on Win override libs from pkg-config because those contain
         # "-mwindows" which causes output to be scratched by cmd.exe
@@ -1252,7 +1253,7 @@ fi
 
 if test $xrgl_disp_req != no -a $FOUND_XRGL_DEPS = yes
 then
-        XRGLDISP_OBJ="src/video_display/openxr_gl.o"
+        XRGLDISP_OBJ="src/video_display/openxr_gl.o src/video_display/opengl_utils.o"
         AC_DEFINE([HAVE_XRGL_DISP], [1],  [Build with OpenXR VR disp support])
         # on Win override libs from pkg-config because those contain
         # "-mwindows" which causes output to be scratched by cmd.exe
