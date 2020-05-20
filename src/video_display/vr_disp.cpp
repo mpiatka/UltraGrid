@@ -26,7 +26,6 @@
 #include "video_display.h"
 #include "video_display/splashscreen.h"
 
-#include "utils/profile_timer.hpp"
 #include "opengl_utils.hpp"
 
 #define MAX_BUFFER_SIZE   1

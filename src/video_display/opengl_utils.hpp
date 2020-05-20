@@ -65,6 +65,9 @@ public:
 	GLuint get() const { return tex_id; }
 
 	void allocate(int w, int h, GLenum fmt);
+    void upload(size_t w, size_t h,
+            GLenum fmt, GLenum type,
+            const void *px, size_t data_len);
 
 	Texture(const Texture&) = delete;
 	Texture(Texture&& o) { swap(o); }
@@ -74,11 +77,14 @@ public:
 private:
 	void swap(Texture& o){
 		std::swap(tex_id, o.tex_id);
+		std::swap(pbo, o.pbo);
 	}
 	GLuint tex_id = 0;
 	int width = 0;
 	int height = 0;
 	GLenum format = 0;
+
+    GLuint pbo;
 };
 
 class Framebuffer{
