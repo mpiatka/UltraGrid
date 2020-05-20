@@ -109,8 +109,6 @@ typedef GLintptr vdpauSurfaceNV;
 #define NV_CAST(x) ((void *)(uintptr_t)(x))
 #endif
 
-#include "utils/profile_timer.hpp"
-
 using namespace std;
 
 static const char * yuv422_to_rgb_fp = R"raw(
