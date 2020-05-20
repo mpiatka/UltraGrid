@@ -144,6 +144,7 @@ OBJS	      = @OBJS@ \
 		src/utils/vf_split.o \
 		src/utils/wait_obj.o \
 		src/utils/worker.o \
+		src/utils/profile_timer.o \
 		src/video.o \
 		src/video_frame.o \
 		src/video_codec.o \
