@@ -5,6 +5,8 @@
 #include <glm/gtc/quaternion.hpp>
 #include "opengl_utils.hpp"
 
+#include "utils/profile_timer.hpp"
+
 static const float PI_F=3.14159265358979f;
 
 static const GLfloat rectangle[] = {
@@ -151,6 +153,8 @@ Model::~Model(){
 }
 
 void Model::render(){
+    PROFILE_FUNC;
+
     glBindVertexArray(vao);
     if(elem_buf != 0){
         glDrawElements(GL_TRIANGLES, indices_num, GL_UNSIGNED_INT, (void *) 0);
@@ -246,10 +250,12 @@ Texture::Texture(){
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 4, 4, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glGenBuffers(1, &pbo);
 }
 
 Texture::~Texture(){
     glDeleteTextures(1, &tex_id);
+    glDeleteBuffers(1, &pbo);
 }
 
 void Texture::allocate(int w, int h, GLenum fmt) {
@@ -264,6 +270,26 @@ void Texture::allocate(int w, int h, GLenum fmt) {
                 format, GL_UNSIGNED_BYTE,
                 nullptr);
     }
+}
+void Texture::upload(size_t w, size_t h,
+        GLenum fmt, GLenum type,
+        const void *px, size_t data_len)
+{
+    PROFILE_FUNC;
+
+    PROFILE_DETAIL("bind + memcpy");
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, data_len, 0, GL_STREAM_DRAW);
+    void *ptr = glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY);
+    memcpy(ptr, px, data_len);
+    glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+
+    PROFILE_DETAIL("texSubImg + unbind");
+    glTexSubImage2D(GL_TEXTURE_2D, 0,
+            0, 0, width, height,
+            fmt, type, 0);
+
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 }
 
 void Framebuffer::attach_texture(GLuint tex){
@@ -291,11 +317,9 @@ void Yuv_convertor::put_frame(const video_frame *f){
     glBindTexture(GL_TEXTURE_2D, yuv_tex.get());
     yuv_tex.allocate(f->tiles[0].width / 2, f->tiles[0].height, GL_RGBA);
 
-    {
-        glTexSubImage2D(GL_TEXTURE_2D, 0,
-                0, 0, f->tiles[0].width / 2, f->tiles[0].height,
-                GL_RGBA, GL_UNSIGNED_BYTE, f->tiles[0].data);
-    }
+    yuv_tex.upload(f->tiles[0].width / 2, f->tiles[0].height,
+                GL_RGBA, GL_UNSIGNED_BYTE,
+                f->tiles[0].data, f->tiles[0].data_len);
 
     GLuint w_loc = glGetUniformLocation(program.get(), "width");
     glUniform1f(w_loc, f->tiles[0].width);
@@ -307,7 +331,9 @@ void Yuv_convertor::put_frame(const video_frame *f){
 }
 
 Scene::Scene(): program(persp_vert_src, persp_frag_src),
-    model(Model::get_sphere()) {  }
+    model(Model::get_sphere())
+{
+}
 
 void Scene::render(int width, int height){
     float aspect_ratio = static_cast<float>(width) / height;
@@ -324,6 +350,8 @@ void Scene::render(int width, int height){
 }
 
 void Scene::render(int width, int height, const glm::mat4& pvMat){
+    PROFILE_FUNC;
+
     glUseProgram(program.get());
     glViewport(0, 0, width, height);
     GLuint pvLoc;
@@ -335,6 +363,7 @@ void Scene::render(int width, int height, const glm::mat4& pvMat){
 }
 
 void Scene::put_frame(const video_frame *f){
+    PROFILE_FUNC
 
     glBindTexture(GL_TEXTURE_2D, texture.get());
     texture.allocate(f->tiles[0].width, f->tiles[0].height, GL_RGB);
@@ -342,20 +371,22 @@ void Scene::put_frame(const video_frame *f){
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
     switch(f->color_spec){
         case UYVY:
             conv.attach_texture(texture);
             conv.put_frame(f);
             break;
         case RGB:
-            glTexSubImage2D(GL_TEXTURE_2D, 0,
-                    0, 0, f->tiles[0].width, f->tiles[0].height,
-                    GL_RGB, GL_UNSIGNED_BYTE, f->tiles[0].data);
+            texture.upload(f->tiles[0].width, f->tiles[0].height,
+                    GL_RGB, GL_UNSIGNED_BYTE,
+                    f->tiles[0].data, f->tiles[0].data_len);
+
             break;
         case RGBA:
-            glTexSubImage2D(GL_TEXTURE_2D, 0,
-                    0, 0, f->tiles[0].width, f->tiles[0].height,
-                    GL_RGBA, GL_UNSIGNED_BYTE, f->tiles[0].data);
+            texture.upload(f->tiles[0].width, f->tiles[0].height,
+                    GL_RGBA, GL_UNSIGNED_BYTE,
+                    f->tiles[0].data, f->tiles[0].data_len);
         default:
             break;
     }

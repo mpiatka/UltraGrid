@@ -33,8 +33,8 @@
 #include "video_display.h"
 #include "video_display/splashscreen.h"
 
-#include "utils/profile_timer.hpp"
 #include "opengl_utils.hpp"
+#include "utils/profile_timer.hpp"
 
 #define MAX_BUFFER_SIZE   1
 
@@ -137,7 +137,6 @@ public:
 		session_begin_info.next = NULL;
 		session_begin_info.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
 		XrResult result = xrBeginSession(session, &session_begin_info);
-		printf("Session started!\n");
 	}
 private:
 	XrSession session;
@@ -434,6 +433,8 @@ static glm::mat4 get_proj_mat(const XrFovf& fov, float zNear, float zFar){
 }
 
 static void display_xrgl_run(void *state){
+        PROFILE_FUNC;
+
 	state_xrgl *s = static_cast<state_xrgl *>(state);
 
 	Display *xDisplay = nullptr;
@@ -485,10 +486,10 @@ static void display_xrgl_run(void *state){
 
 	bool running = true;
 	while(running){
-		Profile_timer t(Profiler_thread_inst::get_instance(), "Run loop start");
 		std::unique_lock<std::mutex> lk(s->lock);
                 video_frame *frame = nullptr;
                 if(s->frame_queue.size() > 0){
+                        PROFILE_DETAIL("put_frame");
                         frame = s->frame_queue.front();
                         s->frame_queue.pop();
                         s->frame_consumed_cv.notify_one();
@@ -516,14 +517,13 @@ static void display_xrgl_run(void *state){
 		frame_wait_info.type = XR_TYPE_FRAME_WAIT_INFO;
 		frame_wait_info.next = nullptr;
 
-                t = Profile_timer(Profiler_thread_inst::get_instance(), "Wait Frame");
+                PROFILE_DETAIL("wait frame");
 		result = xrWaitFrame(session.get(), &frame_wait_info, &frame_state);
 		if (!XR_SUCCEEDED(result)){
 			log_msg(LOG_LEVEL_ERROR, "Failed to xrWaitFrame\n");
 			break;
 		}
 
-                t = Profile_timer(Profiler_thread_inst::get_instance(), "Poll Events");
 		XrEventDataBuffer xr_event{};
 		xr_event.type = XR_TYPE_EVENT_DATA_BUFFER;
 		xr_event.next = nullptr;
@@ -553,6 +553,7 @@ static void display_xrgl_run(void *state){
 			break;
 		}
 
+                /*
 		printf("View: %f %f %f %f, %f %f %f, fov = %f %f %f %f\n",
 				views[1].pose.orientation.x,
 				views[1].pose.orientation.y,
@@ -565,12 +566,13 @@ static void display_xrgl_run(void *state){
 				views[1].fov.angleRight,
 				views[1].fov.angleUp,
 				views[1].fov.angleDown);
+                                */
 
 		XrFrameBeginInfo frame_begin_info;
 		frame_begin_info.type = XR_TYPE_FRAME_BEGIN_INFO;
 		frame_begin_info.next = nullptr;
 
-                t = Profile_timer(Profiler_thread_inst::get_instance(), "Begin Frame");
+                PROFILE_DETAIL("begin frame");
 		result = xrBeginFrame(session.get(), &frame_begin_info);
 		if (!XR_SUCCEEDED(result)){
 			log_msg(LOG_LEVEL_ERROR, "Failed to begin frame!\n");
@@ -578,6 +580,8 @@ static void display_xrgl_run(void *state){
 		}
 
 		for(unsigned i = 0; i < view_count; i++){
+                        PROFILE_DETAIL("render view");
+
 			XrSwapchainImageAcquireInfo swapchain_image_acquire_info;
 			swapchain_image_acquire_info.type = XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO;
 			swapchain_image_acquire_info.next = nullptr;
@@ -659,8 +663,10 @@ static void display_xrgl_run(void *state){
 				SDL_GL_SwapWindow(s->window.sdl_window);
 			}
 
+                        PROFILE_DETAIL("glFinish");
 			glFinish();
 
+                        PROFILE_DETAIL("release swapchain");
 			XrSwapchainImageReleaseInfo swapchain_image_release_info;
 			swapchain_image_release_info.type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO;
 			swapchain_image_release_info.next = nullptr;
@@ -684,7 +690,7 @@ static void display_xrgl_run(void *state){
 		frame_end_info.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
 		frame_end_info.next = nullptr;
 
-                t = Profile_timer(Profiler_thread_inst::get_instance(), "End Frame");
+                PROFILE_DETAIL("End Frame");
 		result = xrEndFrame(session.get(), &frame_end_info);
 		if (!XR_SUCCEEDED(result)){
 			log_msg(LOG_LEVEL_ERROR, "Failed to end frame!\n");
