@@ -181,4 +181,32 @@ struct Scene{
 	int width, height;
 };
 
+struct Sdl_window{
+
+        Sdl_window();
+        Sdl_window(const char *title, int x, int y, int w, int h, SDL_WindowFlags flags);
+
+        ~Sdl_window();
+
+        Sdl_window(const Sdl_window&) = delete;
+        Sdl_window(Sdl_window&& o) { swap(o); }
+        Sdl_window& operator=(const Sdl_window&) = delete;
+        Sdl_window& operator=(Sdl_window&& o) { swap(o); return *this; }
+
+        void getXlibHandles(Display  **xDisplay,
+                        GLXContext *glxContext,
+                        GLXDrawable *glxDrawable);
+
+        void set_title(const std::string& title){
+                SDL_SetWindowTitle(sdl_window, title.c_str());
+        }
+
+        void swap(Sdl_window& o);
+
+        SDL_Window *sdl_window;
+        SDL_GLContext sdl_gl_context;
+        int width;
+        int height;
+};
+
 #endif

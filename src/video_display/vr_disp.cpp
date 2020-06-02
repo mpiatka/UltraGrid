@@ -30,59 +30,8 @@
 
 #define MAX_BUFFER_SIZE   1
 
-struct SDLWindow{
-	SDLWindow() : SDLWindow("UltraGrid VR",
-			SDL_WINDOWPOS_CENTERED,
-			SDL_WINDOWPOS_CENTERED,
-			640,
-			480,
-			SDL_WINDOW_OPENGL) {  }
-
-	SDLWindow(const char *title, int x, int y, int w, int h, SDL_WindowFlags flags) :
-	width(w), height(h)
-	{
-		SDL_InitSubSystem(SDL_INIT_VIDEO);
-		SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-
-		//TODO: Error handling
-		sdl_window = SDL_CreateWindow(title,
-				x,
-				y,
-				w,
-				h,
-				SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
-
-		SDL_SetWindowMinimumSize(sdl_window, 200, 200);
-
-		//TODO: Error handling
-		sdl_gl_context = SDL_GL_CreateContext(sdl_window);
-
-		glewExperimental = GL_TRUE;
-		//TODO: Error handling
-		GLenum glewError = glewInit();
-
-		glClearColor(0,0,0,1);
-		glClear(GL_COLOR_BUFFER_BIT);
-		SDL_GL_SwapWindow(sdl_window);
-	}
-
-
-	~SDLWindow(){
-		SDL_DestroyWindow(sdl_window);
-		SDL_QuitSubSystem(SDL_INIT_VIDEO);
-	}
-
-
-	SDL_Window *sdl_window;
-	SDL_GLContext sdl_gl_context;
-	int width;
-	int height;
-};
-
 struct state_vr{
-	SDLWindow window;
+	Sdl_window window;
 
 	bool running = false;
 
