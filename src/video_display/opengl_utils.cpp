@@ -1,4 +1,5 @@
 #include <vector>
+#include <stdexcept>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -455,4 +456,74 @@ static std::vector<unsigned> gen_sphere_indices(int latitude_n, int longtitude_n
 	}
 
 	return indices;
+}
+
+Sdl_window::Sdl_window() : Sdl_window("UltraGrid VR",
+                SDL_WINDOWPOS_CENTERED,
+                SDL_WINDOWPOS_CENTERED,
+                640,
+                480,
+                SDL_WINDOW_OPENGL) {  }
+
+Sdl_window::Sdl_window(const char *title,
+                int x, int y,
+                int w, int h,
+                SDL_WindowFlags flags) : width(w), height(h)
+{
+        SDL_InitSubSystem(SDL_INIT_VIDEO);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+
+        SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 0);
+
+        sdl_window = SDL_CreateWindow(title,
+                        x,
+                        y,
+                        w,
+                        h,
+                        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+
+        if(!sdl_window){
+                throw std::runtime_error("Failed to create SDL window!");
+        }
+
+        SDL_SetWindowMinimumSize(sdl_window, 200, 200);
+
+        sdl_gl_context = SDL_GL_CreateContext(sdl_window);
+        if(!sdl_gl_context){
+                throw std::runtime_error("Failed to create gl context!");
+        }
+
+        glewExperimental = GL_TRUE;
+        GLenum glewError = glewInit();
+        if(glewError != GLEW_OK){
+                throw std::runtime_error("Failed to initialize gl context!");
+        }
+
+        glClearColor(0,0,0,1);
+        glClear(GL_COLOR_BUFFER_BIT);
+        SDL_GL_SwapWindow(sdl_window);
+}
+
+Sdl_window::~Sdl_window(){
+        SDL_DestroyWindow(sdl_window);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+}
+
+void Sdl_window::getXlibHandles(Display  **xDisplay,
+                GLXContext *glxContext,
+                GLXDrawable *glxDrawable)
+{
+        SDL_GL_MakeCurrent(sdl_window, sdl_gl_context);
+        *xDisplay = XOpenDisplay(NULL);
+        *glxContext = glXGetCurrentContext();
+        *glxDrawable = glXGetCurrentDrawable();
+}
+
+void Sdl_window::swap(Sdl_window& o){
+        std::swap(sdl_window, o.sdl_window);
+        std::swap(sdl_gl_context, o.sdl_gl_context);
+        std::swap(width, o.width);
+        std::swap(height, o.height);
 }
