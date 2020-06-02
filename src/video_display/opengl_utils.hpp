@@ -119,6 +119,29 @@ private:
 	GLuint fbo = 0;
 };
 
+class GlBuffer{
+    public:
+        GlBuffer(){
+            glGenBuffers(1, &buf_id);
+        }
+
+        ~GlBuffer(){
+            glDeleteBuffers(1, &buf_id);
+        }
+
+        GlBuffer(const GlBuffer&) = delete;
+        GlBuffer(GlBuffer&& o) { swap(o); }
+        GlBuffer& operator=(const GlBuffer&) = delete;
+        GlBuffer& operator=(GlBuffer&& o) { swap(o); return *this; }
+
+    private:
+        void swap(GlBuffer& o){
+            std::swap(buf_id, o.buf_id);
+        }
+
+        GLuint buf_id = 0;
+};
+
 class Yuv_convertor{
 public:
     Yuv_convertor();
