@@ -356,20 +356,20 @@ struct Openxr_state{
 };
 
 struct state_xrgl{
-	video_desc current_desc;
-	int buffered_frames_count;
+        video_desc current_desc;
+        int buffered_frames_count;
 
-	Sdl_window window;
-	Openxr_state xr_state;
+        Sdl_window window;
+        Openxr_state xr_state;
 
-	Scene scene;
+        Scene scene;
 
-	std::chrono::steady_clock::time_point last_frame;
+        std::chrono::steady_clock::time_point last_frame;
 
-	std::mutex lock;
-	std::condition_variable frame_consumed_cv;
-	std::condition_variable new_frame_ready_cv;
-	std::queue<video_frame *> free_frame_queue;
+        std::mutex lock;
+        std::condition_variable frame_consumed_cv;
+        std::condition_variable new_frame_ready_cv;
+        std::queue<video_frame *> free_frame_queue;
         std::queue<video_frame *> frame_queue;
 };
 
@@ -859,7 +859,7 @@ static void display_xrgl_probe(struct device_info **available_cards, int *count,
 
 
 static const struct video_display_info openxr_gl_info = {
-		display_xrgl_probe,
+        display_xrgl_probe,
         display_xrgl_init,
         display_xrgl_run,
         display_xrgl_done,
