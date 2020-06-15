@@ -106,6 +106,7 @@ struct vidcap_vrworks_state {
         std::string spec_path;
         double fps;
         codec_t out_fmt;
+        bool tiled_capture = false;
 
         unsigned char *conv_tmp_frame = nullptr;
         void (*conv_func)(unsigned char *dst,
@@ -133,9 +134,13 @@ struct grab_worker_state {
 
         vidcap_vrworks_state *s;
 
+        bool tiled = false;
+
         unsigned width = 0;
         unsigned height = 0;
-        unsigned char *tmp_frame;
+        unsigned char *tmp_in_frame;
+        unsigned char *tmp_rgba_frame;
+        unsigned tmp_rgba_frame_pitch;
         void (*conv_func)(unsigned char *dst,
                 size_t dstPitch,
                 unsigned char *src,
@@ -244,11 +249,11 @@ static bool check_in_format(grab_worker_state *gs, video_frame *in, int i){
                                 || in->color_spec == UYVY
                       );
                 gs->in_codec = in->color_spec;
-                cudaFree(gs->tmp_frame);
-                gs->tmp_frame = nullptr;
+                cudaFree(gs->tmp_in_frame);
+                gs->tmp_in_frame = nullptr;
 
                 int in_line_size = vc_get_linesize(expected_w, in->color_spec);
-                cudaMalloc(&gs->tmp_frame, in_line_size * expected_h);
+                cudaMalloc(&gs->tmp_in_frame, in_line_size * expected_h);
                 switch(in->color_spec){
                         case RGB:
                                 gs->conv_func = cuda_RGB_to_RGBA;
@@ -258,6 +263,44 @@ static bool check_in_format(grab_worker_state *gs, video_frame *in, int i){
                                 break;
                         default:
                                 gs->conv_func = nullptr;
+                }
+        }
+
+        return true;
+}
+
+static bool upload_frame_buf(grab_worker_state *gs, video_frame *in_frame,
+                unsigned char *dst,
+                unsigned dst_pitch,
+                cudaStream_t stream)
+{
+        unsigned int width = in_frame->tiles[0].width;
+        unsigned int height = in_frame->tiles[0].height;
+        int in_line_size = vc_get_linesize(width, in_frame->color_spec);
+
+        if(gs->conv_func){
+                if (cudaMemcpyAsync(gs->tmp_in_frame,
+                                        (unsigned char *) in_frame->tiles[0].data,
+                                        in_line_size * height,
+                                        cudaMemcpyHostToDevice, stream) != cudaSuccess)
+                {
+                        std::cerr << "Error copying input image bitmap to CUDA buffer" << std::endl;
+                        return false;
+                }
+
+                gs->conv_func(dst, dst_pitch,
+                                gs->tmp_in_frame, in_line_size,
+                                gs->width, gs->height, stream);
+        } else {
+                if (cudaMemcpy2D(dst, dst_pitch,
+                                        (unsigned char *) in_frame->tiles[0].data,
+                                        in_line_size,
+                                        in_line_size, height,
+                                        cudaMemcpyHostToDevice) != cudaSuccess)
+                {
+                        std::cerr << "Error copying RGBA image bitmap to CUDA buffer" << std::endl;
+                        return false;
+
                 }
         }
 
@@ -281,38 +324,11 @@ static bool upload_frame(grab_worker_state *gs, video_frame *in_frame, int i){
                 return false;
         }
 
-        unsigned int width = in_frame->tiles[0].width;
-        unsigned int height = in_frame->tiles[0].height;
-        int in_line_size = vc_get_linesize(width, in_frame->color_spec);
-
-
-        if(gs->conv_func){
-                if (cudaMemcpyAsync(gs->tmp_frame,
-                                        (unsigned char *) in_frame->tiles[0].data,
-                                        in_line_size * height,
-                                        cudaMemcpyHostToDevice, stream) != cudaSuccess)
-                {
-                        std::cerr << "Error copying input image bitmap to CUDA buffer" << std::endl;
-                        return false;
-                }
-
-                gs->conv_func((unsigned char *) input_image.dev_ptr, input_image.pitch,
-                                gs->tmp_frame, in_line_size,
-                                gs->width, gs->height, stream);
-        } else {
-                if (cudaMemcpy2D(input_image.dev_ptr, input_image.pitch,
-                                        (unsigned char *) in_frame->tiles[0].data,
-                                        in_line_size,
-                                        in_line_size, height,
-                                        cudaMemcpyHostToDevice) != cudaSuccess)
-                {
-                        std::cerr << "Error copying RGBA image bitmap to CUDA buffer" << std::endl;
-                        return false;
-
-                }
-        }
-
-        return true;
+        return upload_frame_buf(gs,
+                        in_frame,
+                        static_cast<unsigned char *>(input_image.dev_ptr),
+                        input_image.pitch,
+                        stream);
 }
 
 static void grab_worker(grab_worker_state *gs, vidcap_params *param, int id){
@@ -323,6 +339,14 @@ static void grab_worker(grab_worker_state *gs, vidcap_params *param, int id){
 
         gs->width = gs->s->cam_properties[id].image_size.x;
         gs->height = gs->s->cam_properties[id].image_size.y;
+        if(gs->tiled){
+                gs->width *= 2;
+                gs->height *= 2;
+
+                int in_line_size = vc_get_linesize(gs->width, RGBA);
+                gs->tmp_rgba_frame_pitch = in_line_size;
+                cudaMalloc(&gs->tmp_rgba_frame, in_line_size * gs->height);
+        }
 
         vidcap *device = nullptr;
 
@@ -353,7 +377,50 @@ static void grab_worker(grab_worker_state *gs, vidcap_params *param, int id){
                 }
 
                 if (check_in_format(gs, frame, id)){
-                        upload_frame(gs, frame, id);
+                        if(gs->tiled){
+                                upload_frame_buf(gs,
+                                                frame,
+                                                gs->tmp_rgba_frame,
+                                                gs->tmp_rgba_frame_pitch,
+                                                0
+                                                );
+
+                                const int order[] = {3, 1, 2, 0};
+                                for(int i = 0; i < 4; i++){
+                                        nvstitchImageBuffer_t input_image;
+                                        nvstitchResult res;
+                                        res = nvssVideoGetInputBuffer(gs->s->stitcher, i, &input_image);
+                                        if(res != NVSTITCH_SUCCESS){
+                                                std::cerr << std::endl << "Failed to get input buffer." << std::endl;
+                                                break;
+                                        }
+
+                                        cudaStream_t stream;
+
+                                        res = nvssVideoGetInputStream(gs->s->stitcher, i, &stream);
+                                        if(res != NVSTITCH_SUCCESS){
+                                                std::cerr << std::endl << "Failed to get input stream." << std::endl;
+                                                break;
+                                        }
+
+                                        unsigned src_pitch = gs->tmp_rgba_frame_pitch;
+                                        unsigned tile_pitch = gs->tmp_rgba_frame_pitch / 2;
+                                        unsigned tile_height = gs->height / 2;
+                                        if (cudaMemcpy2D((unsigned char *)input_image.dev_ptr, input_image.pitch,
+                                                                (unsigned char *) gs->tmp_rgba_frame + (order[i] % 2) * tile_pitch + (order[i] / 2) * src_pitch * tile_height,
+                                                                gs->tmp_rgba_frame_pitch,
+                                                                tile_pitch, tile_height,
+                                                                cudaMemcpyDeviceToDevice) != cudaSuccess)
+                                        {
+                                                std::cerr << "Error copying RGBA image bitmap to CUDA buffer" << std::endl;
+                                                break;
+
+                                        }
+
+                                }
+                        } else {
+                                upload_frame(gs, frame, id);
+                        }
                 }
 
                 grab_lk.lock();
@@ -408,15 +475,20 @@ static bool init_stitcher(struct vidcap_vrworks_state *s){
                 calculate_roi(s);
         }
 
+        s->stitcher_properties = { 0 };
         s->stitcher_properties.version = NVSTITCH_VERSION;
-        s->stitcher_properties.pano_width = s->width;
+        //s->stitcher_properties.format = 
+        s->stitcher_properties.pipeline = s->pipeline;
         s->stitcher_properties.quality = s->quality;
+        s->stitcher_properties.projection = NVSTITCH_PANORAMA_PROJECTION_EQUIRECTANGULAR;
+        s->stitcher_properties.pano_width = s->width;
+        //s->stitcher_properties.stereo_ipd = 6.3f;
+        //s->stitcher_properties.feather_width = 2.0f;
         s->stitcher_properties.num_gpus = 1;
         s->stitcher_properties.ptr_gpus = &selected_gpu;
-        s->stitcher_properties.pipeline = s->pipeline;
-        s->stitcher_properties.projection = NVSTITCH_PANORAMA_PROJECTION_EQUIRECTANGULAR;
+        //s->stitcher_properties.min_dist = 300;
+        //s->stitcher_properties.mono_flags |= NVSTITCH_MONO_FLAGS_ENABLE_DEPTH_ALIGNMENT;
         s->stitcher_properties.output_roi = s->roi;
-        //s->stitcher_properties.mono_flags = NVSTITCH_MONO_FLAGS_ENABLE_DEPTH_ALIGNMENT;
 
         nvstitchResult res;
         res = nvssVideoCreateInstance(&s->stitcher_properties, &s->rig_properties, &s->stitcher);
@@ -483,6 +555,8 @@ static void parse_fmt(vidcap_vrworks_state *s, const char * const fmt){
                         s->fps = strtod(strchr(item, '=') + 1, nullptr);
                 } else if(FMT_CMP("fmt=")){
                         s->out_fmt = get_codec_from_name(strchr(item, '=') + 1);
+                } else if(FMT_CMP("tiled")){
+                        s->tiled_capture = true;
                 }
                 init_fmt = NULL;
         }
@@ -537,6 +611,11 @@ vidcap_vrworks_init(struct vidcap_params *params, void **state)
                         break;
         }
 
+        if(s->tiled_capture && s->devices_cnt != 1){
+                log_msg(LOG_LEVEL_ERROR, "Number of capture devices must be exactly 1 when using tiled capture!\n");
+                return VIDCAP_INIT_FAIL;
+        }
+
         s->captured_frames = (struct video_frame **) calloc(s->devices_cnt, sizeof(struct video_frame *));
 
         s->frame = nullptr;
@@ -551,6 +630,7 @@ vidcap_vrworks_init(struct vidcap_params *params, void **state)
                 tmp = vidcap_params_get_next(tmp);
 
                 s->capture_workers[i].s = s;
+                s->capture_workers[i].tiled = s->tiled_capture;
                 s->capture_workers[i].thread = 
                         std::thread(grab_worker, &s->capture_workers[i], tmp, i);
         }
@@ -684,6 +764,7 @@ vidcap_vrworks_grab(void *state, struct audio_frame **audio)
                 std::cout << std::endl << "Failed to stitch." << std::endl;
                 return NULL;
         }
+		//cudaStreamSynchronize(cudaStreamDefault);
 
         cudaStream_t out_stream;
         res = nvssVideoGetOutputStream(s->stitcher, NVSTITCH_EYE_MONO, &out_stream);
@@ -734,6 +815,8 @@ vidcap_vrworks_grab(void *state, struct audio_frame **audio)
 
                 for(unsigned i = 0; i < overlap_count; i++){
                         nvssVideoGetOverlapInfo(s->stitcher, i, &overlap, &seam);
+                        seam.reproj_width = 100;
+                        nvssVideoSetSeam(s->stitcher, i, &seam);
                         log_msg(LOG_LEVEL_INFO, "overlap(%u,%u): %ux%u %u,%u\n",
                                         overlap.camera_left,
                                         overlap.camera_right,
@@ -757,7 +840,7 @@ vidcap_vrworks_grab(void *state, struct audio_frame **audio)
                                                         seam.properties.diagonal.p1.y,
                                                         seam.properties.diagonal.p2.x,
                                                         seam.properties.diagonal.p2.y
-                                                        );
+                                               );
                                         break;
 
                         }
