@@ -745,6 +745,62 @@ static bool download_stitched(vidcap_vrworks_state *s, cudaStream_t out_stream){
         return true;
 }
 
+static void report_stats(vidcap_vrworks_state *s){
+        gettimeofday(&s->t, NULL);
+        double seconds = tv_diff(s->t, s->t0);    
+        if (seconds >= 5) {
+                float fps  = s->frames / seconds;
+                log_msg(LOG_LEVEL_INFO, "[vrworks cap.] %d frames in %g seconds = %g FPS\n", s->frames, seconds, fps);
+                s->t0 = s->t;
+                s->frames = 0;
+
+                nvstitchOverlap_t overlap;
+                nvstitchSeam_t seam;
+                unsigned overlap_count;
+                if(s->pipeline != NVSTITCH_STITCHER_PIPELINE_MONO_EQ){
+                        return;
+                }
+                if(nvssVideoGetOverlapCount(s->stitcher, &overlap_count) != NVSTITCH_SUCCESS){
+                        log_msg(LOG_LEVEL_WARNING, "[vrworks cap.] Unable to get overlap count\n");
+                        return;
+                } 
+                log_msg(LOG_LEVEL_INFO, "[vrworks cap.] %u overlaps\n", overlap_count);
+
+                for(unsigned i = 0; i < overlap_count; i++){
+                        nvssVideoGetOverlapInfo(s->stitcher, i, &overlap, &seam);
+                        seam.reproj_width = 100;
+                        nvssVideoSetSeam(s->stitcher, i, &seam);
+                        log_msg(LOG_LEVEL_INFO, "overlap(%u,%u): %ux%u %u,%u\n",
+                                        overlap.camera_left,
+                                        overlap.camera_right,
+                                        overlap.overlap_rect.left,
+                                        overlap.overlap_rect.top,
+                                        overlap.overlap_rect.width,
+                                        overlap.overlap_rect.height
+                               );
+
+                        log_msg(LOG_LEVEL_INFO, "seam %d ", seam.reproj_width);
+                        switch(seam.seam_type){
+                                case NVSTITCH_SEAM_TYPE_VERTICAL:
+                                        log_msg(LOG_LEVEL_INFO, "(vertical) %u\n", seam.properties.vertical.x_offset);
+                                        break;
+                                case NVSTITCH_SEAM_TYPE_HORIZONTAL:
+                                        log_msg(LOG_LEVEL_INFO, "(horizontal) %u\n", seam.properties.horizontal.y_offset);
+                                        break;
+                                case NVSTITCH_SEAM_TYPE_DIAGONAL:
+                                        log_msg(LOG_LEVEL_INFO, "(diagonal) %u,%u %u,%u\n",
+                                                        seam.properties.diagonal.p1.x,
+                                                        seam.properties.diagonal.p1.y,
+                                                        seam.properties.diagonal.p2.x,
+                                                        seam.properties.diagonal.p2.y
+                                               );
+                                        break;
+
+                        }
+                }
+        }  
+}
+
 static struct video_frame *
 vidcap_vrworks_grab(void *state, struct audio_frame **audio)
 {
@@ -799,53 +855,7 @@ vidcap_vrworks_grab(void *state, struct audio_frame **audio)
 #endif
 
         s->frames++;
-        gettimeofday(&s->t, NULL);
-        double seconds = tv_diff(s->t, s->t0);    
-        if (seconds >= 5) {
-                float fps  = s->frames / seconds;
-                log_msg(LOG_LEVEL_INFO, "[vrworks cap.] %d frames in %g seconds = %g FPS\n", s->frames, seconds, fps);
-                s->t0 = s->t;
-                s->frames = 0;
-
-                nvstitchOverlap_t overlap;
-                nvstitchSeam_t seam;
-                unsigned overlap_count;
-                nvssVideoGetOverlapCount(s->stitcher, &overlap_count);
-                log_msg(LOG_LEVEL_INFO, "[vrworks cap.] %u overlaps\n", overlap_count);
-
-                for(unsigned i = 0; i < overlap_count; i++){
-                        nvssVideoGetOverlapInfo(s->stitcher, i, &overlap, &seam);
-                        seam.reproj_width = 100;
-                        nvssVideoSetSeam(s->stitcher, i, &seam);
-                        log_msg(LOG_LEVEL_INFO, "overlap(%u,%u): %ux%u %u,%u\n",
-                                        overlap.camera_left,
-                                        overlap.camera_right,
-                                        overlap.overlap_rect.left,
-                                        overlap.overlap_rect.top,
-                                        overlap.overlap_rect.width,
-                                        overlap.overlap_rect.height
-                               );
-
-                        log_msg(LOG_LEVEL_INFO, "seam %d ", seam.reproj_width);
-                        switch(seam.seam_type){
-                                case NVSTITCH_SEAM_TYPE_VERTICAL:
-                                        log_msg(LOG_LEVEL_INFO, "(vertical) %u\n", seam.properties.vertical.x_offset);
-                                        break;
-                                case NVSTITCH_SEAM_TYPE_HORIZONTAL:
-                                        log_msg(LOG_LEVEL_INFO, "(horizontal) %u\n", seam.properties.horizontal.y_offset);
-                                        break;
-                                case NVSTITCH_SEAM_TYPE_DIAGONAL:
-                                        log_msg(LOG_LEVEL_INFO, "(diagonal) %u,%u %u,%u\n",
-                                                        seam.properties.diagonal.p1.x,
-                                                        seam.properties.diagonal.p1.y,
-                                                        seam.properties.diagonal.p2.x,
-                                                        seam.properties.diagonal.p2.y
-                                               );
-                                        break;
-
-                        }
-                }
-        }  
+        report_stats(s);
 
         return s->frame;
 }
