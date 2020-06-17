@@ -269,7 +269,7 @@ static bool check_in_format(grab_worker_state *gs, video_frame *in, int i){
         return true;
 }
 
-static bool upload_frame_buf(grab_worker_state *gs, video_frame *in_frame,
+static bool upload_to_cuda_buf(grab_worker_state *gs, video_frame *in_frame,
                 unsigned char *dst,
                 unsigned dst_pitch,
                 cudaStream_t stream)
@@ -324,11 +324,49 @@ static bool upload_frame(grab_worker_state *gs, video_frame *in_frame, int i){
                 return false;
         }
 
-        return upload_frame_buf(gs,
+        return upload_to_cuda_buf(gs,
                         in_frame,
                         static_cast<unsigned char *>(input_image.dev_ptr),
                         input_image.pitch,
                         stream);
+}
+
+static void upload_tiles(grab_worker_state *gs){
+        const int order[] = {3, 1, 2, 0};
+        for(int i = 0; i < 4; i++){
+                nvstitchImageBuffer_t input_image;
+                nvstitchResult res;
+                res = nvssVideoGetInputBuffer(gs->s->stitcher, i, &input_image);
+                if(res != NVSTITCH_SUCCESS){
+                        std::cerr << std::endl << "Failed to get input buffer." << std::endl;
+                        continue;
+                }
+
+                cudaStream_t stream;
+
+                res = nvssVideoGetInputStream(gs->s->stitcher, i, &stream);
+                if(res != NVSTITCH_SUCCESS){
+                        std::cerr << std::endl << "Failed to get input stream." << std::endl;
+                        continue;
+                }
+
+                unsigned src_pitch = gs->tmp_rgba_frame_pitch;
+                unsigned tile_pitch = gs->tmp_rgba_frame_pitch / 2;
+                unsigned tile_height = gs->height / 2;
+                unsigned char *src = static_cast<unsigned char *>(gs->tmp_rgba_frame);
+                src += (order[i] % 2) * tile_pitch;
+                src += (order[i] / 2) * src_pitch * tile_height;
+                if (cudaMemcpy2D((unsigned char *)input_image.dev_ptr, input_image.pitch,
+                                        src,
+                                        gs->tmp_rgba_frame_pitch,
+                                        tile_pitch, tile_height,
+                                        cudaMemcpyDeviceToDevice) != cudaSuccess)
+                {
+                        std::cerr << "Error copying RGBA image bitmap to CUDA buffer" << std::endl;
+                        continue;
+                }
+
+        }
 }
 
 static void grab_worker(grab_worker_state *gs, vidcap_params *param, int id){
@@ -378,46 +416,15 @@ static void grab_worker(grab_worker_state *gs, vidcap_params *param, int id){
 
                 if (check_in_format(gs, frame, id)){
                         if(gs->tiled){
-                                upload_frame_buf(gs,
+                                upload_to_cuda_buf(gs,
                                                 frame,
                                                 gs->tmp_rgba_frame,
                                                 gs->tmp_rgba_frame_pitch,
                                                 0
                                                 );
 
-                                const int order[] = {3, 1, 2, 0};
-                                for(int i = 0; i < 4; i++){
-                                        nvstitchImageBuffer_t input_image;
-                                        nvstitchResult res;
-                                        res = nvssVideoGetInputBuffer(gs->s->stitcher, i, &input_image);
-                                        if(res != NVSTITCH_SUCCESS){
-                                                std::cerr << std::endl << "Failed to get input buffer." << std::endl;
-                                                break;
-                                        }
+                                upload_tiles(gs);
 
-                                        cudaStream_t stream;
-
-                                        res = nvssVideoGetInputStream(gs->s->stitcher, i, &stream);
-                                        if(res != NVSTITCH_SUCCESS){
-                                                std::cerr << std::endl << "Failed to get input stream." << std::endl;
-                                                break;
-                                        }
-
-                                        unsigned src_pitch = gs->tmp_rgba_frame_pitch;
-                                        unsigned tile_pitch = gs->tmp_rgba_frame_pitch / 2;
-                                        unsigned tile_height = gs->height / 2;
-                                        if (cudaMemcpy2D((unsigned char *)input_image.dev_ptr, input_image.pitch,
-                                                                (unsigned char *) gs->tmp_rgba_frame + (order[i] % 2) * tile_pitch + (order[i] / 2) * src_pitch * tile_height,
-                                                                gs->tmp_rgba_frame_pitch,
-                                                                tile_pitch, tile_height,
-                                                                cudaMemcpyDeviceToDevice) != cudaSuccess)
-                                        {
-                                                std::cerr << "Error copying RGBA image bitmap to CUDA buffer" << std::endl;
-                                                break;
-
-                                        }
-
-                                }
                         } else {
                                 upload_frame(gs, frame, id);
                         }
