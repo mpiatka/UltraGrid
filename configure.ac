@@ -1199,26 +1199,25 @@ then
 fi
 
 # ------------------------------------------------------------------------------
-# VR display
+# Panorama gl display
 # ------------------------------------------------------------------------------
 GLM_INC=-I$srcdir/glm
-vr_disp=no
-AC_ARG_ENABLE(vr_disp,
-[  --disable-vr_disp            disable VR display (default is auto]
+panogl_disp=no
+AC_ARG_ENABLE(panogl_disp,
+[  --disable-panogl_disp            disable gl panorama display (default is auto]
 [                          Requires:  glew sdl2 gl],
-    [vr_disp_req=$enableval],
-    [vr_disp_req=$build_default]
+    [panogl_disp_req=$enableval],
+    [panogl_disp_req=$build_default]
     )
 
 PKG_CHECK_MODULES([SDL2], [sdl2], [found_sdl2=yes], [found_sdl2=no])
-if test $vr_disp_req = yes -a $found_sdl2 = no; then
+if test $panogl_disp_req = yes -a $found_sdl2 = no; then
         AC_MSG_ERROR([SDL2 not found]);
 fi
 
-if test $vr_disp_req != no -a $found_sdl2 = yes
+if test $panogl_disp_req != no -a $found_sdl2 = yes
 then
-        VRDISP_OBJ="src/video_display/vr_disp.o src/video_display/opengl_utils.o"
-        vr_common=yes
+        VRDISP_OBJ="src/video_display/panogl_disp.o src/video_display/opengl_utils.o"
         AC_DEFINE([HAVE_VR_DISP], [1],  [Build with VR disp support])
         # on Win override libs from pkg-config because those contain
         # "-mwindows" which causes output to be scratched by cmd.exe
@@ -1229,7 +1228,7 @@ then
         ADD_MODULE("display_sdl2", "$VRDISP_OBJ", "$VRDISP_LIBS")
         VRDISP_LIB=$SDL2_LIB
 		INC="$INC $GLM_INC"
-        vr_disp=yes
+        panogl_disp=yes
 fi
 
 # ------------------------------------------------------------------------------
@@ -3290,7 +3289,7 @@ RESULT=`add_column "$RESULT" "SDL (ver. $sdl_version)" $sdl $?`
 RESULT=`add_column "$RESULT" "SW video mix" $swmix $?`
 RESULT=`add_column "$RESULT" "V4L2" $v4l2 $?`
 RESULT=`add_column "$RESULT" "XIMEA" $ximea $?`
-RESULT=`add_column "$RESULT" "VR Display" $vr_disp $?`
+RESULT=`add_column "$RESULT" "Panorama Gl Display" $panogl_disp $?`
 RESULT=`add_column "$RESULT" "OpenXR VR Display" $xrgl_disp $?`
 RESULT=`end_section "$RESULT"`
 

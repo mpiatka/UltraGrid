@@ -55,7 +55,7 @@ struct state_vr{
 	std::queue<video_frame *> free_frame_queue;
 };
 
-static void * display_vr_init(struct module *parent, const char *fmt, unsigned int flags) {
+static void * display_panogl_init(struct module *parent, const char *fmt, unsigned int flags) {
 	state_vr *s = new state_vr();
 	s->sdl_frame_event = SDL_RegisterEvents(1);
 	s->sdl_redraw_event = SDL_RegisterEvents(1);
@@ -135,7 +135,7 @@ static void handle_user_event(state_vr *s, SDL_Event *event){
 	}
 }
 
-static void display_vr_run(void *state) {
+static void display_panogl_run(void *state) {
 	state_vr *s = static_cast<state_vr *>(state);
 
 	draw(s);
@@ -174,13 +174,13 @@ static void display_vr_run(void *state) {
 	}
 }
 
-static void display_vr_done(void *state) {
+static void display_panogl_done(void *state) {
 	state_vr *s = static_cast<state_vr *>(state);
 
 	delete s;
 }
 
-static struct video_frame * display_vr_getf(void *state) {
+static struct video_frame * display_panogl_getf(void *state) {
 	struct state_vr *s = static_cast<state_vr *>(state);
 
 	std::lock_guard<std::mutex> lock(s->lock);
@@ -198,7 +198,7 @@ static struct video_frame * display_vr_getf(void *state) {
 	return vf_alloc_desc_data(s->current_desc);
 }
 
-static int display_vr_putf(void *state, struct video_frame *frame, int nonblock) {
+static int display_panogl_putf(void *state, struct video_frame *frame, int nonblock) {
 	struct state_vr *s = static_cast<state_vr *>(state);
 
 	if (nonblock == PUTF_DISCARD) {
@@ -224,18 +224,19 @@ static int display_vr_putf(void *state, struct video_frame *frame, int nonblock)
 	return 0;
 }
 
-static int display_vr_reconfigure(void *state, struct video_desc desc) {
+static int display_panogl_reconfigure(void *state, struct video_desc desc) {
 	state_vr *s = static_cast<state_vr *>(state);
 
 	s->current_desc = desc;
 	return 1;
 }
 
-static int display_vr_get_property(void *state, int property, void *val, size_t *len) {
+static int display_panogl_get_property(void *state, int property, void *val, size_t *len) {
 	UNUSED(state);
 	codec_t codecs[] = {
 		RGBA,
 		RGB,
+		UYVY
 	};
 	enum interlacing_t supported_il_modes[] = {PROGRESSIVE};
 	int rgb_shift[] = {0, 8, 16};
@@ -276,24 +277,24 @@ static int display_vr_get_property(void *state, int property, void *val, size_t 
 }
 
 
-static const struct video_display_info display_vr_info = {
+static const struct video_display_info display_panogl_info = {
         [](struct device_info **available_cards, int *count, void (**deleter)(void *)) {
                 UNUSED(deleter);
                 *count = 1;
                 *available_cards = (struct device_info *) calloc(1, sizeof(struct device_info));
-                strcpy((*available_cards)[0].id, "vr");
-                strcpy((*available_cards)[0].name, "VR SW display");
+                strcpy((*available_cards)[0].id, "pano_gl");
+                strcpy((*available_cards)[0].name, "Panorama Gl SW display");
                 (*available_cards)[0].repeatable = true;
         },
-        display_vr_init,
-        display_vr_run,
-        display_vr_done,
-        display_vr_getf,
-        display_vr_putf,
-        display_vr_reconfigure,
-        display_vr_get_property,
+        display_panogl_init,
+        display_panogl_run,
+        display_panogl_done,
+        display_panogl_getf,
+        display_panogl_putf,
+        display_panogl_reconfigure,
+        display_panogl_get_property,
         NULL,
         NULL,
 };
 
-REGISTER_MODULE(vr_disp, &display_vr_info, LIBRARY_CLASS_VIDEO_DISPLAY, VIDEO_DISPLAY_ABI_VERSION);
+REGISTER_MODULE(pano_gl, &display_panogl_info, LIBRARY_CLASS_VIDEO_DISPLAY, VIDEO_DISPLAY_ABI_VERSION);
