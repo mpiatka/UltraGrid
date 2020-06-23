@@ -1,5 +1,7 @@
 #ifdef BUILD_PROFILED
 
+#include <cstdlib>
+#include <cstring>
 #include "profile_timer.hpp"
 
 std::chrono::steady_clock::time_point Profiler::start_point;
@@ -13,6 +15,9 @@ Profiler& Profiler::get_instance(){
 }
 
 void Profiler::write_events(const std::vector<Profile_event>& events){
+    if(!active)
+        return;
+
     std::lock_guard<std::mutex> lock(io_mut);
     for(const auto& event : events){
         out_file << "{ \"name\": \"" << event.name << "\""
@@ -26,7 +31,17 @@ void Profiler::write_events(const std::vector<Profile_event>& events){
     }
 }
 
-Profiler::Profiler(const std::string& filename){
+Profiler::Profiler(){
+    const char *env_p = std::getenv("UG_PROFILE");
+    active = env_p && env_p[0] != '\0';
+    if(!active){
+        return;
+    }
+
+    std::string filename = "ug_";
+    filename += env_p;
+    filename += ".json";
+
     pid = std::this_thread::get_id();
     out_file.open(filename);
 

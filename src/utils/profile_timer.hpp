@@ -42,13 +42,13 @@ public:
     void write_events(const std::vector<Profile_event>& events);
 
 private:
-    Profiler(const std::string& filename);
-
-    Profiler() : Profiler("ug_profile.json") {  }
+    Profiler();
 
     std::mutex io_mut;
     std::ofstream out_file;
     std::thread::id pid;
+
+    bool active = false;
 
     static std::chrono::steady_clock::time_point start_point;
 };
