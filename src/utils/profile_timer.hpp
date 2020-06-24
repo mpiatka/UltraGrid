@@ -20,15 +20,16 @@
 
 
 struct Profile_event {
-    Profile_event(std::string name, std::thread::id thread_id) : 
+    Profile_event(std::string name,
+            std::thread::id thread_id) : 
         name(name),
-        start(std::chrono::steady_clock::now()),
-        end(std::chrono::steady_clock::now()),
+        start(),
+        end(),
         thread_id(thread_id) {  }
 
     std::string name;
-    std::chrono::steady_clock::time_point start;
-    std::chrono::steady_clock::time_point end;
+    std::chrono::steady_clock::time_point::rep start;
+    std::chrono::steady_clock::time_point::rep end;
     std::thread::id thread_id;
 };
 
@@ -40,6 +41,10 @@ public:
     static Profiler& get_instance();
 
     void write_events(const std::vector<Profile_event>& events);
+
+    static std::chrono::steady_clock::time_point get_start_point(){
+        return start_point;
+    }
 
 private:
     Profiler();
@@ -69,6 +74,7 @@ public:
 private:
     Profiler& profiler;
     std::vector<Profile_event> thread_events;
+    std::chrono::steady_clock::time_point::rep last_ts;
 };
 
 class Profile_timer {

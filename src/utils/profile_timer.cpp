@@ -19,14 +19,19 @@ void Profiler::write_events(const std::vector<Profile_event>& events){
         return;
 
     std::lock_guard<std::mutex> lock(io_mut);
+    std::chrono::steady_clock::time_point::rep last_end = 0;
     for(const auto& event : events){
+
+            auto ts = event.start;
+            auto end = event.end;
         out_file << "{ \"name\": \"" << event.name << "\""
             << ", \"cat\": \"function\""
             << ", \"ph\": \"X\""
             << ", \"pid\": \"" << pid << "\""
             << ", \"tid\": \"" << event.thread_id << "\""
-            << ", \"ts\": \"" << std::chrono::duration_cast<std::chrono::microseconds>(event.start - start_point).count() << "\""
-            << ", \"dur\": \"" << std::chrono::duration_cast<std::chrono::microseconds>(event.end - event.start).count() << "\""
+            << ", \"ts\": \"" << ts << "\""
+            << ", \"dur\": \"" << end - ts << "\""
+            << ", \"dbg_end\": \"" << end << "\""
             << "},\n ";
     }
 }
@@ -71,10 +76,21 @@ void Profiler_thread_inst::add_event(Profile_event&& event){
 }
 
 Profile_timer::Profile_timer(Profiler_thread_inst& profiler, std::string name) :
-    profiler(profiler),
-    event(name, std::this_thread::get_id())
+        profiler(profiler),
+        event(name, std::this_thread::get_id())
 {
+        auto ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - profiler.profiler.get_start_point()).count();
 
+        /* Chromium has problems if two events within the same thread have
+         * the same start time. To work around this we just add a microsecond
+         * if the start time would be the same as the previous one
+         */
+        if(ts <= profiler.last_ts){
+                ts = profiler.last_ts + 1;
+        }
+
+        event.start = ts;
+        profiler.last_ts = ts;
 }
 
 Profile_timer::~Profile_timer(){
@@ -90,7 +106,7 @@ void Profile_timer::commit(){
     if(event.name.empty())
         return;
 
-    event.end = std::chrono::steady_clock::now();
+    event.end = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - profiler.profiler.get_start_point()).count();
     profiler.add_event(std::move(event));
 }
 
