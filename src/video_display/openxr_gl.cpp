@@ -367,6 +367,23 @@ static glm::mat4 get_proj_mat(const XrFovf& fov, float zNear, float zFar){
 	return res;
 }
 
+static int64_t select_swapchain_fmt(const std::vector<int64_t>& swapchain_formats){
+	const int64_t preferred_formats[] = {
+		GL_RGBA8_EXT,
+		GL_SRGB8_ALPHA8_EXT
+	};
+
+	for(auto pref : preferred_formats){
+		for(auto supported_fmt : swapchain_formats){
+			if(pref == supported_fmt){
+				return pref;
+			}
+		}
+	}
+
+	return 0;
+}
+
 static void display_xrgl_run(void *state){
         PROFILE_FUNC;
 
@@ -390,13 +407,14 @@ static void display_xrgl_run(void *state){
 
 	session.begin();
 
-	std::vector<int64_t> swapchain_formats = get_swapchain_formats(session.get());
-	int64_t selected_swapchain_format = swapchain_formats[0];
+	std::vector<int64_t> swapchain_fmts = get_swapchain_formats(session.get());
+
+	int64_t selected_swapchain_fmt = select_swapchain_fmt(swapchain_fmts);
 
 	std::vector<Gl_interop_swapchain> swapchains;
 	for(const auto& view : config_views){
 		swapchains.emplace_back(session.get(),
-				selected_swapchain_format,
+				selected_swapchain_fmt,
 				view.recommendedImageRectWidth,
 				view.recommendedImageRectHeight);
 	}
@@ -420,6 +438,12 @@ static void display_xrgl_run(void *state){
 	}
 
 	bool running = true;
+	if(selected_swapchain_fmt == GL_SRGB8_ALPHA8_EXT){
+		//Convert to sRGB to correctly display on the HMD. This however breaks
+		//the preview window colors
+		glEnable(GL_FRAMEBUFFER_SRGB);
+	}
+
 	while(running){
 		std::unique_lock<std::mutex> lk(s->lock);
                 video_frame *frame = nullptr;
