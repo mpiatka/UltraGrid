@@ -57,7 +57,9 @@ public:
 
 
 		XrResult result = xrCreateSession(instance, &session_create_info, &session);
-		//TODO Error check
+		if(!XR_SUCCEEDED(result)){
+			throw std::runtime_error("Failed to create OpenXR session!");
+		}
 	}
 
 	~Openxr_session(){
@@ -80,8 +82,36 @@ private:
 class Openxr_instance{
 public:
 	Openxr_instance(){
-		//TODO Check if opengl extension is supported
+		uint32_t properties_count = 0;
+		XrResult result = xrEnumerateInstanceExtensionProperties(nullptr,
+				properties_count,
+				&properties_count,
+				nullptr);
+		if(!XR_SUCCEEDED(result)){
+			log_msg(LOG_LEVEL_WARNING, "Failed to check XR_KHR_OPENGL availability!\n");
+		} else {
+			std::vector<XrExtensionProperties> props;
+			props.resize(properties_count);
+			for(auto& prop : props){
+				prop.type = XR_TYPE_EXTENSION_PROPERTIES;
+				prop.next = nullptr;
+			}
+			result = xrEnumerateInstanceExtensionProperties(nullptr,
+				properties_count,
+				&properties_count,
+				props.data());
 
+			bool found = false;
+			for(const auto& prop : props){
+				if(strcmp(prop.extensionName, XR_KHR_OPENGL_ENABLE_EXTENSION_NAME) == 0){
+					found = true;
+					break;
+				}
+			}
+			if(!found){
+				throw std::runtime_error("OpenXR runtime does not support OpenGL interop!");
+			}
+		}
 		const char* const enabledExtensions[] = {XR_KHR_OPENGL_ENABLE_EXTENSION_NAME};
 
 		XrInstanceCreateInfo instanceCreateInfo;
@@ -97,7 +127,10 @@ public:
 		instanceCreateInfo.applicationInfo.engineVersion = 0;
 		instanceCreateInfo.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
 
-		XrResult result = xrCreateInstance(&instanceCreateInfo, &instance);
+		result = xrCreateInstance(&instanceCreateInfo, &instance);
+		if(!XR_SUCCEEDED(result)){
+			throw std::runtime_error("Failed to create OpenXR instance!");
+		}
 
 		XrInstanceProperties instanceProperties;
 		instanceProperties.type = XR_TYPE_INSTANCE_PROPERTIES;
@@ -105,11 +138,13 @@ public:
 
 		result = xrGetInstanceProperties(instance, &instanceProperties);
 
-		printf("Runtime Name: %s\n", instanceProperties.runtimeName);
-		printf("Runtime Version: %d.%d.%d\n",
-		       XR_VERSION_MAJOR(instanceProperties.runtimeVersion),
-		       XR_VERSION_MINOR(instanceProperties.runtimeVersion),
-		       XR_VERSION_PATCH(instanceProperties.runtimeVersion));
+		if(XR_SUCCEEDED(result)){
+			printf("Runtime Name: %s\n", instanceProperties.runtimeName);
+			printf("Runtime Version: %d.%d.%d\n",
+					XR_VERSION_MAJOR(instanceProperties.runtimeVersion),
+					XR_VERSION_MINOR(instanceProperties.runtimeVersion),
+					XR_VERSION_PATCH(instanceProperties.runtimeVersion));
+		}
 
 
 	}
@@ -158,7 +193,11 @@ public:
 		swapchain_create_info.mipCount = 1;
 		swapchain_create_info.next = nullptr;
 
-		xrCreateSwapchain(session, &swapchain_create_info, &swapchain);
+		XrResult result = xrCreateSwapchain(session, &swapchain_create_info, &swapchain);
+
+		if(!XR_SUCCEEDED(result)){
+			throw std::runtime_error("Failed to create OpenXR swapchain!");
+		}
 	}
 
 	~Openxr_swapchain(){
@@ -176,8 +215,10 @@ public:
 
 	uint32_t get_length(){
 		uint32_t len = 0;
-		//TODO error check
-		xrEnumerateSwapchainImages(swapchain, 0, &len, nullptr);
+		XrResult result = xrEnumerateSwapchainImages(swapchain, 0, &len, nullptr);
+		if(!XR_SUCCEEDED(result)){
+			throw std::runtime_error("Failed to enumerate swapchain images\n");
+		}
 
 		return len;
 	}
@@ -237,9 +278,13 @@ private:
 			image.next = nullptr;
 		}
 
-		xrEnumerateSwapchainImages(xr_swapchain.get(),
+		XrResult result = xrEnumerateSwapchainImages(xr_swapchain.get(),
 				length, &length,
 				(XrSwapchainImageBaseHeader *)(images.data()));
+
+		if(!XR_SUCCEEDED(result)){
+			throw std::runtime_error("Failed to enumerate swapchain images");
+		}
 
 		for(size_t i = 0; i < length; i++){
 			framebuffers[i].attach_texture(get_texture(i));
@@ -266,7 +311,10 @@ public:
 		space_create_info.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
 		space_create_info.poseInReferenceSpace = origin;
 
-		xrCreateReferenceSpace(session, &space_create_info, &space);
+		XrResult result = xrCreateReferenceSpace(session, &space_create_info, &space);
+		if(!XR_SUCCEEDED(result)){
+			throw std::runtime_error("Failed to create OpenXR reference space!");
+		}
 	}
 
 	~Openxr_local_space(){
@@ -317,6 +365,10 @@ static std::vector<XrViewConfigurationView> get_views(Openxr_state& xr_state){
 			&view_count,
 			nullptr);
 
+	if(!XR_SUCCEEDED(result)){
+		throw std::runtime_error("Failed to enumerate view configuration views!");
+	}
+
 	std::vector<XrViewConfigurationView> config_views(view_count);
 	for(auto& view : config_views) view.type = XR_TYPE_VIEW_CONFIGURATION_VIEW;
 
@@ -326,6 +378,10 @@ static std::vector<XrViewConfigurationView> get_views(Openxr_state& xr_state){
 			view_count,
 			&view_count,
 			config_views.data());
+
+	if(!XR_SUCCEEDED(result)){
+		throw std::runtime_error("Failed to enumerate view configuration views!");
+	}
 
 	return config_views;
 }
@@ -344,6 +400,10 @@ static std::vector<int64_t> get_swapchain_formats(XrSession session){
 			swapchain_format_count,
 			&swapchain_format_count,
 			swapchain_formats.data());
+
+	if(!XR_SUCCEEDED(result)){
+		throw std::runtime_error("Failed to enumerate swapchain formats!");
+	}
 
 	return swapchain_formats;
 }
