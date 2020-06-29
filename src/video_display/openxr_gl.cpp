@@ -546,12 +546,56 @@ static void display_xrgl_run(void *state){
                         break;
                 }
 
-                XrEventDataBuffer xr_event{};
-                xr_event.type = XR_TYPE_EVENT_DATA_BUFFER;
-                xr_event.next = nullptr;
+		SDL_Event event;
+                while(SDL_PollEvent(&event)){
+                        switch(event.type){
+                        case SDL_QUIT:
+                                running = false;
+                                break;
+                        case SDL_WINDOWEVENT:
+                                if(event.window.event == SDL_WINDOWEVENT_RESIZED){
+                                        s->window.width = event.window.data1;
+                                        s->window.height = event.window.data2;
+                                }
+                                break;
+                        default:
+                                break;
+                        }
+                }
 
-                result = xrPollEvent(s->xr_state.instance.get(), &xr_event);
-                //TODO process events
+                while(true){
+                        XrEventDataBuffer xr_event{};
+                        xr_event.type = XR_TYPE_EVENT_DATA_BUFFER;
+                        xr_event.next = nullptr;
+
+                        result = xrPollEvent(s->xr_state.instance.get(), &xr_event);
+                        if(result != XR_SUCCESS){
+                                break;
+                        }
+
+                        switch(xr_event.type){
+                        case XR_TYPE_EVENT_DATA_EVENTS_LOST:
+                                log_msg(LOG_LEVEL_WARNING, "OpenXR events lost!\n");
+                                break;
+                        case XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING:
+                                log_msg(LOG_LEVEL_WARNING, "OpenXR instance loss pending!\n");
+                                running = false;
+                                break;
+                        case XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED:
+                                {
+                                        XrEventDataSessionStateChanged* event = (XrEventDataSessionStateChanged*) &xr_event;
+                                        if(event->state >= XR_SESSION_STATE_STOPPING){
+                                                log_msg(LOG_LEVEL_NOTICE, "Received event requesting stop\n");
+                                                running = false;
+                                        }
+                                        break;
+                                }
+                        default:
+                                log_msg(LOG_LEVEL_NOTICE, "Unhandled event %d\n", xr_event.type);
+                                break;
+                        }
+
+                }
 
                 XrViewLocateInfo view_locate_info;
                 view_locate_info.type = XR_TYPE_VIEW_LOCATE_INFO;
@@ -653,15 +697,8 @@ static void display_xrgl_run(void *state){
                         glm::mat4 viewMat = glm::mat4_cast(glm::quat(rot.w, rot.x, rot.y, rot.z));
                         glm::mat4 pvMat = projMat * glm::inverse(viewMat);
 
-                        //TODO Render frame
-
                         auto framebuffer = swapchains[i].get_framebuffer(buf_idx).get();
                         glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-                        if(i % 2){
-                                glClearColor(0.f, 0.f, 1.f, 1.f);
-                        } else {
-                                glClearColor(0.f, 1.f, 0.f, 1.0f);
-                        }
                         glClear(GL_COLOR_BUFFER_BIT);
 
                         s->scene.render(w, h, pvMat);
@@ -669,16 +706,37 @@ static void display_xrgl_run(void *state){
                         glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
                         if(i % 2){
+                                int dstX0;
+                                int dstY0;
+                                int dstX1;
+                                int dstY1;
+                                if(w * s->window.height > s->window.width * h){
+                                        dstX0 = 0;
+                                        dstX1 = s->window.width;
+
+                                        int height = (s->window.width * h) / w;
+                                        dstY0 = (s->window.height - height) / 2;
+                                        dstY1 = dstY0 + height;
+                                } else {
+                                        int width = (s->window.height * w) / h;
+                                        dstX0 = (s->window.width - width) / 2;
+                                        dstX1 = dstX0 + width;
+
+                                        dstY0 = 0;
+                                        dstY1 = s->window.height;
+
+                                }
+                                glClear(GL_COLOR_BUFFER_BIT);
                                 glBlitNamedFramebuffer((GLuint)framebuffer, // readFramebuffer
                                                 (GLuint)0,    // backbuffer     // drawFramebuffer
                                                 (GLint)0,     // srcX0
                                                 (GLint)0,     // srcY0
                                                 (GLint)w,     // srcX1
                                                 (GLint)h,     // srcY1
-                                                (GLint)0,     // dstX0
-                                                (GLint)0,     // dstY0
-                                                (GLint)w / 2, // dstX1
-                                                (GLint)h / 2, // dstY1
+                                                (GLint)dstX0,     // dstX0
+                                                (GLint)dstY0,     // dstY0
+                                                (GLint)dstX1, // dstX1
+                                                (GLint)dstY1, // dstY1
                                                 (GLbitfield)GL_COLOR_BUFFER_BIT, // mask
                                                 (GLenum)GL_LINEAR);              // filter
 
@@ -721,6 +779,7 @@ static void display_xrgl_run(void *state){
 
         }
 
+        exit_uv(0);
 }
 
 static void * display_xrgl_init(struct module *parent, const char *fmt, unsigned int flags) {
