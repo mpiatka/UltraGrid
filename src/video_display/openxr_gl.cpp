@@ -74,6 +74,9 @@ public:
                 session_begin_info.next = NULL;
                 session_begin_info.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
                 XrResult result = xrBeginSession(session, &session_begin_info);
+                if(!XR_SUCCEEDED(result)){
+                        throw std::runtime_error("Failed to begin OpenXR session!");
+                }
         }
 private:
         XrSession session;
@@ -485,7 +488,7 @@ static void display_xrgl_run(void *state){
         XrCompositionLayerProjection projection_layer;
         projection_layer.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION;
         projection_layer.next = nullptr;
-        projection_layer.layerFlags;
+        projection_layer.layerFlags = 0;
         projection_layer.space = space.get();
         projection_layer.viewCount = view_count;
         projection_layer.views = projection_views.data();
@@ -721,9 +724,23 @@ static void display_xrgl_run(void *state){
 }
 
 static void * display_xrgl_init(struct module *parent, const char *fmt, unsigned int flags) {
+        UNUSED(parent);
+        UNUSED(fmt);
+        UNUSED(flags);
         state_xrgl *s = new state_xrgl();
 
-        s->xr_state.system_id = 1; //TODO
+        XrSystemGetInfo system_get_info;
+        system_get_info.type = XR_TYPE_SYSTEM_GET_INFO;
+        system_get_info.next = nullptr;
+        system_get_info.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+
+        XrResult result = xrGetSystem(s->xr_state.instance.get(),
+                        &system_get_info,
+                        &s->xr_state.system_id);
+
+        if(!XR_SUCCEEDED(result)){
+                throw std::runtime_error("No available device found!");
+        }
 
         return s;
 }
@@ -861,8 +878,8 @@ static void display_xrgl_probe(struct device_info **available_cards, int *count,
         XrSystemProperties systemProperties;
         systemProperties.type = XR_TYPE_SYSTEM_PROPERTIES;
         systemProperties.next = NULL;
-        systemProperties.graphicsProperties = {0};
-        systemProperties.trackingProperties = {0};
+        systemProperties.graphicsProperties = {};
+        systemProperties.trackingProperties = {};
 
         result = xrGetSystemProperties(instance.get(), systemId, &systemProperties);
         if(!XR_SUCCEEDED(result)){
