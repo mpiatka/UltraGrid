@@ -68,6 +68,9 @@ public:
     void upload(size_t w, size_t h,
             GLenum fmt, GLenum type,
             const void *px, size_t data_len);
+    void upload_pbo(size_t w, size_t h,
+            GLenum fmt, GLenum type,
+            GLuint pixel_buffer, size_t data_len);
 
 	Texture(const Texture&) = delete;
 	Texture(Texture&& o) { swap(o); }
@@ -127,6 +130,10 @@ class GlBuffer{
 
         ~GlBuffer(){
             glDeleteBuffers(1, &buf_id);
+        }
+
+        GLuint get() {
+            return buf_id;
         }
 
         GlBuffer(const GlBuffer&) = delete;
