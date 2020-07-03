@@ -293,6 +293,23 @@ void Texture::upload(size_t w, size_t h,
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 }
 
+void Texture::upload_pbo(size_t w, size_t h,
+        GLenum fmt, GLenum type,
+        GLuint pixel_buffer, size_t data_len)
+{
+    PROFILE_FUNC;
+
+    PROFILE_DETAIL("bind + memcpy");
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pixel_buffer);
+
+    PROFILE_DETAIL("texSubImg + unbind");
+    glTexSubImage2D(GL_TEXTURE_2D, 0,
+            0, 0, width, height,
+            fmt, type, 0);
+
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+}
+
 void Framebuffer::attach_texture(GLuint tex){
     glBindTexture(GL_TEXTURE_2D, tex);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -318,9 +335,11 @@ void Yuv_convertor::put_frame(const video_frame *f){
     glBindTexture(GL_TEXTURE_2D, yuv_tex.get());
     yuv_tex.allocate(f->tiles[0].width / 2, f->tiles[0].height, GL_RGBA);
 
-    yuv_tex.upload(f->tiles[0].width / 2, f->tiles[0].height,
+	//TODO
+	GlBuffer *pbo = static_cast<GlBuffer *>(f->callbacks.dispose_udata);
+    yuv_tex.upload_pbo(f->tiles[0].width / 2, f->tiles[0].height,
                 GL_RGBA, GL_UNSIGNED_BYTE,
-                f->tiles[0].data, f->tiles[0].data_len);
+                pbo->get(), f->tiles[0].data_len);
 
     GLuint w_loc = glGetUniformLocation(program.get(), "width");
     glUniform1f(w_loc, f->tiles[0].width);

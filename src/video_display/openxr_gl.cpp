@@ -34,7 +34,7 @@
 #include "opengl_utils.hpp"
 #include "utils/profile_timer.hpp"
 
-#define MAX_BUFFER_SIZE   1
+#define MAX_BUFFER_SIZE   3
 
 class Openxr_session{
 public:
@@ -355,8 +355,12 @@ struct state_xrgl{
         std::mutex lock;
         std::condition_variable frame_consumed_cv;
         std::condition_variable new_frame_ready_cv;
-        std::queue<video_frame *> free_frame_queue;
         std::queue<video_frame *> frame_queue;
+
+        std::vector<video_frame *> free_frame_pool;
+        std::condition_variable free_frame_ready_cv;
+
+        std::vector<video_frame *> dispose_frame_pool;
 };
 
 static std::vector<XrViewConfigurationView> get_views(Openxr_state& xr_state){
@@ -507,8 +511,18 @@ static void display_xrgl_run(void *state){
                 glEnable(GL_FRAMEBUFFER_SRGB);
         }
 
+        std::unique_lock<std::mutex> lk(s->lock);
+        for(size_t i = 0; i < MAX_BUFFER_SIZE; i++){
+                video_frame *buf = vf_alloc(1);
+                GlBuffer *pbo = new GlBuffer();
+                buf->callbacks.dispose_udata = pbo;
+                s->free_frame_pool.push_back(buf);
+        }
+        lk.unlock();
+        s->free_frame_ready_cv.notify_all();
+
         while(running){
-                std::unique_lock<std::mutex> lk(s->lock);
+                lk.lock();
                 video_frame *frame = nullptr;
                 if(s->frame_queue.size() > 0){
                         PROFILE_DETAIL("put_frame");
@@ -525,9 +539,38 @@ static void display_xrgl_run(void *state){
                         s->scene.put_frame(frame);
 
                         lk.lock();
-                        s->free_frame_queue.push(frame);
+                        s->dispose_frame_pool.push_back(frame);
                         lk.unlock();
-                } 
+                } else if(!s->dispose_frame_pool.empty()){
+                        lk.lock();
+                        for(auto& f : s->dispose_frame_pool){
+                                GlBuffer *pbo = static_cast<GlBuffer *>(f->callbacks.dispose_udata);
+                                glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo->get());
+                                glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+
+                                if (video_desc_eq(video_desc_from_frame(f), s->current_desc)) {
+                                        glBufferData(GL_PIXEL_UNPACK_BUFFER, f->tiles[0].data_len, 0, GL_STREAM_DRAW);
+                                        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+                                        s->free_frame_pool.push_back(f);
+                                } else {
+                                        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+                                        delete pbo;
+                                        vf_free(f);
+
+                                        struct video_frame *buffer = vf_alloc_desc(s->current_desc);
+                                        GlBuffer *pbo = new GlBuffer();
+                                        buffer->callbacks.dispose_udata = pbo;
+                                        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo->get());
+                                        glBufferData(GL_PIXEL_UNPACK_BUFFER, buffer->tiles[0].data_len, 0, GL_STREAM_DRAW);
+                                        buffer->tiles[0].data = (char *) glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_READ_WRITE); //TODO change to write only
+                                        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+                                        s->free_frame_pool.push_back(buffer);
+                                }
+                        }
+                        s->dispose_frame_pool.clear();
+                        lk.unlock();
+                        s->free_frame_ready_cv.notify_all();
+                }
 
                 XrResult result;
 
@@ -546,7 +589,7 @@ static void display_xrgl_run(void *state){
                         break;
                 }
 
-		SDL_Event event;
+                SDL_Event event;
                 while(SDL_PollEvent(&event)){
                         switch(event.type){
                         case SDL_QUIT:
@@ -801,6 +844,9 @@ static void * display_xrgl_init(struct module *parent, const char *fmt, unsigned
                 throw std::runtime_error("No available device found!");
         }
 
+		s->free_frame_pool.reserve(MAX_BUFFER_SIZE);
+		s->dispose_frame_pool.reserve(MAX_BUFFER_SIZE);
+
         return s;
 }
 
@@ -813,25 +859,18 @@ static void display_xrgl_done(void *state) {
 static struct video_frame * display_xrgl_getf(void *state) {
         struct state_xrgl *s = static_cast<state_xrgl *>(state);
 
-        std::lock_guard<std::mutex> lock(s->lock);
+        std::unique_lock<std::mutex> lock(s->lock);
 
-        while (s->free_frame_queue.size() > 0) {
-                struct video_frame *buffer = s->free_frame_queue.front();
-                s->free_frame_queue.pop();
+        while (true) {
+                s->free_frame_ready_cv.wait(lock, [s]{return s->free_frame_pool.size() > 0;});
+                struct video_frame *buffer = s->free_frame_pool.back();
+                s->free_frame_pool.pop_back();
                 if (video_desc_eq(video_desc_from_frame(buffer), s->current_desc)) {
                         return buffer;
                 } else {
-                        vf_free(buffer);
+                        s->dispose_frame_pool.push_back(buffer);
                 }
         }
-
-        struct video_frame *buffer = vf_alloc_desc_data(s->current_desc);
-        clear_video_buffer(reinterpret_cast<unsigned char *>(buffer->tiles[0].data),
-                        vc_get_linesize(buffer->tiles[0].width, buffer->color_spec),
-                        vc_get_linesize(buffer->tiles[0].width, buffer->color_spec),
-                        buffer->tiles[0].height,
-                        buffer->color_spec);
-        return buffer;
 }
 
 static int display_xrgl_putf(void *state, struct video_frame *frame, int nonblock) {
@@ -847,12 +886,11 @@ static int display_xrgl_putf(void *state, struct video_frame *frame, int nonbloc
         }
 
         if (nonblock == PUTF_DISCARD) {
-                vf_recycle(frame);
+                s->dispose_frame_pool.push_back(frame);
                 return 0;
         }
         if (s->frame_queue.size() >= MAX_BUFFER_SIZE && nonblock == PUTF_NONBLOCK) {
-                vf_recycle(frame);
-                s->free_frame_queue.push(frame);
+                s->free_frame_pool.push_back(frame);
                 return 1;
         }
         s->frame_consumed_cv.wait(lk, [s]{return s->frame_queue.size() < MAX_BUFFER_SIZE;});
