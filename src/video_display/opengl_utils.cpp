@@ -272,9 +272,9 @@ void Texture::allocate(int w, int h, GLenum fmt) {
                 nullptr);
     }
 }
-void Texture::upload(size_t w, size_t h,
+void Texture::upload_internal_pbo(size_t w, size_t h,
         GLenum fmt, GLenum type,
-        const void *px, size_t data_len)
+        const void *data, size_t data_len)
 {
     PROFILE_FUNC;
 
@@ -282,32 +282,70 @@ void Texture::upload(size_t w, size_t h,
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     glBufferData(GL_PIXEL_UNPACK_BUFFER, data_len, 0, GL_STREAM_DRAW);
     void *ptr = glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY);
-    memcpy(ptr, px, data_len);
+    memcpy(ptr, data, data_len);
     glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
 
     PROFILE_DETAIL("texSubImg + unbind");
     glTexSubImage2D(GL_TEXTURE_2D, 0,
-            0, 0, width, height,
+            0, 0, w, h,
             fmt, type, 0);
 
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 }
 
-void Texture::upload_pbo(size_t w, size_t h,
+void Texture::upload(size_t w, size_t h,
         GLenum fmt, GLenum type,
-        GLuint pixel_buffer, size_t data_len)
+        const void *data, size_t data_len)
 {
     PROFILE_FUNC;
 
-    PROFILE_DETAIL("bind + memcpy");
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pixel_buffer);
-
-    PROFILE_DETAIL("texSubImg + unbind");
     glTexSubImage2D(GL_TEXTURE_2D, 0,
-            0, 0, width, height,
-            fmt, type, 0);
+            0, 0, w, h,
+            fmt, type, data);
+}
 
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+void Texture::upload_frame(video_frame *f, bool pbo_frame){
+	PROFILE_FUNC;
+
+	size_t width = f->tiles[0].width;
+	size_t height = f->tiles[0].height;
+	GLenum fmt = GL_RGBA;
+
+    switch(f->color_spec){
+        case UYVY:
+			//Two UYVY pixels get uploaded as one RGBA pixel
+			width /= 2;
+			fmt = GL_RGBA;
+            break;
+        case RGB:
+			fmt = GL_RGB;
+            break;
+        case RGBA:
+			fmt = GL_RGBA;
+			break;
+        default:
+			assert(0 && "color_spec not supported");
+            break;
+    }
+	
+	if(pbo_frame){
+		GlBuffer *pbo = static_cast<GlBuffer *>(f->callbacks.dispose_udata);
+
+		PROFILE_DETAIL("PBO frame upload");
+		glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo->get());
+		glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+		f->tiles[0].data = nullptr;
+
+		upload(width, height,
+				fmt, GL_UNSIGNED_BYTE,
+				0, f->tiles[0].data_len);
+		glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+	} else {
+		PROFILE_DETAIL("Regular frame upload");
+		upload_internal_pbo(width, height,
+				fmt, GL_UNSIGNED_BYTE,
+				f->tiles[0].data, f->tiles[0].data_len);
+	}
 }
 
 void Framebuffer::attach_texture(GLuint tex){
@@ -326,7 +364,8 @@ Yuv_convertor::Yuv_convertor(): program(vert_src, yuv_conv_frag_src),
     quad(Model::get_quad())
 { }
 
-void Yuv_convertor::put_frame(const video_frame *f){
+void Yuv_convertor::put_frame(video_frame *f, bool pbo_frame){
+	PROFILE_FUNC;
     glUseProgram(program.get());
     glBindFramebuffer(GL_FRAMEBUFFER, fbuf.get());
     glViewport(0, 0, f->tiles[0].width, f->tiles[0].height);
@@ -335,12 +374,9 @@ void Yuv_convertor::put_frame(const video_frame *f){
     glBindTexture(GL_TEXTURE_2D, yuv_tex.get());
     yuv_tex.allocate(f->tiles[0].width / 2, f->tiles[0].height, GL_RGBA);
 
-	//TODO
-	GlBuffer *pbo = static_cast<GlBuffer *>(f->callbacks.dispose_udata);
-    yuv_tex.upload_pbo(f->tiles[0].width / 2, f->tiles[0].height,
-                GL_RGBA, GL_UNSIGNED_BYTE,
-                pbo->get(), f->tiles[0].data_len);
+	yuv_tex.upload_frame(f, pbo_frame);
 
+    PROFILE_DETAIL("YUV convert render");
     GLuint w_loc = glGetUniformLocation(program.get(), "width");
     glUniform1f(w_loc, f->tiles[0].width);
 
@@ -382,7 +418,7 @@ void Scene::render(int width, int height, const glm::mat4& pvMat){
     model.render();
 }
 
-void Scene::put_frame(const video_frame *f){
+void Scene::put_frame(video_frame *f, bool pbo_frame){
     PROFILE_FUNC
 
     glBindTexture(GL_TEXTURE_2D, texture.get());
@@ -392,23 +428,11 @@ void Scene::put_frame(const video_frame *f){
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    switch(f->color_spec){
-        case UYVY:
-            conv.attach_texture(texture);
-            conv.put_frame(f);
-            break;
-        case RGB:
-            texture.upload(f->tiles[0].width, f->tiles[0].height,
-                    GL_RGB, GL_UNSIGNED_BYTE,
-                    f->tiles[0].data, f->tiles[0].data_len);
-
-            break;
-        case RGBA:
-            texture.upload(f->tiles[0].width, f->tiles[0].height,
-                    GL_RGBA, GL_UNSIGNED_BYTE,
-                    f->tiles[0].data, f->tiles[0].data_len);
-        default:
-            break;
+    if(f->color_spec == UYVY){
+		conv.attach_texture(texture);
+		conv.put_frame(f, pbo_frame);
+	} else {
+		texture.upload_frame(f, pbo_frame);
     }
 }
 

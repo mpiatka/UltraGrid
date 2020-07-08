@@ -451,6 +451,48 @@ static int64_t select_swapchain_fmt(const std::vector<int64_t>& swapchain_format
         return 0;
 }
 
+static void recycle_frame(video_frame *f){
+        GlBuffer *pbo = static_cast<GlBuffer *>(f->callbacks.dispose_udata);
+        if(!pbo){
+                return;
+        }
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo->get());
+        if(f->tiles[0].data){
+                glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+        }
+        glBufferData(GL_PIXEL_UNPACK_BUFFER, f->tiles[0].data_len, 0, GL_STREAM_DRAW);
+        f->tiles[0].data = (char *) glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_READ_WRITE); //TODO change to write only
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+}
+
+static void delete_frame(video_frame *f){
+        vf_free(f);
+
+        GlBuffer *pbo = static_cast<GlBuffer *>(f->callbacks.dispose_udata);
+        if(!pbo){
+                return;
+        }
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo->get());
+        if(f->tiles[0].data){
+                glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+        }
+         
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+        delete pbo;
+}
+
+static video_frame *allocate_frame(state_xrgl *s){
+        video_frame *buffer = vf_alloc_desc(s->current_desc);
+        GlBuffer *pbo = new GlBuffer();
+        buffer->callbacks.dispose_udata = pbo;
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo->get());
+        glBufferData(GL_PIXEL_UNPACK_BUFFER, buffer->tiles[0].data_len, 0, GL_STREAM_DRAW);
+        buffer->tiles[0].data = (char *) glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_READ_WRITE); //TODO change to write only
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+        return buffer;
+}
+
 static void display_xrgl_run(void *state){
         PROFILE_FUNC;
 
@@ -528,7 +570,6 @@ static void display_xrgl_run(void *state){
                         PROFILE_DETAIL("put_frame");
                         frame = s->frame_queue.front();
                         s->frame_queue.pop();
-                        s->frame_consumed_cv.notify_one();
                         if(!frame){
                                 running = false;
                         }
@@ -536,34 +577,23 @@ static void display_xrgl_run(void *state){
                 lk.unlock();
 
                 if(frame){
-                        s->scene.put_frame(frame);
+                        s->frame_consumed_cv.notify_one();
+                        s->scene.put_frame(frame, frame->callbacks.dispose_udata != nullptr);
 
                         lk.lock();
                         s->dispose_frame_pool.push_back(frame);
                         lk.unlock();
                 } else if(!s->dispose_frame_pool.empty()){
+                        PROFILE_DETAIL("Process disposed frames");
                         lk.lock();
-                        for(auto& f : s->dispose_frame_pool){
-                                GlBuffer *pbo = static_cast<GlBuffer *>(f->callbacks.dispose_udata);
-                                glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo->get());
-                                glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
-
+                        for(video_frame *f : s->dispose_frame_pool){
                                 if (video_desc_eq(video_desc_from_frame(f), s->current_desc)) {
-                                        glBufferData(GL_PIXEL_UNPACK_BUFFER, f->tiles[0].data_len, 0, GL_STREAM_DRAW);
-                                        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+                                        recycle_frame(f);
                                         s->free_frame_pool.push_back(f);
                                 } else {
-                                        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-                                        delete pbo;
-                                        vf_free(f);
+                                        delete_frame(f);
 
-                                        struct video_frame *buffer = vf_alloc_desc(s->current_desc);
-                                        GlBuffer *pbo = new GlBuffer();
-                                        buffer->callbacks.dispose_udata = pbo;
-                                        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo->get());
-                                        glBufferData(GL_PIXEL_UNPACK_BUFFER, buffer->tiles[0].data_len, 0, GL_STREAM_DRAW);
-                                        buffer->tiles[0].data = (char *) glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_READ_WRITE); //TODO change to write only
-                                        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+                                        struct video_frame *buffer = allocate_frame(s);
                                         s->free_frame_pool.push_back(buffer);
                                 }
                         }
@@ -890,7 +920,7 @@ static int display_xrgl_putf(void *state, struct video_frame *frame, int nonbloc
                 return 0;
         }
         if (s->frame_queue.size() >= MAX_BUFFER_SIZE && nonblock == PUTF_NONBLOCK) {
-                s->free_frame_pool.push_back(frame);
+                s->dispose_frame_pool.push_back(frame);
                 return 1;
         }
         s->frame_consumed_cv.wait(lk, [s]{return s->frame_queue.size() < MAX_BUFFER_SIZE;});
