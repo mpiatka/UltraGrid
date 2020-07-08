@@ -67,10 +67,12 @@ public:
 	void allocate(int w, int h, GLenum fmt);
     void upload(size_t w, size_t h,
             GLenum fmt, GLenum type,
-            const void *px, size_t data_len);
-    void upload_pbo(size_t w, size_t h,
+            const void *data, size_t data_len);
+    void upload_internal_pbo(size_t w, size_t h,
             GLenum fmt, GLenum type,
-            GLuint pixel_buffer, size_t data_len);
+            const void *data, size_t data_len);
+
+    void upload_frame(video_frame *f, bool pbo_frame);
 
 	Texture(const Texture&) = delete;
 	Texture(Texture&& o) { swap(o); }
@@ -153,7 +155,7 @@ class Yuv_convertor{
 public:
     Yuv_convertor();
 
-	void put_frame(const video_frame *f);
+	void put_frame(video_frame *f, bool pbo_frame = false);
 
 	void attach_texture(const Texture& tex){
 		fbuf.attach_texture(tex);
@@ -172,7 +174,7 @@ struct Scene{
 	void render(int width, int height);
 	void render(int width, int height, const glm::mat4& pvMat);
 
-	void put_frame(const video_frame *f);
+	void put_frame(video_frame *f, bool pbo_frame = false);
 
 	void rotate(float dx, float dy);
 

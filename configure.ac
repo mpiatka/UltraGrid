@@ -1217,7 +1217,7 @@ fi
 
 if test $panogl_disp_req != no -a $found_sdl2 = yes
 then
-        VRDISP_OBJ="src/video_display/panogl_disp.o src/video_display/opengl_utils.o"
+        VRDISP_OBJ="src/video_display/pano_gl.o src/video_display/opengl_utils.o"
         AC_DEFINE([HAVE_VR_DISP], [1],  [Build with VR disp support])
         # on Win override libs from pkg-config because those contain
         # "-mwindows" which causes output to be scratched by cmd.exe
