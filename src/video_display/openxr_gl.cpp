@@ -551,8 +551,11 @@ static void display_xrgl_run(void *state){
 
         bool running = true;
         if(selected_swapchain_fmt == GL_SRGB8_ALPHA8_EXT){
-                //Convert to sRGB to correctly display on the HMD. This however breaks
-                //the preview window colors
+                /* Convert to sRGB to correctly display on the HMD.
+                 * This however breaks the preview window colors, because
+                 * the framebuffer is directly copied into preview window
+                 * using glBlitNamedFramebuffer
+                 */
                 glEnable(GL_FRAMEBUFFER_SRGB);
         }
 
@@ -877,8 +880,8 @@ static void * display_xrgl_init(struct module *parent, const char *fmt, unsigned
                 throw std::runtime_error("No available device found!");
         }
 
-		s->free_frame_pool.reserve(MAX_BUFFER_SIZE);
-		s->dispose_frame_pool.reserve(MAX_BUFFER_SIZE);
+        s->free_frame_pool.reserve(MAX_BUFFER_SIZE);
+        s->dispose_frame_pool.reserve(MAX_BUFFER_SIZE);
 
         return s;
 }
