@@ -451,6 +451,12 @@ static int64_t select_swapchain_fmt(const std::vector<int64_t>& swapchain_format
         return 0;
 }
 
+static void map_new_buffer(struct video_frame *f){
+        glBufferData(GL_PIXEL_UNPACK_BUFFER, f->tiles[0].data_len, 0, GL_STREAM_DRAW);
+        f->tiles[0].data = (char *) glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+}
+
 static void recycle_frame(video_frame *f){
         GlBuffer *pbo = static_cast<GlBuffer *>(f->callbacks.dispose_udata);
         if(!pbo){
@@ -460,9 +466,7 @@ static void recycle_frame(video_frame *f){
         if(f->tiles[0].data){
                 glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
         }
-        glBufferData(GL_PIXEL_UNPACK_BUFFER, f->tiles[0].data_len, 0, GL_STREAM_DRAW);
-        f->tiles[0].data = (char *) glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_READ_WRITE); //TODO change to write only
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+        map_new_buffer(f);
 }
 
 static void delete_frame(video_frame *f){
@@ -486,9 +490,8 @@ static video_frame *allocate_frame(state_xrgl *s){
         GlBuffer *pbo = new GlBuffer();
         buffer->callbacks.dispose_udata = pbo;
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo->get());
-        glBufferData(GL_PIXEL_UNPACK_BUFFER, buffer->tiles[0].data_len, 0, GL_STREAM_DRAW);
-        buffer->tiles[0].data = (char *) glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_READ_WRITE); //TODO change to write only
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+        map_new_buffer(buffer);
 
         return buffer;
 }
