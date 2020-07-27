@@ -466,9 +466,9 @@ static void recycle_frame(video_frame *f){
 }
 
 static void delete_frame(video_frame *f){
+        GlBuffer *pbo = static_cast<GlBuffer *>(f->callbacks.dispose_udata);
         vf_free(f);
 
-        GlBuffer *pbo = static_cast<GlBuffer *>(f->callbacks.dispose_udata);
         if(!pbo){
                 return;
         }
