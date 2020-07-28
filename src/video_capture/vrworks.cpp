@@ -156,14 +156,14 @@ vidcap_vrworks_probe(bool verbose, void (**deleter)(void *))
 {
         UNUSED(verbose);
         *deleter = free;
-	struct vidcap_type*		vt;
+        struct vidcap_type* vt;
     
-	vt = (struct vidcap_type *) calloc(1, sizeof(struct vidcap_type));
-	if (vt != NULL) {
-		vt->name        = "vrworks";
-		vt->description = "vrworks video capture";
-	}
-	return vt;
+        vt = (struct vidcap_type *) calloc(1, sizeof(struct vidcap_type));
+        if (vt != NULL) {
+                vt->name        = "vrworks";
+                vt->description = "vrworks video capture";
+        }
+        return vt;
 }
 
 static void calculate_roi(vidcap_vrworks_state *s){
@@ -656,7 +656,7 @@ error:
 static void
 vidcap_vrworks_done(void *state)
 {
-	struct vidcap_vrworks_state *s = (struct vidcap_vrworks_state *) state;
+        struct vidcap_vrworks_state *s = (struct vidcap_vrworks_state *) state;
 
         if(!s) return;
 
@@ -808,11 +808,7 @@ static void report_stats(vidcap_vrworks_state *s){
         }  
 }
 
-static struct video_frame *
-vidcap_vrworks_grab(void *state, struct audio_frame **audio)
-{
-	struct vidcap_vrworks_state *s = (struct vidcap_vrworks_state *) state;
-        nvstitchResult res;
+static double wait_for_frames(struct vidcap_vrworks_state *s){
 
         double fps = std::numeric_limits<double>::max();
         for (auto& worker : s->capture_workers) {
@@ -822,12 +818,18 @@ vidcap_vrworks_grab(void *state, struct audio_frame **audio)
                         fps = worker.grabbed_fps;
         }
 
+        return fps;
+}
+
+static struct video_frame *stitch(struct vidcap_vrworks_state *s){
+        nvstitchResult res;
+
         res = nvssVideoStitch(s->stitcher);
         if(res != NVSTITCH_SUCCESS){
                 std::cout << std::endl << "Failed to stitch." << std::endl;
                 return NULL;
         }
-		//cudaStreamSynchronize(cudaStreamDefault);
+        //cudaStreamSynchronize(cudaStreamDefault);
 
         cudaStream_t out_stream;
         res = nvssVideoGetOutputStream(s->stitcher, NVSTITCH_EYE_MONO, &out_stream);
@@ -840,6 +842,29 @@ vidcap_vrworks_grab(void *state, struct audio_frame **audio)
                 return NULL;
         }
 
+        if (cudaStreamSynchronize(out_stream) != cudaSuccess)
+        {
+                std::cerr << "Error synchronizing with the output CUDA stream" << std::endl;
+                return NULL;
+        }
+
+        return s->frame;
+}
+
+static struct video_frame *
+vidcap_vrworks_grab(void *state, struct audio_frame **audio)
+{
+        struct vidcap_vrworks_state *s = (struct vidcap_vrworks_state *) state;
+        nvstitchResult res;
+
+        double fps = wait_for_frames(s);
+
+        video_frame *f = stitch(s);
+        if(!f){
+                return nullptr;
+        }
+
+        //res = nvssVideoStitch(s->stitcher);
         std::unique_lock<std::mutex> stitch_lk(s->stitched_mut);
         s->stitched_count += 1;
         stitch_lk.unlock();
@@ -848,23 +873,15 @@ vidcap_vrworks_grab(void *state, struct audio_frame **audio)
         //If s->fps == -1 it means it was not set by user so we use the fps
         //of the slowest grabber
         if(s->fps <= 0){
-                s->frame->fps = fps;
+                f->fps = fps;
         } else {
-                s->frame->fps = s->fps;
+                f->fps = s->fps;
         }
-
-#if 1
-        if (cudaStreamSynchronize(out_stream) != cudaSuccess)
-        {
-                std::cerr << "Error synchronizing with the output CUDA stream" << std::endl;
-                return NULL;
-        }
-#endif
 
         s->frames++;
         report_stats(s);
 
-        return s->frame;
+        return f;
 }
 
 static const struct video_capture_info vidcap_vrworks_info = {
