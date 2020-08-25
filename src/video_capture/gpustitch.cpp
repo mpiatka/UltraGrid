@@ -306,12 +306,13 @@ static void upload_tiles(grab_worker_state *gs){
                 unsigned char *src = static_cast<unsigned char *>(gs->tmp_rgba_frame);
                 src += (order[i] % 2) * tile_pitch;
                 src += (order[i] / 2) * src_pitch * tile_height;
-                if (cudaMemcpy2D((unsigned char *)input_image->data(),
+                if (cudaMemcpy2DAsync((unsigned char *)input_image->data(),
                                         input_image->get_pitch(),
                                         src,
                                         gs->tmp_rgba_frame_pitch,
                                         tile_pitch, tile_height,
-                                        cudaMemcpyDeviceToDevice) != cudaSuccess)
+                                        cudaMemcpyDeviceToDevice,
+                                        stream) != cudaSuccess)
                 {
                         std::cerr << "Error copying RGBA image bitmap to CUDA buffer" << std::endl;
                         continue;
@@ -435,28 +436,52 @@ static bool init_stitcher(struct vidcap_gpustitch_state *s){
         params.width = 3840;
         params.height = 2160;
 
-        params.focal_len = 1173.753;
-        params.yaw = toRadian(0.02325995);
-        params.pitch = toRadian(-0.832604);
-        params.roll = toRadian(90.0565);
+        params.focal_len = 1185.429921;
+        params.yaw = toRadian(0);
+        params.pitch = toRadian(0);
+        params.roll = toRadian(90.0);
+        params.distortion[0] = -0.09994f;
+        params.distortion[1] = 0.30684f;
+        params.distortion[2] = -0.33116f;
+        params.distortion[3] = 1.12426f;
+        params.x_offset = -33.8f;
+        params.y_offset = 14.5f;
         s->cam_properties.push_back(params);
 
-        params.focal_len = 1198.055;
-        params.yaw = toRadian(90.89778);
-        params.pitch = toRadian(-0.379786);
-        params.roll = toRadian(90.3411);
+        params.focal_len = 1185.429921;
+        params.yaw = toRadian(90.366);
+        params.pitch = toRadian(1.211);
+        params.roll = toRadian(90.398);
+        params.distortion[0] = -0.09994f;
+        params.distortion[1] = 0.30684f;
+        params.distortion[2] = -0.33116f;
+        params.distortion[3] = 1.12426f;
+        params.x_offset = -33.8f;
+        params.y_offset = 14.5f;
         s->cam_properties.push_back(params);
 
-        params.focal_len = 1181.822;
-        params.yaw = toRadian(-177.1611);
-        params.pitch = toRadian(-0.679113);
-        params.roll = toRadian(89.41799);
+        params.focal_len = 1185.429921;
+        params.yaw = toRadian(178.857);
+        params.pitch = toRadian(0.675);
+        params.roll = toRadian(89.969);
+        params.distortion[0] = -0.09994f;
+        params.distortion[1] = 0.30684f;
+        params.distortion[2] = -0.33116f;
+        params.distortion[3] = 1.12426f;
+        params.x_offset = -33.8f;
+        params.y_offset = 14.5f;
         s->cam_properties.push_back(params);
 
-        params.focal_len = 1164.125;
-        params.yaw = toRadian(-88.45461);
-        params.pitch = toRadian(0.9491351);
-        params.roll = toRadian(89.92228);
+        params.focal_len = 1185.429921;
+        params.yaw = toRadian(-90.549);
+        params.pitch = toRadian(0.811);
+        params.roll = toRadian(89.742);
+        params.distortion[0] = -0.09994f;
+        params.distortion[1] = 0.30684f;
+        params.distortion[2] = -0.33116f;
+        params.distortion[3] = 1.12426f;
+        params.x_offset = -33.8f;
+        params.y_offset = 14.5f;
         s->cam_properties.push_back(params);
 
         gpustitch::Stitcher_params stitch_params;
