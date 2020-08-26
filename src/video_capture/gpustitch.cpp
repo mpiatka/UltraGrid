@@ -59,6 +59,7 @@
 #include <thread>
 #include <condition_variable>
 #include <libgpustitch/stitcher.hpp>
+#include <libgpustitch/config_utils.hpp>
 #include <cuda.h>
 #include <cuda_runtime.h>
 
@@ -432,61 +433,11 @@ static bool init_stitcher(struct vidcap_gpustitch_state *s){
                 }
         }
 
-        gpustitch::Cam_params params;
-        params.width = 3840;
-        params.height = 2160;
-
-        params.focal_len = 1185.429921;
-        params.yaw = toRadian(0);
-        params.pitch = toRadian(0);
-        params.roll = toRadian(90.0);
-        params.distortion[0] = -0.09994f;
-        params.distortion[1] = 0.30684f;
-        params.distortion[2] = -0.33116f;
-        params.distortion[3] = 1.12426f;
-        params.x_offset = -33.8f;
-        params.y_offset = 14.5f;
-        s->cam_properties.push_back(params);
-
-        params.focal_len = 1185.429921;
-        params.yaw = toRadian(90.366);
-        params.pitch = toRadian(1.211);
-        params.roll = toRadian(90.398);
-        params.distortion[0] = -0.09994f;
-        params.distortion[1] = 0.30684f;
-        params.distortion[2] = -0.33116f;
-        params.distortion[3] = 1.12426f;
-        params.x_offset = -33.8f;
-        params.y_offset = 14.5f;
-        s->cam_properties.push_back(params);
-
-        params.focal_len = 1185.429921;
-        params.yaw = toRadian(178.857);
-        params.pitch = toRadian(0.675);
-        params.roll = toRadian(89.969);
-        params.distortion[0] = -0.09994f;
-        params.distortion[1] = 0.30684f;
-        params.distortion[2] = -0.33116f;
-        params.distortion[3] = 1.12426f;
-        params.x_offset = -33.8f;
-        params.y_offset = 14.5f;
-        s->cam_properties.push_back(params);
-
-        params.focal_len = 1185.429921;
-        params.yaw = toRadian(-90.549);
-        params.pitch = toRadian(0.811);
-        params.roll = toRadian(89.742);
-        params.distortion[0] = -0.09994f;
-        params.distortion[1] = 0.30684f;
-        params.distortion[2] = -0.33116f;
-        params.distortion[3] = 1.12426f;
-        params.x_offset = -33.8f;
-        params.y_offset = 14.5f;
-        s->cam_properties.push_back(params);
-
         gpustitch::Stitcher_params stitch_params;
         stitch_params.width = s->width;
         stitch_params.height = s->width / 2;
+
+        gpustitch::read_params(s->spec_path, stitch_params, s->cam_properties);
 
         s->stitcher = gpustitch::Stitcher(stitch_params, s->cam_properties);
 
