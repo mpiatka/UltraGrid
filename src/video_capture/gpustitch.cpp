@@ -286,13 +286,6 @@ static void upload_tiles(grab_worker_state *gs){
                 return;
         }
         for(int i = 0; i < 4; i++){
-                gpustitch::Image_cuda *input_image;
-                input_image = gs->s->stitcher.get_input_image(i);
-                if(!input_image){
-                        std::cerr << std::endl << "Failed to get input buffer." << std::endl;
-                        continue;
-                }
-
                 cudaStream_t stream;
 
                 gs->s->stitcher.get_input_stream(i, &stream);
@@ -307,18 +300,10 @@ static void upload_tiles(grab_worker_state *gs){
                 unsigned char *src = static_cast<unsigned char *>(gs->tmp_rgba_frame);
                 src += (order[i] % 2) * tile_pitch;
                 src += (order[i] / 2) * src_pitch * tile_height;
-                if (cudaMemcpy2DAsync((unsigned char *)input_image->data(),
-                                        input_image->get_pitch(),
-                                        src,
-                                        gs->tmp_rgba_frame_pitch,
-                                        tile_pitch, tile_height,
-                                        cudaMemcpyDeviceToDevice,
-                                        stream) != cudaSuccess)
-                {
-                        std::cerr << "Error copying RGBA image bitmap to CUDA buffer" << std::endl;
-                        continue;
-                }
-                gs->s->stitcher.submit_input_image(i);
+                gs->s->stitcher.submit_input_image_async(i, src,
+                                gs->width / 2, gs->height / 2,
+                                gs->tmp_rgba_frame_pitch,
+                                gpustitch::Src_mem_kind::Device);
 
         }
 }
