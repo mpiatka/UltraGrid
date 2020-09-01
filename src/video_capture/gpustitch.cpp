@@ -214,6 +214,7 @@ static bool check_in_format(grab_worker_state *gs, video_frame *in, int i){
 }
 
 static bool upload_to_cuda_buf(grab_worker_state *gs, video_frame *in_frame,
+                size_t x_offset, size_t y_offset, size_t w, size_t h,
                 unsigned char *dst,
                 unsigned dst_pitch,
                 cudaStream_t stream)
@@ -221,25 +222,34 @@ static bool upload_to_cuda_buf(grab_worker_state *gs, video_frame *in_frame,
         unsigned int width = in_frame->tiles[0].width;
         unsigned int height = in_frame->tiles[0].height;
         int in_line_size = vc_get_linesize(width, in_frame->color_spec);
+        int roi_line_size = vc_get_linesize(w, in_frame->color_spec);
+
+        size_t offset_bytes = y_offset * in_line_size
+                + vc_get_linesize(x_offset, in_frame->color_spec); 
+
+        w = (w / get_pf_block_size(in_frame->color_spec)) * get_pf_block_size(in_frame->color_spec);
 
         if(gs->conv_func){
-                if (cudaMemcpyAsync(gs->tmp_in_frame,
-                                        (unsigned char *) in_frame->tiles[0].data,
-                                        in_line_size * height,
+                if (cudaMemcpy2DAsync(gs->tmp_in_frame + offset_bytes,
+                                        in_line_size,
+                                        (unsigned char *)(in_frame->tiles[0].data) + offset_bytes,
+                                        in_line_size,
+                                        roi_line_size, h,
                                         cudaMemcpyHostToDevice, stream) != cudaSuccess)
                 {
                         std::cerr << "Error copying input image bitmap to CUDA buffer" << std::endl;
                         return false;
                 }
 
-                gs->conv_func(dst, dst_pitch,
-                                gs->tmp_in_frame, in_line_size,
-                                gs->width, gs->height, stream);
+                gs->conv_func(dst + y_offset * dst_pitch + vc_get_linesize(x_offset, RGBA),
+                                dst_pitch,
+                                gs->tmp_in_frame + offset_bytes, in_line_size,
+                                w, h, stream);
         } else {
-                if (cudaMemcpy2D(dst, dst_pitch,
-                                        (unsigned char *) in_frame->tiles[0].data,
+                if (cudaMemcpy2D(dst + y_offset * dst_pitch + vc_get_linesize(x_offset, RGBA), dst_pitch,
+                                        (unsigned char*)(in_frame->tiles[0].data) + offset_bytes,
                                         in_line_size,
-                                        in_line_size, height,
+                                        w, h,
                                         cudaMemcpyHostToDevice) != cudaSuccess)
                 {
                         std::cerr << "Error copying RGBA image bitmap to CUDA buffer" << std::endl;
@@ -277,14 +287,9 @@ static bool upload_frame(grab_worker_state *gs, video_frame *in_frame, int i){
                         */
 }
 
-static void upload_tiles(grab_worker_state *gs){
+static void upload_tiles(grab_worker_state *gs, video_frame *frame){
         const int order[] = {3, 1, 2, 0};
 
-        if (cudaStreamSynchronize(gs->tmp_in_frame_stream) != cudaSuccess)
-        {
-                std::cerr << "Error synchronizing with the output CUDA stream" << std::endl;
-                return;
-        }
         for(int i = 0; i < 4; i++){
                 cudaStream_t stream;
 
@@ -294,12 +299,25 @@ static void upload_tiles(grab_worker_state *gs){
                         continue;
                 }
 
-                unsigned src_pitch = gs->tmp_rgba_frame_pitch;
-                unsigned tile_pitch = gs->tmp_rgba_frame_pitch / 2;
                 unsigned tile_height = gs->height / 2;
+                unsigned tile_width = gs->width / 2;
+                unsigned src_pitch = gs->tmp_rgba_frame_pitch;
+                unsigned tile_line_len = gs->tmp_rgba_frame_pitch / 2;
+                unsigned x_offset = (order[i] % 2) * tile_width;
+                unsigned y_offset = (order[i] / 2) * tile_height;
+
+                upload_to_cuda_buf(gs,
+                                frame,
+                                x_offset, y_offset, tile_width, tile_height,
+                                gs->tmp_rgba_frame,
+                                gs->tmp_rgba_frame_pitch,
+                                stream
+                                );
+
                 unsigned char *src = static_cast<unsigned char *>(gs->tmp_rgba_frame);
-                src += (order[i] % 2) * tile_pitch;
+                src += (order[i] % 2) * tile_line_len;
                 src += (order[i] / 2) * src_pitch * tile_height;
+
                 gs->s->stitcher.submit_input_image_async(i, src,
                                 gs->width / 2, gs->height / 2,
                                 gs->tmp_rgba_frame_pitch,
@@ -362,14 +380,7 @@ static void grab_worker(grab_worker_state *gs, vidcap_params *param, int id){
                 if (check_in_format(gs, frame, id)){
                         PROFILE_DETAIL("Upload");
                         if(gs->tiled){
-                                upload_to_cuda_buf(gs,
-                                                frame,
-                                                gs->tmp_rgba_frame,
-                                                gs->tmp_rgba_frame_pitch,
-                                                gs->tmp_in_frame_stream
-                                                );
-
-                                upload_tiles(gs);
+                                upload_tiles(gs, frame);
 
                         } else {
                                 upload_frame(gs, frame, id);
@@ -775,7 +786,6 @@ static struct video_frame *stitch(struct vidcap_gpustitch_state *s){
                 std::cout << std::endl << "Failed to stitch." << std::endl;
                 return NULL;
         }
-        //cudaStreamSynchronize(cudaStreamDefault);
 
         cudaStream_t out_stream;
         s->stitcher.get_output_stream(&out_stream);
@@ -785,6 +795,7 @@ static struct video_frame *stitch(struct vidcap_gpustitch_state *s){
                 return NULL;
         }
 
+        cudaStreamSynchronize(out_stream);
         std::unique_lock<std::mutex> stitch_lk(s->stitched_mut);
         s->stitched_count += 1;
         stitch_lk.unlock();
