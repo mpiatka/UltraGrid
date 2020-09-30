@@ -695,7 +695,6 @@ static bool download_stitched(vidcap_gpustitch_state *s, cudaStream_t out_stream
                 src_pitch = vc_get_linesize(w, s->out_fmt);
                 row_bytes = src_pitch;
         }
-
         if (cudaMemcpy2DAsync(s->frame->tiles[0].data, row_bytes,
                                 src, src_pitch,
                                 row_bytes, h,
@@ -795,7 +794,6 @@ static struct video_frame *stitch(struct vidcap_gpustitch_state *s){
                 return NULL;
         }
 
-        cudaStreamSynchronize(out_stream);
         std::unique_lock<std::mutex> stitch_lk(s->stitched_mut);
         s->stitched_count += 1;
         stitch_lk.unlock();
