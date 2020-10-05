@@ -263,29 +263,27 @@ static bool upload_to_cuda_buf(grab_worker_state *gs, video_frame *in_frame,
 }
 
 static bool upload_frame(grab_worker_state *gs, video_frame *in_frame, int i){
-        /*
-        nvstitchImageBuffer_t input_image;
-        nvstitchResult res;
-        res = nvssVideoGetInputBuffer(gs->s->stitcher, i, &input_image);
-        if(res != NVSTITCH_SUCCESS){
-                std::cerr << std::endl << "Failed to get input buffer." << std::endl;
-                return false;
-        }
-
         cudaStream_t stream;
+        gs->s->stitcher.get_input_stream(i, &stream);
 
-        res = nvssVideoGetInputStream(gs->s->stitcher, i, &stream);
-        if(res != NVSTITCH_SUCCESS){
+        if(!stream){
                 std::cerr << std::endl << "Failed to get input stream." << std::endl;
                 return false;
         }
 
-        return upload_to_cuda_buf(gs,
+        upload_to_cuda_buf(gs,
                         in_frame,
-                        static_cast<unsigned char *>(input_image.dev_ptr),
-                        input_image.pitch,
+                        0, 0, gs->width, gs->height,
+                        gs->tmp_rgba_frame,
+                        gs->tmp_rgba_frame_pitch,
                         stream);
-                        */
+
+        gs->s->stitcher.submit_input_image_async(i, gs->tmp_rgba_frame,
+                        gs->width, gs->height,
+                        gs->tmp_rgba_frame_pitch,
+                        gpustitch::Src_mem_kind::Device);
+
+        return true;
 }
 
 static void upload_tiles(grab_worker_state *gs, video_frame *frame){
@@ -295,10 +293,6 @@ static void upload_tiles(grab_worker_state *gs, video_frame *frame){
                 cudaStream_t stream;
 
                 gs->s->stitcher.get_input_stream(i, &stream);
-                if(!stream){
-                        std::cerr << std::endl << "Failed to get input stream." << std::endl;
-                        continue;
-                }
 
                 unsigned tile_height = gs->height / 2;
                 unsigned tile_width = gs->width / 2;
@@ -339,11 +333,11 @@ static void grab_worker(grab_worker_state *gs, vidcap_params *param, int id){
         if(gs->tiled){
                 gs->width *= 2;
                 gs->height *= 2;
-
-                int in_line_size = vc_get_linesize(gs->width, RGBA);
-                gs->tmp_rgba_frame_pitch = in_line_size;
-                cudaMalloc(&gs->tmp_rgba_frame, in_line_size * gs->height);
         }
+
+        int in_line_size = vc_get_linesize(gs->width, RGBA);
+        gs->tmp_rgba_frame_pitch = in_line_size;
+        cudaMalloc(&gs->tmp_rgba_frame, in_line_size * gs->height);
 
         vidcap *device = nullptr;
 
@@ -435,6 +429,12 @@ static bool init_stitcher(struct vidcap_gpustitch_state *s){
         stitch_params.height = s->width / 2;
 
         gpustitch::read_params(s->spec_path, stitch_params, s->cam_properties);
+
+        if(s->cam_properties.size() != s->devices_cnt){
+                log_msg(LOG_LEVEL_ERROR, "Number of capture devices is different from specified number of cameras!\n");
+                if(s->cam_properties.size() < s->devices_cnt)
+                        return false;
+        }
 
         s->stitcher = gpustitch::Stitcher(stitch_params, s->cam_properties);
 
