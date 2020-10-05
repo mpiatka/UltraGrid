@@ -438,53 +438,6 @@ static bool init_stitcher(struct vidcap_gpustitch_state *s){
 
         s->stitcher = gpustitch::Stitcher(stitch_params, s->cam_properties);
 
-        /*
-        // Fetch rig parameters from XML file.
-        if (!xmlutil::readCameraRigXml(s->spec_path, s->cam_properties, &s->rig_properties))
-        {
-                std::cerr << log_str << "Failed to retrieve rig paramters from XML file." << std::endl;
-                return false;
-        }
-
-        if(s->roi.width == 0 || s->roi.height == 0){
-                //calculate_roi(s);
-        }
-
-        s->stitcher_properties = { 0 };
-#if 0
-        s->stitcher_properties.version = NVSTITCH_VERSION;
-        s->stitcher_properties.pano_width = 7680;
-        s->stitcher_properties.quality = NVSTITCH_STITCHER_QUALITY_HIGH;
-        s->stitcher_properties.num_gpus = 1;
-        s->stitcher_properties.ptr_gpus = &selected_gpu;
-        s->stitcher_properties.pipeline = NVSTITCH_STITCHER_PIPELINE_MONO_EQ;
-        s->stitcher_properties.projection = NVSTITCH_PANORAMA_PROJECTION_EQUIRECTANGULAR;
-        s->stitcher_properties.output_roi = nvstitchRect_t{};
-#else
-
-        s->stitcher_properties.version = NVSTITCH_VERSION;
-        //s->stitcher_properties.format = 
-        s->stitcher_properties.pipeline = s->pipeline;
-        s->stitcher_properties.quality = s->quality;
-        s->stitcher_properties.projection = NVSTITCH_PANORAMA_PROJECTION_EQUIRECTANGULAR;
-        s->stitcher_properties.pano_width = s->width;
-        //s->stitcher_properties.stereo_ipd = 6.3f;
-        //s->stitcher_properties.feather_width = 2.0f;
-        s->stitcher_properties.num_gpus = 1;
-        s->stitcher_properties.ptr_gpus = &selected_gpu;
-        //s->stitcher_properties.min_dist = 300;
-        //s->stitcher_properties.mono_flags |= NVSTITCH_MONO_FLAGS_ENABLE_DEPTH_ALIGNMENT;
-        s->stitcher_properties.output_roi = s->roi;
-#endif
-
-        nvstitchResult res;
-        res = nvssVideoCreateInstance(&s->stitcher_properties, &s->rig_properties, &s->stitcher);
-        if(res != NVSTITCH_SUCCESS){
-                std::cout << log_str << "Failed to create stitcher instance." << std::endl;
-                return false;
-        }
-        */
-
         return true;
 }
 
@@ -619,10 +572,7 @@ vidcap_gpustitch_done(void *state)
         stop_grab_workers(s);
 
         free(s->captured_frames);
-        
         vf_free(s->frame);
-
-        //nvssVideoDestroyInstance(s->stitcher);
         cudaFree(s->conv_tmp_frame);
 
         delete s;
@@ -726,53 +676,6 @@ static void report_stats(vidcap_gpustitch_state *s){
                 log_msg(LOG_LEVEL_INFO, "[gpustitch cap.] %d frames in %g seconds = %g FPS\n", s->frames, seconds, fps);
                 s->t0 = s->t;
                 s->frames = 0;
-
-                /*
-                nvstitchOverlap_t overlap;
-                nvstitchSeam_t seam;
-                unsigned overlap_count;
-                if(s->pipeline != NVSTITCH_STITCHER_PIPELINE_MONO_EQ){
-                        return;
-                }
-                if(nvssVideoGetOverlapCount(s->stitcher, &overlap_count) != NVSTITCH_SUCCESS){
-                        log_msg(LOG_LEVEL_WARNING, "[gpustitch cap.] Unable to get overlap count\n");
-                        return;
-                } 
-                log_msg(LOG_LEVEL_INFO, "[gpustitch cap.] %u overlaps\n", overlap_count);
-
-                for(unsigned i = 0; i < overlap_count; i++){
-                        nvssVideoGetOverlapInfo(s->stitcher, i, &overlap, &seam);
-                        seam.reproj_width = 100;
-                        nvssVideoSetSeam(s->stitcher, i, &seam);
-                        log_msg(LOG_LEVEL_INFO, "overlap(%u,%u): %ux%u %u,%u\n",
-                                        overlap.camera_left,
-                                        overlap.camera_right,
-                                        overlap.overlap_rect.left,
-                                        overlap.overlap_rect.top,
-                                        overlap.overlap_rect.width,
-                                        overlap.overlap_rect.height
-                               );
-
-                        log_msg(LOG_LEVEL_INFO, "seam %d ", seam.reproj_width);
-                        switch(seam.seam_type){
-                                case NVSTITCH_SEAM_TYPE_VERTICAL:
-                                        log_msg(LOG_LEVEL_INFO, "(vertical) %u\n", seam.properties.vertical.x_offset);
-                                        break;
-                                case NVSTITCH_SEAM_TYPE_HORIZONTAL:
-                                        log_msg(LOG_LEVEL_INFO, "(horizontal) %u\n", seam.properties.horizontal.y_offset);
-                                        break;
-                                case NVSTITCH_SEAM_TYPE_DIAGONAL:
-                                        log_msg(LOG_LEVEL_INFO, "(diagonal) %u,%u %u,%u\n",
-                                                        seam.properties.diagonal.p1.x,
-                                                        seam.properties.diagonal.p1.y,
-                                                        seam.properties.diagonal.p2.x,
-                                                        seam.properties.diagonal.p2.y
-                                               );
-                                        break;
-
-                        }
-                }
-                */
         }  
 }
 
@@ -845,9 +748,6 @@ vidcap_gpustitch_grab(void *state, struct audio_frame **audio)
         } else {
                 f->fps = s->fps;
         }
-
-
-        //res = nvssVideoStitch(s->stitcher);
 
         s->frames++;
         report_stats(s);
