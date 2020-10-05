@@ -107,6 +107,7 @@ struct vidcap_gpustitch_state {
         double fps;
         codec_t out_fmt;
         bool tiled_capture = false;
+        bool output_cuda_buf = false;
 
         unsigned char *conv_tmp_frame = nullptr;
         void (*conv_func)(unsigned char *dst,
@@ -517,6 +518,8 @@ static void parse_fmt(vidcap_gpustitch_state *s, const char * const fmt){
                         s->out_fmt = get_codec_from_name(strchr(item, '=') + 1);
                 } else if(FMT_CMP("tiled")){
                         s->tiled_capture = true;
+                } else if(FMT_CMP("cudabuf")){
+                        s->output_cuda_buf = true;
                 }
                 init_fmt = NULL;
         }
@@ -644,9 +647,15 @@ static bool allocate_result_frame(vidcap_gpustitch_state *s, unsigned width, uns
         s->frame->tiles[0].data_len = vc_get_linesize(desc.width,
                         desc.color_spec) * desc.height;
 
-        if(cudaMallocHost(&s->frame->tiles[0].data, s->frame->tiles[0].data_len) != cudaSuccess){
-                std::cerr << log_str << "Failed to allocate result frame" << std::endl;
-                return false;
+        s->frame->callbacks.data_deleter = NULL;
+        s->frame->callbacks.recycle = NULL;
+
+        if(!s->output_cuda_buf){
+                if(cudaMallocHost(&s->frame->tiles[0].data, s->frame->tiles[0].data_len) != cudaSuccess){
+                        std::cerr << log_str << "Failed to allocate result frame" << std::endl;
+                        return false;
+                }
+                s->frame->callbacks.data_deleter = result_data_delete;
         }
 
         if(s->conv_func){
@@ -657,9 +666,6 @@ static bool allocate_result_frame(vidcap_gpustitch_state *s, unsigned width, uns
                         return false;
                 }
         }
-
-        s->frame->callbacks.data_deleter = result_data_delete;
-        s->frame->callbacks.recycle = NULL;
 
         return true;
 }
@@ -695,13 +701,18 @@ static bool download_stitched(vidcap_gpustitch_state *s, cudaStream_t out_stream
                 src_pitch = vc_get_linesize(w, s->out_fmt);
                 row_bytes = src_pitch;
         }
-        if (cudaMemcpy2DAsync(s->frame->tiles[0].data, row_bytes,
-                                src, src_pitch,
-                                row_bytes, h,
-                                cudaMemcpyDeviceToHost, out_stream) != cudaSuccess)
-        {
-                std::cerr << log_str << "Error copying output panorama from CUDA buffer" << std::endl;
-                return false;
+
+        if(s->output_cuda_buf){
+                s->frame->tiles[0].data = (char *) src;
+        } else {
+                if (cudaMemcpy2DAsync(s->frame->tiles[0].data, row_bytes,
+                                        src, src_pitch,
+                                        row_bytes, h,
+                                        cudaMemcpyDeviceToHost, out_stream) != cudaSuccess)
+                {
+                        std::cerr << log_str << "Error copying output panorama from CUDA buffer" << std::endl;
+                        return false;
+                }
         }
 
         return true;
