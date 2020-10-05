@@ -430,7 +430,7 @@ static bool init_stitcher(struct vidcap_gpustitch_state *s){
 
         gpustitch::read_params(s->spec_path, stitch_params, s->cam_properties);
 
-        if(s->cam_properties.size() != s->devices_cnt){
+        if(s->cam_properties.size() != s->devices_cnt && !(s->tiled_capture && s->devices_cnt == 1)){
                 log_msg(LOG_LEVEL_ERROR, "Number of capture devices is different from specified number of cameras!\n");
                 if(s->cam_properties.size() < s->devices_cnt)
                         return false;
