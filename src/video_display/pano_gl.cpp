@@ -295,6 +295,7 @@ static const struct video_display_info display_panogl_info = {
         display_panogl_get_property,
         NULL,
         NULL,
+        DISPLAY_NEEDS_MAINLOOP,
 };
 
 REGISTER_MODULE(pano_gl, &display_panogl_info, LIBRARY_CLASS_VIDEO_DISPLAY, VIDEO_DISPLAY_ABI_VERSION);
