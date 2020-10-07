@@ -1038,6 +1038,7 @@ static const struct video_display_info openxr_gl_info = {
         display_xrgl_get_property,
         NULL,
         NULL,
+        DISPLAY_NEEDS_MAINLOOP,
 };
 
 REGISTER_MODULE(openxr_gl, &openxr_gl_info, LIBRARY_CLASS_VIDEO_DISPLAY, VIDEO_DISPLAY_ABI_VERSION);
