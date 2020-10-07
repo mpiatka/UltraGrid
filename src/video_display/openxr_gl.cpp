@@ -637,6 +637,11 @@ static void display_xrgl_run(void *state){
                                         s->window.height = event.window.data2;
                                 }
                                 break;
+                        case SDL_KEYDOWN:
+                        case SDL_KEYUP:
+                                if(event.key.keysym.sym == SDLK_q)
+                                        running = false;
+                                break;
                         default:
                                 break;
                         }
