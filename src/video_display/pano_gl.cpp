@@ -34,6 +34,7 @@ struct state_vr{
 	Sdl_window window;
 
 	bool running = false;
+	bool fs = false;
 
 	unsigned sdl_frame_event;
 	unsigned sdl_redraw_event;
@@ -104,6 +105,23 @@ static void handle_window_event(state_vr *s, SDL_Event *event){
 	}
 }
 
+static void handle_keyboard_event(state_vr *s, SDL_Event *event){
+	if(event->key.type == SDL_KEYDOWN){
+		switch(event->key.keysym.sym){
+			case SDLK_f:
+				s->fs = !s->fs;
+                SDL_SetWindowFullscreen(s->window.sdl_window, s->fs ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+				redraw(s);
+				break;
+			case SDLK_q:
+				exit_uv(0);
+				break;
+			default:
+				break;
+		}
+	}
+}
+
 static void handle_user_event(state_vr *s, SDL_Event *event){
 	if(event->type == s->sdl_frame_event){
 		std::unique_lock<std::mutex> lk(s->lock);
@@ -162,6 +180,9 @@ static void display_panogl_run(void *state) {
 				break;
 			case SDL_WINDOWEVENT:
 				handle_window_event(s, &event);
+				break;
+			case SDL_KEYDOWN:
+				handle_keyboard_event(s, &event);
 				break;
 			case SDL_QUIT:
 				exit_uv(0);
