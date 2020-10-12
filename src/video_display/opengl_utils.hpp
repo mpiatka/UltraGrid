@@ -6,6 +6,8 @@
 #include <GL/glx.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_opengl.h>
+#include <mutex>
+#include <memory>
 
 #include "types.h"
 
@@ -79,11 +81,14 @@ public:
         Texture& operator=(const Texture&) = delete;
         Texture& operator=(Texture&& o) { swap(o); return *this; }
 
-private:
         void swap(Texture& o){
                 std::swap(tex_id, o.tex_id);
+                std::swap(width, o.width);
+                std::swap(height, o.height);
+                std::swap(format, o.format);
                 std::swap(pbo, o.pbo);
         }
+private:
         GLuint tex_id = 0;
         int width = 0;
         int height = 0;
@@ -180,8 +185,12 @@ struct Scene{
         GlProgram program;// = GlProgram(persp_vert_src, persp_frag_src);
         Model model;// = Model::get_sphere();
         Texture texture;
+        Texture back_texture;
+        std::mutex tex_mut;
+        bool uploading_next_tex = false;
+
         Framebuffer framebuffer;
-        Yuv_convertor conv;
+        std::unique_ptr<Yuv_convertor> conv;
         float rot_x = 0;
         float rot_y = 0;
         float fov = 55;
@@ -208,10 +217,15 @@ struct Sdl_window{
                 SDL_SetWindowTitle(sdl_window, title.c_str());
         }
 
+        void make_render_context_current();
+        void make_worker_context_current();
+        SDL_GLContext get_worker_context();
+
         void swap(Sdl_window& o);
 
         SDL_Window *sdl_window;
         SDL_GLContext sdl_gl_context;
+        SDL_GLContext sdl_gl_worker_context = nullptr;
         int width;
         int height;
 };
