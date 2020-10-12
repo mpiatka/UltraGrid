@@ -413,6 +413,14 @@ void Scene::render(int width, int height, const glm::mat4& pvMat){
         pvLoc = glGetUniformLocation(program.get(), "pv_mat");
         glUniformMatrix4fv(pvLoc, 1, GL_FALSE, glm::value_ptr(pvMat));
 
+        {//lock
+                std::lock_guard<std::mutex> lock(tex_mut);
+                if(uploading_next_tex){
+                        texture.swap(back_texture);
+                        uploading_next_tex = false;
+                }
+        }
+
         glBindTexture(GL_TEXTURE_2D, texture.get());
         model.render();
 }
@@ -420,18 +428,28 @@ void Scene::render(int width, int height, const glm::mat4& pvMat){
 void Scene::put_frame(video_frame *f, bool pbo_frame){
         PROFILE_FUNC;
 
-        glBindTexture(GL_TEXTURE_2D, texture.get());
-        texture.allocate(f->tiles[0].width, f->tiles[0].height, GL_RGB);
+        glBindTexture(GL_TEXTURE_2D, back_texture.get());
+        back_texture.allocate(f->tiles[0].width, f->tiles[0].height, GL_RGB);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
         if(f->color_spec == UYVY){
-                conv.attach_texture(texture);
-                conv.put_frame(f, pbo_frame);
+                if(!conv){
+                        conv = std::unique_ptr<Yuv_convertor>(new Yuv_convertor());
+                }
+                conv->attach_texture(back_texture);
+                conv->put_frame(f, pbo_frame);
         } else {
-                texture.upload_frame(f, pbo_frame);
+                back_texture.upload_frame(f, pbo_frame);
+        }
+
+        glFinish();
+
+        {
+                std::lock_guard<std::mutex> lock(tex_mut);
+                uploading_next_tex = true;
         }
 }
 
@@ -561,6 +579,24 @@ void Sdl_window::getXlibHandles(Display  **xDisplay,
         *xDisplay = XOpenDisplay(NULL);
         *glxContext = glXGetCurrentContext();
         *glxDrawable = glXGetCurrentDrawable();
+}
+
+void Sdl_window::make_render_context_current(){
+        SDL_GL_MakeCurrent(sdl_window, sdl_gl_context);
+}
+
+void Sdl_window::make_worker_context_current(){
+        SDL_GL_MakeCurrent(sdl_window, sdl_gl_worker_context);
+}
+
+SDL_GLContext Sdl_window::get_worker_context(){
+        if(!sdl_gl_context){
+                SDL_GL_MakeCurrent(sdl_window, sdl_gl_context);
+                SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
+                sdl_gl_worker_context = SDL_GL_CreateContext(sdl_window);
+        }
+
+        return sdl_gl_context;
 }
 
 void Sdl_window::swap(Sdl_window& o){
