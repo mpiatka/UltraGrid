@@ -5,6 +5,7 @@
 #endif
 
 #include <chrono>
+#include <thread>
 
 #include <assert.h>
 //#include <GL/glew.h>
@@ -454,6 +455,10 @@ static int64_t select_swapchain_fmt(const std::vector<int64_t>& swapchain_format
 static void map_new_buffer(struct video_frame *f){
         glBufferData(GL_PIXEL_UNPACK_BUFFER, f->tiles[0].data_len, 0, GL_STREAM_DRAW);
         f->tiles[0].data = (char *) glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY);
+        GLenum ret = glGetError();
+        if(ret != GL_NO_ERROR){
+                std::cerr << "Error mapping: " << ret << std::endl;
+        }
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 }
 
@@ -496,10 +501,74 @@ static video_frame *allocate_frame(state_xrgl *s){
         return buffer;
 }
 
+static void worker(state_xrgl *s){
+        PROFILE_FUNC;
+        s->window.make_worker_context_current();
+        std::unique_lock<std::mutex> lk(s->lock);
+        for(size_t i = 0; i < MAX_BUFFER_SIZE; i++){
+                video_frame *buf = vf_alloc(1);
+                GlBuffer *pbo = new GlBuffer();
+                buf->callbacks.dispose_udata = pbo;
+                s->free_frame_pool.push_back(buf);
+        }
+        lk.unlock();
+        s->free_frame_ready_cv.notify_all();
+
+        bool running = true;
+        while(running){
+                lk.lock();
+                video_frame *frame = nullptr;
+                if(s->frame_queue.size() > 0){
+                        PROFILE_DETAIL("put_frame");
+                        frame = s->frame_queue.front();
+                        s->frame_queue.pop();
+                        if(!frame){
+                                SDL_Event event;
+                                event.type = SDL_QUIT;
+                                SDL_PushEvent(&event);
+                                running = false;
+                        }
+                }
+                lk.unlock();
+
+                if(frame){
+                        s->frame_consumed_cv.notify_one();
+                        s->scene.put_frame(frame, frame->callbacks.dispose_udata != nullptr);
+
+                        lk.lock();
+                        s->dispose_frame_pool.push_back(frame);
+                        lk.unlock();
+                } else if(!s->dispose_frame_pool.empty()){
+                        PROFILE_DETAIL("Process disposed frames");
+                        lk.lock();
+                        for(video_frame *f : s->dispose_frame_pool){
+                                if (video_desc_eq(video_desc_from_frame(f), s->current_desc)) {
+                                        recycle_frame(f);
+                                        s->free_frame_pool.push_back(f);
+                                } else {
+                                        delete_frame(f);
+
+                                        struct video_frame *buffer = allocate_frame(s);
+                                        s->free_frame_pool.push_back(buffer);
+                                }
+                        }
+                        s->dispose_frame_pool.clear();
+                        lk.unlock();
+                        s->free_frame_ready_cv.notify_all();
+                }
+        }
+}
+
 static void display_xrgl_run(void *state){
         PROFILE_FUNC;
 
         state_xrgl *s = static_cast<state_xrgl *>(state);
+
+        //Make sure the worker context is initialized before starting worker
+        s->window.make_worker_context_current();
+        s->window.make_render_context_current();
+
+        std::thread worker_thread(worker, s);
 
         Display *xDisplay = nullptr;
         GLXContext glxContext;
@@ -559,55 +628,7 @@ static void display_xrgl_run(void *state){
                 glEnable(GL_FRAMEBUFFER_SRGB);
         }
 
-        std::unique_lock<std::mutex> lk(s->lock);
-        for(size_t i = 0; i < MAX_BUFFER_SIZE; i++){
-                video_frame *buf = vf_alloc(1);
-                GlBuffer *pbo = new GlBuffer();
-                buf->callbacks.dispose_udata = pbo;
-                s->free_frame_pool.push_back(buf);
-        }
-        lk.unlock();
-        s->free_frame_ready_cv.notify_all();
-
         while(running){
-                lk.lock();
-                video_frame *frame = nullptr;
-                if(s->frame_queue.size() > 0){
-                        PROFILE_DETAIL("put_frame");
-                        frame = s->frame_queue.front();
-                        s->frame_queue.pop();
-                        if(!frame){
-                                running = false;
-                        }
-                }
-                lk.unlock();
-
-                if(frame){
-                        s->frame_consumed_cv.notify_one();
-                        s->scene.put_frame(frame, frame->callbacks.dispose_udata != nullptr);
-
-                        lk.lock();
-                        s->dispose_frame_pool.push_back(frame);
-                        lk.unlock();
-                } else if(!s->dispose_frame_pool.empty()){
-                        PROFILE_DETAIL("Process disposed frames");
-                        lk.lock();
-                        for(video_frame *f : s->dispose_frame_pool){
-                                if (video_desc_eq(video_desc_from_frame(f), s->current_desc)) {
-                                        recycle_frame(f);
-                                        s->free_frame_pool.push_back(f);
-                                } else {
-                                        delete_frame(f);
-
-                                        struct video_frame *buffer = allocate_frame(s);
-                                        s->free_frame_pool.push_back(buffer);
-                                }
-                        }
-                        s->dispose_frame_pool.clear();
-                        lk.unlock();
-                        s->free_frame_ready_cv.notify_all();
-                }
-
                 XrResult result;
 
                 XrFrameState frame_state{};
@@ -864,6 +885,7 @@ static void display_xrgl_run(void *state){
         }
 
         exit_uv(0);
+        worker_thread.join();
 }
 
 static void * display_xrgl_init(struct module *parent, const char *fmt, unsigned int flags) {

@@ -355,6 +355,7 @@ void Framebuffer::attach_texture(GLuint tex){
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glBindTexture(GL_TEXTURE_2D, 0);
 
+
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
         assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
@@ -586,17 +587,20 @@ void Sdl_window::make_render_context_current(){
 }
 
 void Sdl_window::make_worker_context_current(){
-        SDL_GL_MakeCurrent(sdl_window, sdl_gl_worker_context);
+        SDL_GLContext worker_context = get_worker_context();
+        SDL_GL_MakeCurrent(sdl_window, worker_context);
 }
 
 SDL_GLContext Sdl_window::get_worker_context(){
-        if(!sdl_gl_context){
+        if(!sdl_gl_worker_context){
                 SDL_GL_MakeCurrent(sdl_window, sdl_gl_context);
                 SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
                 sdl_gl_worker_context = SDL_GL_CreateContext(sdl_window);
+                SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
+                SDL_GL_MakeCurrent(sdl_window, sdl_gl_context);
         }
 
-        return sdl_gl_context;
+        return sdl_gl_worker_context;
 }
 
 void Sdl_window::swap(Sdl_window& o){
