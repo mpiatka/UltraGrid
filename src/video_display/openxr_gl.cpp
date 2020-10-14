@@ -515,32 +515,15 @@ static void worker(state_xrgl *s){
         s->free_frame_ready_cv.notify_all();
 
         bool running = true;
+        lk.lock();
         while(running){
-                lk.lock();
-                video_frame *frame = nullptr;
-                if(s->frame_queue.size() > 0){
-                        PROFILE_DETAIL("put_frame");
-                        frame = s->frame_queue.front();
-                        s->frame_queue.pop();
-                        if(!frame){
-                                SDL_Event event;
-                                event.type = SDL_QUIT;
-                                SDL_PushEvent(&event);
-                                running = false;
-                        }
-                }
-                lk.unlock();
-
-                if(frame){
-                        s->frame_consumed_cv.notify_one();
-                        s->scene.put_frame(frame, frame->callbacks.dispose_udata != nullptr);
-
-                        lk.lock();
-                        s->dispose_frame_pool.push_back(frame);
-                        lk.unlock();
-                } else if(!s->dispose_frame_pool.empty()){
+                PROFILE_DETAIL("Wait for frame");
+                s->new_frame_ready_cv.wait(lk,
+                                [s]{
+                                return !s->frame_queue.empty() || !s->dispose_frame_pool.empty();
+                                });
+                if(!s->dispose_frame_pool.empty()){
                         PROFILE_DETAIL("Process disposed frames");
-                        lk.lock();
                         for(video_frame *f : s->dispose_frame_pool){
                                 if (video_desc_eq(video_desc_from_frame(f), s->current_desc)) {
                                         recycle_frame(f);
@@ -553,8 +536,26 @@ static void worker(state_xrgl *s){
                                 }
                         }
                         s->dispose_frame_pool.clear();
-                        lk.unlock();
                         s->free_frame_ready_cv.notify_all();
+                }
+
+                if(!s->frame_queue.empty()){
+                        PROFILE_DETAIL("put_frame");
+                        video_frame *frame = s->frame_queue.front();
+                        s->frame_queue.pop();
+                        lk.unlock();
+                        if(!frame){
+                                SDL_Event event;
+                                event.type = SDL_QUIT;
+                                SDL_PushEvent(&event);
+                                running = false;
+                        } else {
+                                s->frame_consumed_cv.notify_one();
+                                s->scene.put_frame(frame, frame->callbacks.dispose_udata != nullptr);
+
+                                lk.lock();
+                                s->dispose_frame_pool.push_back(frame);
+                        }
                 }
         }
 }
@@ -932,6 +933,7 @@ static struct video_frame * display_xrgl_getf(void *state) {
                         return buffer;
                 } else {
                         s->dispose_frame_pool.push_back(buffer);
+                        s->new_frame_ready_cv.notify_one();
                 }
         }
 }
@@ -950,10 +952,12 @@ static int display_xrgl_putf(void *state, struct video_frame *frame, int nonbloc
 
         if (nonblock == PUTF_DISCARD) {
                 s->dispose_frame_pool.push_back(frame);
+                s->new_frame_ready_cv.notify_one();
                 return 0;
         }
         if (s->frame_queue.size() >= MAX_BUFFER_SIZE && nonblock == PUTF_NONBLOCK) {
                 s->dispose_frame_pool.push_back(frame);
+                s->new_frame_ready_cv.notify_one();
                 return 1;
         }
         s->frame_consumed_cv.wait(lk, [s]{return s->frame_queue.size() < MAX_BUFFER_SIZE;});
