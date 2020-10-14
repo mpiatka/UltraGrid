@@ -172,6 +172,32 @@ private:
         Texture yuv_tex;
 };
 
+class TripleBufferTexture{
+public:
+
+        Texture& get_back(){ return back; }
+        Texture& get_front(){ return back; }
+
+        void swap_back(){
+                back.swap(mid);
+                new_front_available = true;
+        }
+
+        void swap_front(){
+                front.swap(mid);
+                new_front_available = false;
+        }
+
+        bool is_new_front_available() const { return new_front_available; }
+
+private:
+        Texture back;
+        Texture front;
+        Texture mid;
+
+        bool new_front_available = false;
+};
+
 struct Scene{
         Scene();
 
@@ -184,10 +210,8 @@ struct Scene{
 
         GlProgram program;// = GlProgram(persp_vert_src, persp_frag_src);
         Model model;// = Model::get_sphere();
-        Texture texture;
-        Texture back_texture;
+        TripleBufferTexture tex;
         std::mutex tex_mut;
-        bool uploading_next_tex = false;
 
         Framebuffer framebuffer;
         std::unique_ptr<Yuv_convertor> conv;

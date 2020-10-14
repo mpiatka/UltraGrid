@@ -416,18 +416,19 @@ void Scene::render(int width, int height, const glm::mat4& pvMat){
 
         {//lock
                 std::lock_guard<std::mutex> lock(tex_mut);
-                if(uploading_next_tex){
-                        texture.swap(back_texture);
-                        uploading_next_tex = false;
+                if(tex.is_new_front_available()){
+                        tex.swap_front();
                 }
         }
 
-        glBindTexture(GL_TEXTURE_2D, texture.get());
+        glBindTexture(GL_TEXTURE_2D, tex.get_front().get());
         model.render();
 }
 
 void Scene::put_frame(video_frame *f, bool pbo_frame){
         PROFILE_FUNC;
+
+        Texture& back_texture = tex.get_back();
 
         glBindTexture(GL_TEXTURE_2D, back_texture.get());
         back_texture.allocate(f->tiles[0].width, f->tiles[0].height, GL_RGB);
@@ -450,7 +451,7 @@ void Scene::put_frame(video_frame *f, bool pbo_frame){
 
         {
                 std::lock_guard<std::mutex> lock(tex_mut);
-                uploading_next_tex = true;
+                tex.swap_back();
         }
 }
 
