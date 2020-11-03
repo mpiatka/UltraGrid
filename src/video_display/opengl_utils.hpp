@@ -176,7 +176,7 @@ class TripleBufferTexture{
 public:
 
         Texture& get_back(){ return back; }
-        Texture& get_front(){ return back; }
+        Texture& get_front(){ return front; }
 
         void swap_back(){
                 back.swap(mid);
