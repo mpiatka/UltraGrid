@@ -1235,7 +1235,7 @@ then
                 XRGLDISP_LIBS="-lSDL2"
         fi
         ADD_MODULE("display_xrgl", "$XRGLDISP_OBJ", "$XRGLDISP_LIBS")
-        XRGLDISP_LIB=$SDL2_LIB
+        XRGLDISP_LIBS+=$SDL2_LIB
 		INC="$INC $GLM_INC"
         xrgl_disp=yes
 fi

@@ -56,8 +56,16 @@ public:
                 session_create_info.next = &graphics_binding_gl;
                 session_create_info.systemId = systemId;
 
+                XrResult result;
 
-                XrResult result = xrCreateSession(instance, &session_create_info, &session);
+                PFN_xrGetOpenGLGraphicsRequirementsKHR pfnGetOpenGLGraphicsRequirementsKHR = nullptr;
+                result = xrGetInstanceProcAddr(instance, "xrGetOpenGLGraphicsRequirementsKHR",
+                                        reinterpret_cast<PFN_xrVoidFunction*>(&pfnGetOpenGLGraphicsRequirementsKHR));
+
+                XrGraphicsRequirementsOpenGLKHR graphicsRequirements{XR_TYPE_GRAPHICS_REQUIREMENTS_OPENGL_KHR};
+                result = pfnGetOpenGLGraphicsRequirementsKHR(instance, systemId, &graphicsRequirements);
+
+                result = xrCreateSession(instance, &session_create_info, &session);
                 if(!XR_SUCCEEDED(result)){
                         throw std::runtime_error("Failed to create OpenXR session!");
                 }
@@ -604,6 +612,7 @@ static void display_xrgl_run(void *state){
         size_t view_count = config_views.size();
         std::vector<XrCompositionLayerProjectionView> projection_views(view_count);
 
+
         XrCompositionLayerProjection projection_layer;
         projection_layer.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION;
         projection_layer.next = nullptr;
@@ -617,6 +626,20 @@ static void display_xrgl_run(void *state){
         for(auto& view : views){
                 view.type = XR_TYPE_VIEW;
                 view.next = nullptr;
+        }
+
+        for(unsigned i = 0; i < view_count; i++){
+                projection_views[i].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
+                projection_views[i].next = nullptr;
+                projection_views[i].subImage.swapchain = swapchains[i].get();
+                projection_views[i].subImage.imageArrayIndex = 0;
+                projection_views[i].subImage.imageRect.offset.x = 0;
+                projection_views[i].subImage.imageRect.offset.y = 0;
+                projection_views[i].subImage.imageRect.extent.width =
+                        config_views[i].recommendedImageRectWidth;
+                projection_views[i].subImage.imageRect.extent.height =
+                        config_views[i].recommendedImageRectHeight;
+
         }
 
         bool running = true;
@@ -780,20 +803,8 @@ static void display_xrgl_run(void *state){
                                 break;
                         }
 
-                        projection_views[i].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
-                        projection_views[i].next = nullptr;
                         projection_views[i].pose = views[i].pose;
                         projection_views[i].fov = views[i].fov;
-                        projection_views[i].subImage.swapchain = swapchains[i].get();
-                        projection_views[i].subImage.imageArrayIndex = buf_idx;
-                        projection_views[i].subImage.imageRect.offset.x = 0;
-                        projection_views[i].subImage.imageRect.offset.y = 0;
-                        projection_views[i].subImage.imageRect.extent.width =
-                                config_views[i].recommendedImageRectWidth;
-                        projection_views[i].subImage.imageRect.extent.height =
-                                config_views[i].recommendedImageRectHeight;
-
-
                         unsigned w = config_views[i].recommendedImageRectWidth;
                         unsigned h = config_views[i].recommendedImageRectHeight;
 
