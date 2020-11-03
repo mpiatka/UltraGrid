@@ -652,6 +652,8 @@ static void display_xrgl_run(void *state){
                 glEnable(GL_FRAMEBUFFER_SRGB);
         }
 
+        glm::mat4 view_reset_rot = glm::mat4(1.0f);
+
         while(running){
                 XrResult result;
 
@@ -670,6 +672,8 @@ static void display_xrgl_run(void *state){
                         break;
                 }
 
+                bool reset_view = false;
+
                 SDL_Event event;
                 while(SDL_PollEvent(&event)){
                         switch(event.type){
@@ -684,8 +688,16 @@ static void display_xrgl_run(void *state){
                                 break;
                         case SDL_KEYDOWN:
                         case SDL_KEYUP:
-                                if(event.key.keysym.sym == SDLK_q)
+                                switch(event.key.keysym.sym){
+                                case SDLK_q:
                                         running = false;
+                                        break;
+                                case SDLK_v:
+                                        if(event.type == SDL_KEYUP){
+                                                reset_view = true;
+                                        }
+                                        break;
+                                }
                                 break;
                         default:
                                 break;
@@ -812,7 +824,11 @@ static void display_xrgl_run(void *state){
                         //glm::mat4 projMat = glm::perspective(glm::radians(70.f), (float) w /h, 0.1f, 300.f);
                         const auto& rot = views[i].pose.orientation;
                         glm::mat4 viewMat = glm::mat4_cast(glm::quat(rot.w, rot.x, rot.y, rot.z));
-                        glm::mat4 pvMat = projMat * glm::inverse(viewMat);
+                        if(reset_view){
+                                reset_view = false;
+                                view_reset_rot = viewMat;
+                        }
+                        glm::mat4 pvMat = projMat * glm::inverse(viewMat) * view_reset_rot;
 
                         auto framebuffer = swapchains[i].get_framebuffer(buf_idx).get();
                         glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
