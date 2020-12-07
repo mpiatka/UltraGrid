@@ -100,11 +100,9 @@ struct vidcap_gpustitch_state {
 
 
         gpustitch::Stitcher stitcher;
+        gpustitch::Stitcher_params stitch_params;
         std::vector<gpustitch::Cam_params> cam_properties;
 
-        gpustitch::Blend_algorithm blend_algo = gpustitch::Blend_algorithm::Multiband;
-
-        unsigned width;
         std::string spec_path;
         double fps;
         codec_t out_fmt;
@@ -426,12 +424,7 @@ static bool init_stitcher(struct vidcap_gpustitch_state *s){
                 }
         }
 
-        gpustitch::Stitcher_params stitch_params;
-        stitch_params.width = s->width;
-        stitch_params.height = s->width / 2;
-        stitch_params.blend_algorithm = s->blend_algo;
-
-        gpustitch::read_params(s->spec_path, stitch_params, s->cam_properties);
+        gpustitch::read_params(s->spec_path, s->stitch_params, s->cam_properties);
 
         if(s->cam_properties.size() != s->devices_cnt && !(s->tiled_capture && s->devices_cnt == 1)){
                 log_msg(LOG_LEVEL_ERROR, "Number of capture devices is different from specified number of cameras!\n");
@@ -439,15 +432,20 @@ static bool init_stitcher(struct vidcap_gpustitch_state *s){
                         return false;
         }
 
-        s->stitcher = gpustitch::Stitcher(stitch_params, s->cam_properties);
+        s->stitcher = gpustitch::Stitcher(s->stitch_params, s->cam_properties);
 
         return true;
 }
 
 static void parse_fmt(vidcap_gpustitch_state *s, const char * const fmt){
-        s->width = 3840;
         s->fps = -1;
         s->out_fmt = RGBA;
+
+        s->stitch_params.width = 3840;
+        s->stitch_params.height = s->stitch_params.width / 2;
+        s->stitch_params.blend_algorithm = gpustitch::Blend_algorithm::Multiband;
+        s->stitch_params.feather_width = 30;
+
 
         if(!fmt)
                 return;
@@ -459,7 +457,8 @@ static void parse_fmt(vidcap_gpustitch_state *s, const char * const fmt){
 #define FMT_CMP(param) (strncmp(item, (param), strlen((param))) == 0)
         while((item = strtok_r(init_fmt, ":", &save_ptr))) {
                 if (FMT_CMP("width=")) {
-                        s->width = atoi(strchr(item, '=') + 1);
+                        s->stitch_params.width = atoi(strchr(item, '=') + 1);
+                        s->stitch_params.height = s->stitch_params.width / 2;
                 } else if(FMT_CMP("blend_algo=")){
                         struct {
                                 const char *name;
@@ -474,7 +473,7 @@ static void parse_fmt(vidcap_gpustitch_state *s, const char * const fmt){
                         bool selected = false;
                         for(const auto& i : blend_algos){
                                 if(strcmp(req, i.name) == 0){
-                                        s->blend_algo = i.algo;
+                                        s->stitch_params.blend_algorithm = i.algo;
                                         selected = true;
                                         break;
                                 }
@@ -483,6 +482,8 @@ static void parse_fmt(vidcap_gpustitch_state *s, const char * const fmt){
                         if(!selected){
                                 log_msg(LOG_LEVEL_WARNING, "Invalid blend algorithm, falling back to default\n");
                         }
+                } else if(FMT_CMP("feather_width=")){
+                        s->stitch_params.feather_width = atoi(strchr(item, '=') + 1);
                 } else if(FMT_CMP("rig_spec=")){
                         s->spec_path = strchr(item, '=') + 1;
                 } else if(FMT_CMP("fps=")){
