@@ -102,6 +102,8 @@ struct vidcap_gpustitch_state {
         gpustitch::Stitcher stitcher;
         std::vector<gpustitch::Cam_params> cam_properties;
 
+        gpustitch::Blend_algorithm blend_algo = gpustitch::Blend_algorithm::Multiband;
+
         unsigned width;
         std::string spec_path;
         double fps;
@@ -427,6 +429,7 @@ static bool init_stitcher(struct vidcap_gpustitch_state *s){
         gpustitch::Stitcher_params stitch_params;
         stitch_params.width = s->width;
         stitch_params.height = s->width / 2;
+        stitch_params.blend_algorithm = s->blend_algo;
 
         gpustitch::read_params(s->spec_path, stitch_params, s->cam_properties);
 
@@ -457,12 +460,29 @@ static void parse_fmt(vidcap_gpustitch_state *s, const char * const fmt){
         while((item = strtok_r(init_fmt, ":", &save_ptr))) {
                 if (FMT_CMP("width=")) {
                         s->width = atoi(strchr(item, '=') + 1);
-                } else if(FMT_CMP("roi=")){
+                } else if(FMT_CMP("blend_algo=")){
+                        struct {
+                                const char *name;
+                                gpustitch::Blend_algorithm algo;
+                        } blend_algos[] = {
+                                {"multiband", gpustitch::Blend_algorithm::Multiband},
+                                {"feather", gpustitch::Blend_algorithm::Feather},
+                        };
 
-                } else if(FMT_CMP("quality=")){
+                        const char *req = strchr(item, '=') + 1;
 
-                } else if(FMT_CMP("pipeline=")){
+                        bool selected = false;
+                        for(const auto& i : blend_algos){
+                                if(strcmp(req, i.name) == 0){
+                                        s->blend_algo = i.algo;
+                                        selected = true;
+                                        break;
+                                }
+                        }
 
+                        if(!selected){
+                                log_msg(LOG_LEVEL_WARNING, "Invalid blend algorithm, falling back to default\n");
+                        }
                 } else if(FMT_CMP("rig_spec=")){
                         s->spec_path = strchr(item, '=') + 1;
                 } else if(FMT_CMP("fps=")){
