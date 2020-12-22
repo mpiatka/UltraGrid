@@ -569,6 +569,8 @@ Sdl_window::Sdl_window(const char *title,
 }
 
 Sdl_window::~Sdl_window(){
+        SDL_GL_DeleteContext(sdl_gl_context);
+        SDL_GL_DeleteContext(sdl_gl_worker_context);
         SDL_DestroyWindow(sdl_window);
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
 }
