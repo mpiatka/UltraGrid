@@ -432,7 +432,12 @@ static bool init_stitcher(struct vidcap_gpustitch_state *s){
                         return false;
         }
 
-        s->stitcher = gpustitch::Stitcher(s->stitch_params, s->cam_properties);
+        try{
+                s->stitcher = gpustitch::Stitcher(s->stitch_params, s->cam_properties);
+        } catch(char const *exc){
+                log_msg(LOG_LEVEL_ERROR, "Exception while initializing stitcher: %s\n", exc);
+                return false;
+        }
 
         return true;
 }
@@ -445,6 +450,7 @@ static void parse_fmt(vidcap_gpustitch_state *s, const char * const fmt){
         s->stitch_params.height = s->stitch_params.width / 2;
         s->stitch_params.blend_algorithm = gpustitch::Blend_algorithm::Multiband;
         s->stitch_params.feather_width = 30;
+        s->stitch_params.multiband_levels = 4;
 
 
         if(!fmt)
@@ -484,6 +490,8 @@ static void parse_fmt(vidcap_gpustitch_state *s, const char * const fmt){
                         }
                 } else if(FMT_CMP("feather_width=")){
                         s->stitch_params.feather_width = atoi(strchr(item, '=') + 1);
+                } else if(FMT_CMP("multiband_levels=")){
+                        s->stitch_params.multiband_levels = atoi(strchr(item, '=') + 1);
                 } else if(FMT_CMP("rig_spec=")){
                         s->spec_path = strchr(item, '=') + 1;
                 } else if(FMT_CMP("fps=")){
