@@ -103,6 +103,7 @@
 #include "audio/audio_playback.h"
 #include "audio/codec.h"
 #include "audio/utils.h"
+#include "utils/profile_timer.hpp"
 
 #define MOD_NAME                "[main] "
 #define PORT_BASE               5004
@@ -440,6 +441,7 @@ static void print_fps(steady_clock::time_point *t0, int *frames, const string &n
 static void *capture_thread(void *arg)
 {
         set_thread_name(__func__);
+        PROFILE_FUNC;
 
         struct module *uv_mod = (struct module *)arg;
         struct state_uv *uv = (struct state_uv *) uv_mod->priv_data;
@@ -449,6 +451,7 @@ static void *capture_thread(void *arg)
         bool should_print_fps = vidcap_generic_fps(uv->capture_device);
 
         while (!should_exit) {
+                PROFILE_DETAIL("capture");
                 /* Capture and transmit video... */
                 struct audio_frame *audio = nullptr;
                 struct video_frame *tx_frame = vidcap_grab(uv->capture_device, &audio);
@@ -476,12 +479,14 @@ static void *capture_thread(void *arg)
                                 frame = shared_ptr<video_frame>(tx_frame, tx_frame->callbacks.dispose);
                         }
 
+                        PROFILE_DETAIL("Send()");
                         uv->state_video_rxtx->send(move(frame)); // std::move really important here (!)
 
                         // wait for frame frame to be processed, eg. by compress
                         // or sender (uncompressed video). Grab invalidates previous frame
                         // (if not defined dispose function).
                         if (wait_for_cur_uncompressed_frame) {
+                                PROFILE_DETAIL("wait_obj_wait()");
                                 wait_obj_wait(wait_obj);
                                 tx_frame->callbacks.dispose = NULL;
                                 tx_frame->callbacks.dispose_udata = NULL;

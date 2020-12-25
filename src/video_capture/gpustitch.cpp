@@ -746,7 +746,7 @@ static struct video_frame *stitch(struct vidcap_gpustitch_state *s){
                 return NULL;
         }
 
-        PROFILE_DETAIL("Synchronize 2");
+        PROFILE_DETAIL("cudaStreamSynchronize");
         if (cudaStreamSynchronize(out_stream) != cudaSuccess)
         {
                 std::cerr << "Error synchronizing with the output CUDA stream" << std::endl;
