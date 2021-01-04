@@ -44,7 +44,7 @@ struct state_vr{
 
 	Scene scene;
 
-	int max_fps = 60;
+	int threshold_fps = 60; //Target fps for redraws caused by interaction
 
 	SDL_TimerID redraw_timer = 0;
 	bool redraw_needed = false;
@@ -66,13 +66,9 @@ static void * display_panogl_init(struct module *parent, const char *fmt, unsign
 
 static void draw(state_vr *s){
 	auto now = std::chrono::steady_clock::now();
-	if(std::chrono::duration_cast<std::chrono::milliseconds>(now - s->last_frame).count() < 16)
-		return;
-
 	s->last_frame = now;
 
 	glClear(GL_COLOR_BUFFER_BIT);
-	
 	s->scene.render(s->window.width, s->window.height);
 
 	SDL_GL_SwapWindow(s->window.sdl_window);
@@ -87,11 +83,18 @@ static Uint32 redraw_callback(Uint32 interval, void *param){
 	return interval;
 }
 
-static void redraw(state_vr *s){
-	if(!s->redraw_timer){
-		s->redraw_timer = SDL_AddTimer(1000 / s->max_fps, redraw_callback, &s->sdl_redraw_event);
+static void redraw(state_vr *s, bool redraw_now = false){
+	if(redraw_now){
+		if(s->redraw_timer){
+			SDL_RemoveTimer(s->redraw_timer);
+			s->redraw_timer = 0;
+			s->redraw_needed = false;
+		}
 		draw(s);
 	} else {
+		if(!s->redraw_timer){
+			s->redraw_timer = SDL_AddTimer(1000 / s->threshold_fps, redraw_callback, &s->sdl_redraw_event);
+		}
 		s->redraw_needed = true;
 	}
 }
@@ -140,8 +143,9 @@ static void handle_user_event(state_vr *s, SDL_Event *event){
 		} else {
 			//poison
 			s->running = false;
+			return;
 		}
-		redraw(s);
+		redraw(s, frame->fps > s->threshold_fps);
 	} else if(event->type == s->sdl_redraw_event){
 		if(s->redraw_needed){
 			draw(s);
