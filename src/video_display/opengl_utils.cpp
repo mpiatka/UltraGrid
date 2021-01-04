@@ -520,24 +520,25 @@ static std::vector<unsigned> gen_sphere_indices(int latitude_n, int longtitude_n
         return indices;
 }
 
-Sdl_window::Sdl_window() : Sdl_window("UltraGrid VR",
+Sdl_window::Sdl_window(bool double_buffer) : Sdl_window("UltraGrid VR",
                 SDL_WINDOWPOS_CENTERED,
                 SDL_WINDOWPOS_CENTERED,
                 640,
                 480,
-                SDL_WINDOW_OPENGL) {  }
+                SDL_WINDOW_OPENGL, double_buffer) {  }
 
 Sdl_window::Sdl_window(const char *title,
                 int x, int y,
                 int w, int h,
-                SDL_WindowFlags flags) : width(w), height(h)
+                SDL_WindowFlags flags, bool double_buffer) : width(w), height(h)
 {
         SDL_InitSubSystem(SDL_INIT_VIDEO);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
 
-        SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 0);
+        if(!double_buffer)
+                SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 0);
 
         sdl_window = SDL_CreateWindow(title,
                         x,

@@ -31,7 +31,7 @@
 #define MAX_BUFFER_SIZE   1
 
 struct state_vr{
-	Sdl_window window;
+	Sdl_window window = Sdl_window(true);
 
 	bool running = false;
 	bool fs = false;
