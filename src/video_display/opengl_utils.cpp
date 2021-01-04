@@ -525,12 +525,12 @@ Sdl_window::Sdl_window(bool double_buffer) : Sdl_window("UltraGrid VR",
                 SDL_WINDOWPOS_CENTERED,
                 640,
                 480,
-                SDL_WINDOW_OPENGL, double_buffer) {  }
+                SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE, double_buffer) {  }
 
 Sdl_window::Sdl_window(const char *title,
                 int x, int y,
                 int w, int h,
-                SDL_WindowFlags flags, bool double_buffer) : width(w), height(h)
+                Uint32 flags, bool double_buffer) : width(w), height(h)
 {
         SDL_InitSubSystem(SDL_INIT_VIDEO);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
@@ -545,7 +545,7 @@ Sdl_window::Sdl_window(const char *title,
                         y,
                         w,
                         h,
-                        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+                        flags);
 
         if(!sdl_window){
                 throw std::runtime_error("Failed to create SDL window!");

@@ -226,7 +226,7 @@ struct Sdl_window{
         Sdl_window(bool double_buffer = false);
         Sdl_window(const char *title,
                         int x, int y, int w, int h,
-                        SDL_WindowFlags flags, bool double_buffer = false);
+                        Uint32 flags, bool double_buffer = false);
 
         ~Sdl_window();
 
