@@ -27,6 +27,7 @@
 #include "video_display/splashscreen.h"
 
 #include "opengl_utils.hpp"
+#include "utils/profile_timer.hpp"
 
 #define MAX_BUFFER_SIZE   1
 
@@ -65,6 +66,7 @@ static void * display_panogl_init(struct module *parent, const char *fmt, unsign
 }
 
 static void draw(state_vr *s){
+	PROFILE_FUNC;
 	auto now = std::chrono::steady_clock::now();
 	s->last_frame = now;
 
@@ -83,20 +85,37 @@ static Uint32 redraw_callback(Uint32 interval, void *param){
 	return interval;
 }
 
-static void redraw(state_vr *s, bool redraw_now = false){
-	if(redraw_now){
-		if(s->redraw_timer){
-			SDL_RemoveTimer(s->redraw_timer);
-			s->redraw_timer = 0;
-			s->redraw_needed = false;
-		}
-		draw(s);
-	} else {
-		if(!s->redraw_timer){
-			s->redraw_timer = SDL_AddTimer(1000 / s->threshold_fps, redraw_callback, &s->sdl_redraw_event);
-		}
-		s->redraw_needed = true;
-	}
+static void redraw(state_vr *s,
+		bool video_framerate_over_threshold = false,
+		bool triggered_by_frame = false)
+{
+        if(video_framerate_over_threshold && triggered_by_frame){
+                /* If video framerate is over the threshold we draw the
+                 * incoming frames immediately. Since this draw already
+                 * contains changes caused by interaction (e.g. moving the
+                 * camera) we cancel the redraw timer
+                 */
+                if(s->redraw_timer){
+                        SDL_RemoveTimer(s->redraw_timer);
+                        s->redraw_timer = 0;
+                        s->redraw_needed = false;
+                }
+                draw(s);
+        } else {
+                if(!s->redraw_timer){
+                        /* Redrawing due to interaction is delayed, so that if
+                         * a fresh video frame arrives very soon after the
+                         * interaction it can be drawn together with the
+                         * changes caused by interaction
+                         */
+                        s->redraw_timer = SDL_AddTimer(1000 / s->threshold_fps,
+                                        redraw_callback, &s->sdl_redraw_event);
+
+                        if(triggered_by_frame)
+                                draw(s);
+                }
+                s->redraw_needed = !triggered_by_frame;
+        }
 }
 
 static void handle_window_event(state_vr *s, SDL_Event *event){
@@ -145,7 +164,7 @@ static void handle_user_event(state_vr *s, SDL_Event *event){
 			s->running = false;
 			return;
 		}
-		redraw(s, frame->fps > s->threshold_fps);
+		redraw(s, frame->fps >= s->threshold_fps, true);
 	} else if(event->type == s->sdl_redraw_event){
 		if(s->redraw_needed){
 			draw(s);
@@ -224,6 +243,7 @@ static struct video_frame * display_panogl_getf(void *state) {
 }
 
 static int display_panogl_putf(void *state, struct video_frame *frame, int nonblock) {
+	PROFILE_FUNC;
 	struct state_vr *s = static_cast<state_vr *>(state);
 
 	if (nonblock == PUTF_DISCARD) {
@@ -244,6 +264,7 @@ static int display_panogl_putf(void *state, struct video_frame *frame, int nonbl
 	SDL_Event event;
 	event.type = s->sdl_frame_event;
 	event.user.data1 = frame;
+	PROFILE_DETAIL("push frame event");
 	SDL_PushEvent(&event);
 
 	return 0;
