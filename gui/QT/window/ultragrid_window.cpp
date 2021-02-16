@@ -106,7 +106,7 @@ void UltragridWindow::setupPreviewCallbacks(){
 
 	for(const auto &i : opts){
 		settings.getOption(i).addOnChangeCallback(
-				std::bind(&UltragridWindow::schedulePreview, this));
+				Option::Callback(&UltragridWindow::schedulePreview, this));
 	}
 }
 
@@ -191,8 +191,9 @@ void UltragridWindow::start(){
 	process.start(ultragridExecutable, launchArgs);
 }
 
-void UltragridWindow::schedulePreview(){
-	previewTimer.start(1000);
+void UltragridWindow::schedulePreview(Option&, bool, void *opaque){
+	UltragridWindow *obj = static_cast<UltragridWindow *>(opaque);
+	obj->previewTimer.start(1000);
 }
 
 void UltragridWindow::startPreview(){
