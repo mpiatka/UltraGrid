@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <iostream>
 #include <QMetaType>
+#include <functional>
 #include "settings_ui.hpp"
 
 void SettingsUi::init(Settings *settings, AvailableSettings *availableSettings){
