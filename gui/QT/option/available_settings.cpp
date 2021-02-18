@@ -64,6 +64,12 @@ void AvailableSettings::queryVideoCompress(const QStringList &lines){
 						{"default", ":codec=H.264"},
 						{"libx264", ":encoder=libx264"}
 					}
+				},{
+					"H.265",
+					{
+						{"default", ":codec=H.265"},
+						{"libx265", ":encoder=libx265"}
+					}
 				}
 			}
 			});
@@ -77,6 +83,19 @@ void AvailableSettings::queryVideoCompress(const QStringList &lines){
 			{
 				{
 					"Cineform",
+					{
+						{"default", ""}
+					}
+				}
+			}
+			});
+	videoCompressModules.push_back({
+			"dummy",
+			{
+			},
+			{
+				{
+					"Dummy",
 					{
 						{"default", ""}
 					}

@@ -1,4 +1,5 @@
 #include <cstring>
+#include <iostream>
 
 #include "video_opts.hpp"
 #include "combobox_ui.hpp"
@@ -120,11 +121,73 @@ static const VideoCompressItem videoCodecs[] = {
 	{"Cineform", "cineform", false},
 };
 
+void populateVideoCompressSettings(AvailableSettings *availSettings,
+		Settings* settings)
+{
+	for(const auto& mod : availSettings->getVideoCompressModules()){
+		std::cout << "Module " << mod.name << std::endl;
+
+		std::string codecOptKey = mod.name + ".codec";
+		settings->addOption(codecOptKey,
+				Option::SilentOpt,
+				"",
+				mod.codecs[0].name,
+				false,
+				"video.compress",
+				mod.name);
+
+		for(const auto& modOption: mod.opts){
+			settings->addOption(modOption.key,
+					modOption.booleanOpt ? Option::BoolOpt : Option::StringOpt,
+					modOption.optStr,
+					"",
+					false,
+					"video.compress." + mod.name,
+					mod.name
+					);
+		}
+
+		for(const auto& codec : mod.codecs){
+			std::cout << "Codec " << codec.name << std::endl;
+
+			std::string optName = "video.compress.";
+			optName += mod.name;
+			optName += ".codec";
+
+			settings->addOption(codec.name + ".encoder",
+					Option::StringOpt,
+					"",
+					codec.encoders[0].optStr,
+					true,
+					optName,
+					codec.name);
+
+			for(const auto& encoder : codec.encoders){
+				std::cout << "Encoder " << encoder.name << std::endl;
+
+			}
+
+		}
+	}
+}
+
 std::vector<SettingItem> getVideoCompress(AvailableSettings *availSettings){
     std::vector<SettingItem> res;
 
     const std::string optStr = "video.compress";
 
+	for(const auto& mod : availSettings->getVideoCompressModules()){
+		for(const auto& codec : mod.codecs){
+			SettingItem item;
+			item.name = codec.name;
+			item.opts.push_back({"video.compress", mod.name});
+			item.opts.push_back({"video.compress." + mod.name + ".codec", codec.name});
+
+			res.push_back(std::move(item));
+		}
+	}
+
+#if 0
     for(const auto &i : videoCodecs){
         SettingItem item;
         item.name = i.displayName;
@@ -150,6 +213,7 @@ std::vector<SettingItem> getVideoCompress(AvailableSettings *availSettings){
 
         res.push_back(std::move(item));
     }
+#endif
 
     return res;
 }
