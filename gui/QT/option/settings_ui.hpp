@@ -36,6 +36,7 @@ private:
 	AvailableSettings *availableSettings = nullptr;
 
 	std::vector<std::unique_ptr<WidgetUi>> uiControls;
+	std::vector<std::unique_ptr<WidgetUi>> codecControls;
 
 	static void refreshAllCallback(Option&, bool, void *);
 
@@ -46,6 +47,8 @@ private:
 private slots:
 
 	void test();
+
+	void addCodecOptControls();
 
 signals:
 	void changed();

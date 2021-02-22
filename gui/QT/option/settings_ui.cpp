@@ -1,6 +1,10 @@
 #include <stdio.h>
 #include <iostream>
 #include <QMetaType>
+#include <QLabel>
+#include <QLineEdit>
+#include <QFormLayout>
+#include <QCheckBox>
 #include <functional>
 #include "settings_ui.hpp"
 #include "video_opts.hpp"
@@ -176,4 +180,29 @@ void SettingsUi::initSettingsWin(Ui::Settings *ui){
 	addControl(new CheckboxUi(ui->decodeAccelCheck, settings, "decode.hwaccel"));
 	addControl(new CheckboxUi(ui->errorsFatalBox, settings, "errors_fatal"));
 	addControl(new LineEditUi(ui->encryptionLineEdit, settings, "encryption"));
+
+	addCodecOptControls();
+}
+
+void SettingsUi::addCodecOptControls(){
+	std::string mod = settings->getOption("video.compress").getValue();
+	std::string codec = settings->getOption("video.compress." + mod + ".codec").getValue();
+
+	QFormLayout *formLayout = new QFormLayout();
+	for(const auto& compMod : availableSettings->getVideoCompressModules()){
+		if(compMod.name == mod){
+			for(const auto& modOpt : compMod.opts){
+				QLabel *label = new QLabel(QString::fromStdString(modOpt.displayName));
+				QWidget *field = nullptr;
+				if(modOpt.booleanOpt){
+					field = new QCheckBox();
+				} else {
+					field = new QLineEdit();
+				}
+
+				formLayout->addRow(label, field);
+			}
+		}
+	}
+	settingsWin->scrollContents->setLayout(formLayout);
 }
