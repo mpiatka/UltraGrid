@@ -245,21 +245,24 @@ void SettingsUi::buildCodecOptControls(const std::string& mod, const std::string
 				QLabel *label = new QLabel(QString::fromStdString(modOpt.displayName));
 				QWidget *field = nullptr;
 				WidgetUi *widgetUi = nullptr;
+				std::string optKey = "video.compress." + mod + "." + modOpt.key;
 				if(modOpt.booleanOpt){
 					QCheckBox *checkBox = new QCheckBox();
 					field = checkBox;
 
 					widgetUi = new CheckboxUi(checkBox,
 							settings,
-							modOpt.key);
+							optKey);
 				} else {
 					QLineEdit *lineEdit = new QLineEdit();
 					field = lineEdit;
 
 					widgetUi = new LineEditUi(lineEdit,
 							settings,
-							"video.compress." + mod + "." + modOpt.key);
+							optKey);
 				}
+				label->setToolTip(QString::fromStdString(modOpt.displayDesc));
+				field->setToolTip(QString::fromStdString(modOpt.displayDesc));
 
 				formLayout->addRow(label, field);
 

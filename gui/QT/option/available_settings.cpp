@@ -56,6 +56,7 @@ void AvailableSettings::queryVideoCompress(const QStringList &lines){
 			{
 				{"Bitrate", "Video Bitrate desc", "quality", ":bitrate=", false},
 				{"Crf", "Constant rate factor", "crf", ":crf=", false},
+				{"Disable intra refresh", "do not use Periodic Intra Refresh (H.264/H.265)", "intra_refresh", ":disable_intra_refresh", true},
 			},
 			{
 				{
