@@ -317,7 +317,7 @@ void print_capabilities(struct module *root, bool use_vidcap)
 
                 if(vci->get_module_info){
                         auto module_info = vci->get_module_info();
-                        cout << "[capabilit][v3][video_compress] {"
+                        cout << "[capability][video_compress][v3] {"
                                 "\"name\":\"" << it.first << "\", "
                                 "\"options\": [";
 
