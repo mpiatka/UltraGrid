@@ -54,7 +54,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
-#include <unordered_map>
+#include <map>
 #include <vector>
 
 #include "debug.h"
@@ -137,7 +137,7 @@ static void usage(void);
 static int parse_fmt(struct state_video_compress_libav *s, char *fmt);
 static void cleanup(struct state_video_compress_libav *s);
 
-static unordered_map<codec_t, codec_params_t, hash<int>> codec_params = {
+static map<codec_t, codec_params_t> codec_params = {
         { H264, codec_params_t{
                 [](bool is_rgb) { return is_rgb ? "libx264rgb" : "libx264"; },
                 0.07 * 2 /* for H.264: 1 - low motion, 2 - medium motion, 4 - high motion */
@@ -506,7 +506,7 @@ static compress_module_info get_libavcodec_module_info(){
 	module_info.opts.emplace_back(module_option{"Bitrate", "Bitrate", "quality", "bitrate=", false});
 	module_info.opts.emplace_back(module_option{"Crf", "Crf", "crf", "crf=", false});
 
-        for (auto && param : codec_params) {
+        for (const auto& param : codec_params) {
                 enum AVCodecID avID = get_ug_to_av_codec(param.first);
                 if (avID == AV_CODEC_ID_NONE) { // old FFMPEG -> codec id is flushed to 0 in compat
                         continue;
