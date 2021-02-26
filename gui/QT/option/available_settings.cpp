@@ -81,8 +81,8 @@ void AvailableSettings::queryVideoCompress(const QStringList &lines){
 				maybeWriteString(optJson, "display_desc", capabOpt.displayDesc);
 				maybeWriteString(optJson, "key", capabOpt.key);
 				maybeWriteString(optJson, "opt_str", capabOpt.optStr);
-				if(obj.contains("is_boolean") && obj["is_boolean"].isString()){
-					capabOpt.booleanOpt = obj["is_boolean"].toString() == "t";
+				if(optJson.contains("is_boolean") && optJson["is_boolean"].isString()){
+					capabOpt.booleanOpt = optJson["is_boolean"].toString() == "t";
 				}
 
 				compMod.opts.emplace_back(std::move(capabOpt));
