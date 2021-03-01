@@ -196,6 +196,7 @@ struct encoder{
 struct codec{
         std::string name;
         std::vector<encoder> encoders;
+        int priority;
 };
 
 struct compress_module_info{
