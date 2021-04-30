@@ -97,6 +97,7 @@
 #include "utils/net.h"
 #include "utils/thread.h"
 #include "utils/wait_obj.h"
+#include "utils/udp_holepunch.h"
 #include "video.h"
 #include "video_capture.h"
 #include "video_display.h"
@@ -1220,6 +1221,29 @@ static int adjust_params(struct ug_options *opt) {
         if (strcmp(opt->audio.proto, "rtsp") == 0 && strcmp(opt->video_protocol, "rtsp") != 0) {
                 LOG(LOG_LEVEL_WARNING) << "Using RTSP for audio but not for video is not recommended and might not work.\n";
         }
+
+        Holepunch_config punch_c = {0};
+        punch_c.client_name = opt->requested_receiver;
+        punch_c.room_name = "ug_testroom";
+        punch_c.video_rx_port = &opt->video_rx_port;
+        punch_c.video_tx_port = &opt->video_tx_port;
+        //int *audio_rx_port;
+        //int *audio_tx_port;
+
+        char punched_host[1024];
+        punch_c.host_addr = punched_host;
+        punch_c.host_addr_len = sizeof(punched_host);
+
+        punch_c.coord_srv_addr = "";
+        punch_c.coord_srv_port = 12345;
+        punch_c.stun_srv_addr = "";
+        punch_c.stun_srv_port = 3478;
+
+        assert(punch_udp(&punch_c));
+
+        printf("remote: %s\n rx: %d\n tx: %d\n", punched_host, opt->video_rx_port, opt->video_tx_port);
+        opt->requested_receiver = punched_host;
+        opt->audio.host = punched_host;
 
         return 0;
 }
