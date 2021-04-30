@@ -97,6 +97,7 @@
 #include "utils/net.h"
 #include "utils/thread.h"
 #include "utils/wait_obj.h"
+#include "utils/udp_holepunch.h"
 #include "video.h"
 #include "video_capture.h"
 #include "video_display.h"
@@ -1239,6 +1240,29 @@ int main(int argc, char *argv[])
                 exit_uv(1);
                 goto cleanup;
         }
+
+        Holepunch_config punch_c = {0};
+        punch_c.client_name = requested_receiver;
+        punch_c.room_name = "ug_testroom";
+        punch_c.video_rx_port = &video_rx_port;
+        punch_c.video_tx_port = &video_tx_port;
+        //int *audio_rx_port;
+        //int *audio_tx_port;
+
+        char punched_host[1024];
+        punch_c.host_addr = punched_host;
+        punch_c.host_addr_len = sizeof(punched_host);
+
+        punch_c.coord_srv_addr = "";
+        punch_c.coord_srv_port = 12345;
+        punch_c.stun_srv_addr = "";
+        punch_c.stun_srv_port = 3478;
+
+        assert(punch_udp(&punch_c));
+
+        printf("remote: %s\n rx: %d\n tx: %d\n", punched_host, video_rx_port, video_tx_port);
+        requested_receiver = punched_host;
+        audio_host = punched_host;
 
         uv.audio = audio_cfg_init (&uv.root_module, audio_host, audio_rx_port,
                         audio_tx_port, audio_send, audio_recv,
