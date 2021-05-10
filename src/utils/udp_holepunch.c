@@ -23,6 +23,7 @@ struct Punch_ctx {
         juice_agent_t *juice_agent;
 
         int coord_sock;
+        int local_candidate_port;
 };
 
 static void send_msg(int sock, const char *msg){
@@ -42,6 +43,25 @@ static void on_candidate(juice_agent_t *agent, const char *sdp, void *user_ptr) 
         printf("Candidate: %s\n", sdp);
         struct Punch_ctx *ctx = (struct Punch_ctx *) user_ptr;
         send_msg(ctx->coord_sock, sdp);
+
+        char *c = sdp;
+        //sdp is a RFC5245 string
+        //port is located after 5 space characters
+        for(int i = 0; i < 5; i++){
+                c = strchr(c, ' ') + 1;
+                assert(c);
+        }
+        char *end;
+        int port = strtol(c, &end, 10);
+        assert(c != end);
+        assert(*end == ' ');
+        c = end + 1;
+
+        const char *host_type_str = "typ host";
+        if(strncmp(c, host_type_str, strlen(host_type_str)) == 0){
+                printf("Local candidate port: %d\n", port);
+                ctx->local_candidate_port = port;
+        }
 }
 
 static juice_agent_t *create_agent(const struct Holepunch_config *c, void *usr_ptr){
@@ -214,7 +234,7 @@ bool punch_udp(const struct Holepunch_config *c){
         juice_destroy(video_ctx.juice_agent);
         close(video_ctx.coord_sock);
 
-        assert(split_host_port(local, c->video_rx_port));
+        *c->video_rx_port = video_ctx.local_candidate_port;
         assert(split_host_port(remote, c->video_tx_port));
 
         strncpy(c->host_addr, remote, c->host_addr_len);
