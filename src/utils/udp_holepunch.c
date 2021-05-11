@@ -9,6 +9,8 @@
 #include <netdb.h>
 #include "utils/udp_holepunch.h"
 
+#include "debug.h"
+
 #ifdef _WIN32
 #include <windows.h>
 static void sleep(unsigned int secs) { Sleep(secs * 1000); }
@@ -18,6 +20,7 @@ static void sleep(unsigned int secs) { Sleep(secs * 1000); }
 
 #define MAX_MSG_LEN 2048
 #define MSG_HEADER_LEN 5
+#define MOD_NAME "[HOLEPUNCH] "
 
 struct Punch_ctx {
         juice_agent_t *juice_agent;
@@ -40,12 +43,18 @@ static void send_msg(int sock, const char *msg){
 }
 
 static void on_candidate(juice_agent_t *agent, const char *sdp, void *user_ptr) {
-        printf("Candidate: %s\n", sdp);
+        log_msg(LOG_LEVEL_NOTICE, MOD_NAME "Received candidate: %s\n", sdp);
         struct Punch_ctx *ctx = (struct Punch_ctx *) user_ptr;
         send_msg(ctx->coord_sock, sdp);
 
+        /* sdp is a RFC5245 string which should look like this:
+         * "a=candidate:2 1 UDP <prio> <ip> <port> typ <type> ..."
+         * Since libjuice reports only the external (after NAT translation)
+         * receive port, we need to get the receive port number from the local
+         * candidate (of type "host").
+         */
+
         char *c = sdp;
-        //sdp is a RFC5245 string
         //port is located after 5 space characters
         for(int i = 0; i < 5; i++){
                 c = strchr(c, ' ') + 1;
@@ -59,7 +68,7 @@ static void on_candidate(juice_agent_t *agent, const char *sdp, void *user_ptr) 
 
         const char *host_type_str = "typ host";
         if(strncmp(c, host_type_str, strlen(host_type_str)) == 0){
-                printf("Local candidate port: %d\n", port);
+                log_msg(LOG_LEVEL_INFO, MOD_NAME "Local candidate port: %d\n", port);
                 ctx->local_candidate_port = port;
         }
 }
@@ -74,11 +83,6 @@ static juice_agent_t *create_agent(const struct Holepunch_config *c, void *usr_p
         conf.turn_servers = NULL;
         conf.turn_servers_count = 0;
 
-#if 0
-        conf.cb_state_changed = on_state_changed1;
-        conf.cb_gathering_done = on_gathering_done1;
-        conf.cb_recv = on_recv1;
-#endif
         conf.cb_candidate = on_candidate;
         conf.user_ptr = usr_ptr;
 
@@ -122,9 +126,14 @@ static bool connect_to_coordinator(const char *coord_srv_addr,
         sockaddr.sin_family = AF_INET;
         sockaddr.sin_port = htons(coord_srv_port);
         struct hostent *host = gethostbyname(coord_srv_addr);
-        memcpy(&sockaddr.sin_addr.s_addr, host->h_addr_list[0], host->h_length);
+        if(!host){
+                error_msg(MOD_NAME "Failed to resolve coordination server host\n");
+                return false;
+        }
 
+        memcpy(&sockaddr.sin_addr.s_addr, host->h_addr_list[0], host->h_length);
         if (connect(s, (struct sockaddr *) &sockaddr, sizeof(sockaddr)) < 0){
+                error_msg(MOD_NAME "Failed to connect to coordination server\n");
                 return false;
         }
 
@@ -135,15 +144,15 @@ static bool connect_to_coordinator(const char *coord_srv_addr,
 static bool exchange_coord_desc(juice_agent_t *agent, int coord_sock){
         char sdp[JUICE_MAX_SDP_STRING_LEN];
         juice_get_local_description(agent, sdp, JUICE_MAX_SDP_STRING_LEN);
-        printf("Local description:\n%s\n", sdp);
+        log_msg(LOG_LEVEL_VERBOSE, MOD_NAME "Local description:\n%s\n", sdp);
 
         send_msg(coord_sock, sdp);
 
         char msg_buf[MAX_MSG_LEN];
         recv_msg(coord_sock, msg_buf, sizeof(msg_buf));
-        printf("Remote client name: %s\n", msg_buf);
+        log_msg(LOG_LEVEL_INFO, MOD_NAME "Remote client name: %s\n", msg_buf);
         recv_msg(coord_sock, msg_buf, sizeof(msg_buf));
-        printf("Remote desc: %s\n", msg_buf);
+        log_msg(LOG_LEVEL_VERBOSE, MOD_NAME "Remote desc: %s\n", msg_buf);
 
         juice_set_remote_description(agent, msg_buf);
 }
@@ -166,7 +175,7 @@ static bool discover_and_xchg_candidates(juice_agent_t *agent, int coord_sock,
                 if(FD_ISSET(coord_sock, &rfds)){
                         char msg_buf[MAX_MSG_LEN];
                         recv_msg(coord_sock, msg_buf, sizeof(msg_buf));
-                        printf("Received remote candidate\n");
+                        log_msg(LOG_LEVEL_VERBOSE, MOD_NAME "Received remote candidate\n");
                         juice_add_remote_candidate(agent, msg_buf);
                 }
                 juice_state_t state = juice_get_state(agent);
@@ -179,14 +188,13 @@ static bool discover_and_xchg_candidates(juice_agent_t *agent, int coord_sock,
                                         JUICE_MAX_CANDIDATE_SDP_STRING_LEN,
                                         remote,
                                         JUICE_MAX_CANDIDATE_SDP_STRING_LEN) == 0)) {
-                printf("Local candidate  1: %s\n", local);
-                printf("Remote candidate 1: %s\n", remote);
+                log_msg(LOG_LEVEL_INFO, MOD_NAME "Local candidate  : %s\n", local);
+                log_msg(LOG_LEVEL_INFO, MOD_NAME "Remote candidate : %s\n", remote);
         }
 }
 
 static bool initialize_punch(struct Punch_ctx *ctx, const struct Holepunch_config *c){
         if(!connect_to_coordinator(c->coord_srv_addr, c->coord_srv_port, &ctx->coord_sock)){
-                fprintf(stderr, "Failed to connect to coordinator!\n");
                 return false;
         }
 
@@ -216,10 +224,15 @@ static bool split_host_port(char *pair, int *port){
         return true;
 }
 
+static void juice_log_handler(juice_log_level_t level, const char *message){
+        log_msg(LOG_LEVEL_DEBUG, MOD_NAME "libjuice: %s\n", message);
+}
+
 bool punch_udp(const struct Holepunch_config *c){
         struct Punch_ctx video_ctx = {0};
 
         juice_set_log_level(JUICE_LOG_LEVEL_DEBUG);
+        juice_set_log_handler(juice_log_handler);
 
         if(!initialize_punch(&video_ctx, c)){
                 return false;
