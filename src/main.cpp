@@ -605,6 +605,70 @@ static bool parse_bitrate(char *optarg, long long int *bitrate) {
         return true;
 }
 
+static bool parse_holepunch_conf(char *conf, struct Holepunch_config *punch_c){
+        char *token = strchr(conf, ':');
+        while(token){
+                token = token + 1;
+                char *next = strchr(token, ':');
+                if(next){
+                        *next = '\0';
+                }
+
+                if(strncmp(token, "coord_srv=", strlen("coord_srv=")) == 0){
+                        token += strlen("coord_srv=");
+                        punch_c->coord_srv_addr = token;
+
+                        if(!next){
+                                log_msg(LOG_LEVEL_ERROR, "Missing hole punching coord server port.\n");
+                                return false;
+                        }
+
+                        char *end;
+                        next++;
+                        punch_c->coord_srv_port = strtol(next, &end, 10);
+                        if(next == end){
+                                log_msg(LOG_LEVEL_ERROR, "Failed to parse hole punching coord server port.\n");
+                                return false;
+                        }
+                        next = strchr(next, ':');
+                } else if(strncmp(token, "stun_srv=", strlen("stun_srv=")) == 0){
+                        token += strlen("stun_srv=");
+                        punch_c->stun_srv_addr = token;
+
+                        if(!next){
+                                log_msg(LOG_LEVEL_ERROR, "Missing hole punching stun server port.\n");
+                                return false;
+                        }
+
+                        char *end;
+                        next++;
+                        punch_c->stun_srv_port = strtol(next, &end, 10);
+                        if(next == end){
+                                log_msg(LOG_LEVEL_ERROR, "Failed to parse hole punching stun server port.\n");
+                                return false;
+                        }
+                        next = strchr(next, ':');
+                } else if(strncmp(token, "room=", strlen("room=")) == 0){
+                        token += strlen("room=");
+                        punch_c->room_name = token;
+                } else if(strncmp(token, "client_name=", strlen("client_name=")) == 0){
+                        token += strlen("client_name=");
+                        punch_c->client_name = token;
+                }
+
+                token = next;
+        }
+
+        if(!punch_c->stun_srv_addr || !punch_c->coord_srv_addr ||
+                        !punch_c->room_name || !punch_c->client_name)
+        {
+                log_msg(LOG_LEVEL_ERROR, "Not all hole punch params provided.\n");
+                return false;
+        }
+
+        return true;
+}
+
 struct ug_options {
         ug_options() {
                 vidcap_params_set_device(vidcap_params_head, "none");
@@ -1222,28 +1286,35 @@ static int adjust_params(struct ug_options *opt) {
                 LOG(LOG_LEVEL_WARNING) << "Using RTSP for audio but not for video is not recommended and might not work.\n";
         }
 
-        Holepunch_config punch_c = {0};
-        punch_c.client_name = opt->requested_receiver;
-        punch_c.room_name = "ug_testroom";
-        punch_c.video_rx_port = &opt->video_rx_port;
-        punch_c.video_tx_port = &opt->video_tx_port;
-        //int *audio_rx_port;
-        //int *audio_tx_port;
-
         char punched_host[1024];
-        punch_c.host_addr = punched_host;
-        punch_c.host_addr_len = sizeof(punched_host);
+        if(opt->nat_traverse_config && strncmp(opt->nat_traverse_config, "holepunch", strlen("holepunch")) == 0){
+                Holepunch_config punch_c = {};
 
-        punch_c.coord_srv_addr = "";
-        punch_c.coord_srv_port = 12345;
-        punch_c.stun_srv_addr = "";
-        punch_c.stun_srv_port = 3478;
+                /* This cast should be safe, because if nat_traverse_config is
+                 * non-emty it should point to argv which is editable.
+                 * TODO: get rid of it
+                 */
+                if(!parse_holepunch_conf(const_cast<char *>(opt->nat_traverse_config), &punch_c)){
+                        return EXIT_FAILURE;
+                }
 
-        assert(punch_udp(&punch_c));
+                punch_c.video_rx_port = &opt->video_rx_port;
+                punch_c.video_tx_port = &opt->video_tx_port;
+                //int *audio_rx_port;
+                //int *audio_tx_port;
 
-        printf("remote: %s\n rx: %d\n tx: %d\n", punched_host, opt->video_rx_port, opt->video_tx_port);
-        opt->requested_receiver = punched_host;
-        opt->audio.host = punched_host;
+                punch_c.host_addr = punched_host;
+                punch_c.host_addr_len = sizeof(punched_host);
+
+                if(!punch_udp(&punch_c)){
+                        log_msg(LOG_LEVEL_ERROR, "Hole punching failed.\n");
+                        return EXIT_FAILURE;
+                }
+
+                printf("remote: %s\n rx: %d\n tx: %d\n", punched_host, opt->video_rx_port, opt->video_tx_port);
+                opt->requested_receiver = punched_host;
+                opt->audio.host = punched_host;
+        }
 
         return 0;
 }
@@ -1314,9 +1385,13 @@ int main(int argc, char *argv[])
                 EXIT(EXIT_FAIL_CONTROL_SOCK);
         }
 
-        if ((nat_traverse = start_nat_traverse(opt.nat_traverse_config, opt.video_rx_port, opt.audio.recv_port)) == nullptr) {
-                exit_uv(1);
-                goto cleanup;
+        if(!opt.nat_traverse_config
+                        || strncmp(opt.nat_traverse_config, "holepunch", strlen("holepunch")) != 0){
+                nat_traverse = start_nat_traverse(opt.nat_traverse_config, opt.video_rx_port, opt.audio.recv_port);
+                if(!nat_traverse){
+                        exit_uv(1);
+                        goto cleanup;
+                }
         }
 
         uv.audio = audio_cfg_init (&uv.root_module, &opt.audio,
