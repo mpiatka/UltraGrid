@@ -27,7 +27,7 @@ struct Holepunch_config{
         int stun_srv_port;
 };
 
-bool punch_udp(const struct Holepunch_config *c);
+bool punch_udp(struct Holepunch_config c);
 
 
 #ifdef __cplusplus

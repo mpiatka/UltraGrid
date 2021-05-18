@@ -666,8 +666,7 @@ static bool parse_holepunch_conf(char *conf, struct Holepunch_config *punch_c){
                 token = next;
         }
 
-        if(!punch_c->stun_srv_addr || !punch_c->coord_srv_addr ||
-                        !punch_c->room_name || !punch_c->client_name)
+        if(!punch_c->stun_srv_addr || !punch_c->coord_srv_addr || !punch_c->room_name)
         {
                 log_msg(LOG_LEVEL_ERROR, "Not all hole punch params provided.\n");
                 return false;
@@ -1246,7 +1245,7 @@ int main(int argc, char *argv[])
                 punch_c.host_addr = punched_host;
                 punch_c.host_addr_len = sizeof(punched_host);
 
-                if(!punch_udp(&punch_c)){
+                if(!punch_udp(punch_c)){
                         log_msg(LOG_LEVEL_ERROR, "Hole punching failed.\n");
                         EXIT(EXIT_FAILURE);
                 }
