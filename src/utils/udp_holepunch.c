@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/socket.h>
-#include <sys/select.h>
+#include <poll.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include "utils/udp_holepunch.h"
@@ -162,17 +162,13 @@ static void exchange_coord_desc(juice_agent_t *agent, int coord_sock){
 static void discover_and_xchg_candidates(juice_agent_t *agent, int coord_sock) {
         juice_gather_candidates(agent);
 
-        fd_set rfds;
-        FD_ZERO(&rfds);
-
-        struct timeval tv;
-        tv.tv_sec = 0;
-        tv.tv_usec = 300000;
+        struct pollfd fds;
+        fds.fd = coord_sock;
+        fds.events = POLLIN;
 
         while(1){
-                FD_SET(coord_sock, &rfds);
-                select(coord_sock + 1, &rfds, NULL, NULL, &tv);
-                if(FD_ISSET(coord_sock, &rfds)){
+                poll(&fds, 1, 300);
+                if(fds.revents & POLLIN){
                         char msg_buf[MAX_MSG_LEN];
                         recv_msg(coord_sock, msg_buf, sizeof(msg_buf));
                         log_msg(LOG_LEVEL_VERBOSE, MOD_NAME "Received remote candidate\n");
