@@ -974,21 +974,12 @@ AC_ARG_ENABLE(libjuice,
 [libjuice_req=$enableval],
 [libjuice_req=$build_default])
 
-AC_ARG_WITH(libjuice,
-            [  --with-libjuice=DIR          specify location of libjuice],
-            [LIBJUICE_PATH=$withval
-             ])
-
-if test -n "$LIBJUICE_PATH"
-then
-        AC_CHECK_FILES(${LIBJUICE_PATH}/build/libjuice-static.a, FOUND_LIBJUICE=yes, FOUND_LIBJUICE=no)
-fi
+AC_CHECK_LIB(juice, juice_create, FOUND_LIBJUICE=yes, FOUND_LIBJUICE=no)
+LIBJUICE_LIB="-ljuice"
 
 if test "$libjuice_req" != no -a "$FOUND_LIBJUICE" = yes
 then
         libjuice=yes
-        LIBJUICE_INC="$LIBJUICE_INC -I${LIBJUICE_PATH}/include"
-        LIBJUICE_LIB="${LIBJUICE_PATH}/build/libjuice-static.a"
         ADD_MODULE("holepunch", "src/utils/udp_holepunch.o", "$LIBJUICE_LIB")
         INC="$INC $LIBJUICE_INC"
 fi
