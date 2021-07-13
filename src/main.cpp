@@ -1231,6 +1231,53 @@ static int adjust_params(struct ug_options *opt) {
                 }
         }
 
+        char punched_host[1024];
+        if(opt->nat_traverse_config && strncmp(opt->nat_traverse_config, "holepunch", strlen("holepunch")) == 0){
+                Holepunch_config punch_c = {};
+
+                /* This cast should be safe, because if nat_traverse_config is
+                 * non-emty it should point to argv which is editable.
+                 * TODO: get rid of it
+                 */
+                if(!parse_holepunch_conf(const_cast<char *>(opt->nat_traverse_config), &punch_c)){
+                        return EXIT_FAILURE;
+                }
+
+                commandline_params["udp-disable-multi-socket"] = string();
+
+                if (strcmp("none", vidcap_params_get_driver(opt->vidcap_params_head)) == 0
+                                && strcmp("none", opt->requested_display) != 0)
+                {
+                        vidcap_params_set_device(opt->vidcap_params_tail, "testcard:2:2:1:UYVY");
+                        opt->vidcap_params_tail = vidcap_params_allocate_next(opt->vidcap_params_tail);
+                }
+
+                if (strcmp("none", opt->audio.send_cfg) == 0
+                                && strcmp("none", opt->audio.recv_cfg) != 0)
+                {
+                        parse_audio_capture_format("sample_rate=5");
+                        opt->audio.send_cfg = "testcard:frames=1";
+                }
+
+                punch_c.video_rx_port = &opt->video_rx_port;
+                punch_c.video_tx_port = &opt->video_tx_port;
+                punch_c.audio_rx_port = &opt->audio.recv_port;
+                punch_c.audio_tx_port = &opt->audio.send_port;
+
+                punch_c.host_addr = punched_host;
+                punch_c.host_addr_len = sizeof(punched_host);
+
+                if(!punch_udp(punch_c)){
+                        log_msg(LOG_LEVEL_ERROR, "Hole punching failed.\n");
+                        return EXIT_FAILURE;
+                }
+
+                printf("remote: %s\n rx: %d\n tx: %d\n", punched_host, opt->video_rx_port, opt->video_tx_port);
+                opt->requested_receiver = punched_host;
+                opt->audio.host = punched_host;
+        }
+
+
         if (strcmp("none", opt->audio.recv_cfg) != 0) {
                 audio_rxtx_mode |= MODE_RECEIVER;
         }
@@ -1302,36 +1349,6 @@ static int adjust_params(struct ug_options *opt) {
         }
         if (strcmp(opt->audio.proto, "rtsp") == 0 && strcmp(opt->video_protocol, "rtsp") != 0) {
                 LOG(LOG_LEVEL_WARNING) << "Using RTSP for audio but not for video is not recommended and might not work.\n";
-        }
-
-        char punched_host[1024];
-        if(opt->nat_traverse_config && strncmp(opt->nat_traverse_config, "holepunch", strlen("holepunch")) == 0){
-                Holepunch_config punch_c = {};
-
-                /* This cast should be safe, because if nat_traverse_config is
-                 * non-emty it should point to argv which is editable.
-                 * TODO: get rid of it
-                 */
-                if(!parse_holepunch_conf(const_cast<char *>(opt->nat_traverse_config), &punch_c)){
-                        return EXIT_FAILURE;
-                }
-
-                punch_c.video_rx_port = &opt->video_rx_port;
-                punch_c.video_tx_port = &opt->video_tx_port;
-                punch_c.audio_rx_port = &opt->audio.recv_port;
-                punch_c.audio_tx_port = &opt->audio.send_port;
-
-                punch_c.host_addr = punched_host;
-                punch_c.host_addr_len = sizeof(punched_host);
-
-                if(!punch_udp(punch_c)){
-                        log_msg(LOG_LEVEL_ERROR, "Hole punching failed.\n");
-                        return EXIT_FAILURE;
-                }
-
-                printf("remote: %s\n rx: %d\n tx: %d\n", punched_host, opt->video_rx_port, opt->video_tx_port);
-                opt->requested_receiver = punched_host;
-                opt->audio.host = punched_host;
         }
 
         return 0;
