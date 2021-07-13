@@ -1222,21 +1222,6 @@ int main(int argc, char *argv[])
                 }
         }
 
-        if (strcmp("none", audio_recv) != 0) {
-                audio_rxtx_mode |= MODE_RECEIVER;
-        }
-
-        if (strcmp("none", audio_send) != 0) {
-                audio_rxtx_mode |= MODE_SENDER;
-        }
-
-        if (strcmp("none", requested_display) != 0) {
-                video_rxtx_mode |= MODE_RECEIVER;
-        }
-        if (strcmp("none", vidcap_params_get_driver(vidcap_params_head)) != 0) {
-                video_rxtx_mode |= MODE_SENDER;
-        }
-
         char punched_host[1024];
         if(nat_traverse_config && strncmp(nat_traverse_config, "holepunch", strlen("holepunch")) == 0){
                 Holepunch_config punch_c = {};
@@ -1247,6 +1232,22 @@ int main(int argc, char *argv[])
                  */
                 if(!parse_holepunch_conf(const_cast<char *>(nat_traverse_config), &punch_c)){
                         EXIT(EXIT_FAILURE);
+                }
+
+                commandline_params["udp-disable-multi-socket"] = string();
+
+                if (strcmp("none", vidcap_params_get_driver(vidcap_params_head)) == 0
+                                && strcmp("none", requested_display) != 0)
+                {
+                        vidcap_params_set_device(vidcap_params_tail, "testcard:2:2:1:UYVY");
+                        vidcap_params_tail = vidcap_params_allocate_next(vidcap_params_tail);
+                }
+
+                if (strcmp("none", audio_send) == 0
+                                && strcmp("none", audio_recv) != 0)
+                {
+                        parse_audio_capture_format("sample_rate=5");
+                        audio_send = "testcard:frames=1";
                 }
 
                 punch_c.video_rx_port = &video_rx_port;
@@ -1265,6 +1266,21 @@ int main(int argc, char *argv[])
                 printf("remote: %s\n rx: %d\n tx: %d\n", punched_host, video_rx_port, video_tx_port);
                 requested_receiver = punched_host;
                 audio_host = punched_host;
+        }
+
+        if (strcmp("none", audio_recv) != 0) {
+                audio_rxtx_mode |= MODE_RECEIVER;
+        }
+
+        if (strcmp("none", audio_send) != 0) {
+                audio_rxtx_mode |= MODE_SENDER;
+        }
+
+        if (strcmp("none", requested_display) != 0) {
+                video_rxtx_mode |= MODE_RECEIVER;
+        }
+        if (strcmp("none", vidcap_params_get_driver(vidcap_params_head)) != 0) {
+                video_rxtx_mode |= MODE_SENDER;
         }
 
         if (video_rx_port == -1) {
