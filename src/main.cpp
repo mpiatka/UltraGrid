@@ -751,7 +751,7 @@ struct ug_options {
         const char *video_protocol = "ultragrid_rtp";
         const char *video_protocol_opts = "";
 
-        const char *nat_traverse_config = nullptr;
+        char *nat_traverse_config = nullptr;
 
         unsigned int video_rxtx_mode = 0;
 };
@@ -1123,7 +1123,7 @@ static int parse_options(int argc, char *argv[], struct ug_options *opt) {
                         print_video_codecs();
                         return EXIT_SUCCESS;
                 case 'N':
-                        opt->nat_traverse_config = optarg == nullptr ? "" : optarg;
+                        opt->nat_traverse_config = optarg == nullptr ? const_cast<char *>("") : optarg;
                         break;
                 case 'C':
                         opt->is_client = true;
@@ -1235,11 +1235,7 @@ static int adjust_params(struct ug_options *opt) {
         if(opt->nat_traverse_config && strncmp(opt->nat_traverse_config, "holepunch", strlen("holepunch")) == 0){
                 Holepunch_config punch_c = {};
 
-                /* This cast should be safe, because if nat_traverse_config is
-                 * non-emty it should point to argv which is editable.
-                 * TODO: get rid of it
-                 */
-                if(!parse_holepunch_conf(const_cast<char *>(opt->nat_traverse_config), &punch_c)){
+                if(!parse_holepunch_conf(opt->nat_traverse_config, &punch_c)){
                         return EXIT_FAILURE;
                 }
 
