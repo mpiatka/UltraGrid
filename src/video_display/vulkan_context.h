@@ -59,6 +59,22 @@ struct  Vulkan_display_exception : public std::runtime_error {
 #define CHECKED_ASSIGN(variable, expr) { variable = expr; }
 
 #endif //NO_EXCEPTIONS -------------------------------------------------------
+
+struct Window_parameters {
+        uint32_t width;
+        uint32_t height;
+        bool vsync;
+
+        bool operator==(const Window_parameters& other) const {
+                return width == other.width && 
+                        height == other.height && 
+                        vsync == other.vsync;
+        }
+        bool operator!=(const Window_parameters& other) const {
+                return !(*this == other);
+        }
+};
+
 namespace vulkan_display_detail {
         using c_str = const char*;
         using namespace std::literals;
@@ -92,7 +108,7 @@ namespace vulkan_display_detail {
                 std::vector<Swapchain_image> swapchain_images;
 
                 vk::Extent2D window_size{ 0, 0 };
-
+                bool vsync;
         private:
 
                 RETURN_VAL init_validation_layers_error_messenger();
@@ -134,7 +150,7 @@ namespace vulkan_display_detail {
 
                 RETURN_VAL create_instance(std::vector<const char*>& required_extensions);
 
-                RETURN_VAL init(VkSurfaceKHR surface, uint32_t window_width, uint32_t window_height);
+                RETURN_VAL init(VkSurfaceKHR surface, Window_parameters parameters);
 
                 RETURN_VAL create_framebuffers(vk::RenderPass render_pass);
 
@@ -142,7 +158,11 @@ namespace vulkan_display_detail {
                         return swapchain_images[framebuffer_id].framebuffer;
                 }
 
-                RETURN_VAL recreate_swapchain(vk::Extent2D window_size, vk::RenderPass render_pass);
+                Window_parameters get_window_parameters() {
+                        return { window_size.width, window_size.height, vsync };
+                }
+
+                RETURN_VAL recreate_swapchain(Window_parameters parameters, vk::RenderPass render_pass);
         };
 }
 

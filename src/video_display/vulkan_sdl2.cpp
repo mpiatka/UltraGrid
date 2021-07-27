@@ -157,10 +157,11 @@ struct state_vulkan_sdl2 final : Window_inteface {
                 module_done(&mod);
         }
 
-        std::pair<uint32_t, uint32_t> get_window_size() override {
+        Window_parameters get_window_parameters() override {
+                assert(window);
                 int width, height;
                 SDL_Vulkan_GetDrawableSize(window, &width, &height);
-                return { static_cast<uint32_t>(width), static_cast<uint32_t>(height) };
+                return { static_cast<uint32_t>(width), static_cast<uint32_t>(height), vsync };
         }
 };
 
@@ -613,9 +614,6 @@ static void* display_sdl2_init(struct module* parent, const char* fmt, unsigned 
                 else if (strncmp(tok, "display=", strlen("display=")) == 0) {
                         s->display_idx = atoi(tok + strlen("display="));
                 }
-                else if (strncmp(tok, "driver=", strlen("driver=")) == 0) {
-                        driver = tok + strlen("driver=");
-                }
                 else if (strcmp(tok, "fs") == 0) {
                         s->fs = true;
                 }
@@ -662,7 +660,7 @@ static void* display_sdl2_init(struct module* parent, const char* fmt, unsigned 
                         s->x = atoi(tok);
                         s->y = atoi(strchr(tok, ',') + 1);
                 }
-                else if (strncmp(tok, "renderer=", strlen("renderer=")) == 0) {
+                else if (strncmp(tok, "renderer=", strlen("renderer=")) == 0) { //todo
                         s->renderer_idx = atoi(tok + strlen("renderer="));
                 }
                 else {

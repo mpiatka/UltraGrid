@@ -462,8 +462,8 @@ RETURN_VAL Vulkan_display::create_description_sets() {
 RETURN_VAL Vulkan_display::init(VkSurfaceKHR surface, Window_inteface* window) {
         // Order of following calls is important
         this->window = window;
-        auto [width, height] = window->get_window_size();
-        PASS_RESULT(context.init(surface, width, height));
+        auto window_parameters = window->get_window_parameters();
+        PASS_RESULT(context.init(surface, window_parameters));
         device = context.device;
         PASS_RESULT(create_shader(vertex_shader, "shaders/vert.spv", device));
         PASS_RESULT(create_shader(fragment_shader, "shaders/frag.spv", device));
@@ -539,6 +539,18 @@ RETURN_VAL Vulkan_display::record_graphics_commands(unsigned current_path_id, ui
 
         return RETURN_VAL();
 }
+RETURN_VAL Vulkan_display::acquire_new_image(uint32_t& image_index, const Path& path) {
+        while (true) {
+                auto acquired = device.acquireNextImageKHR(context.swapchain, UINT64_MAX, path.image_acquired_semaphore, nullptr, &image_index);
+                if (acquired == vk::Result::eSuboptimalKHR || acquired == vk::Result::eErrorOutOfDateKHR) {
+                        window_parameters_changed();
+                        continue;
+                }
+                
+                CHECK(acquired, "Next swapchain image cannot be acquired."s + vk::to_string(acquired));
+                return RETURN_VAL();
+        }
+}
 
 RETURN_VAL Vulkan_display::render(std::byte* frame,
         uint32_t image_width, uint32_t image_height, vk::Format format)
@@ -563,12 +575,7 @@ RETURN_VAL Vulkan_display::render(std::byte* frame,
                 format, transfer_image_row_pitch);
 
         uint32_t image_index;
-        auto acquired = device.acquireNextImageKHR(context.swapchain, UINT64_MAX, path.image_acquired_semaphore, nullptr, &image_index);
-        while (acquired == vk::Result::eSuboptimalKHR || acquired == vk::Result::eErrorOutOfDateKHR) {
-                resize_window();
-                std::tie(acquired, image_index) = device.acquireNextImageKHR(context.swapchain, UINT64_MAX, path.image_acquired_semaphore, nullptr);
-        }
-        CHECK(acquired, "Next swapchain image cannot be acquired.");
+        PASS_RESULT(acquire_new_image(image_index, path));
 
         record_graphics_commands(current_path_id, image_index);
 
@@ -587,21 +594,28 @@ RETURN_VAL Vulkan_display::render(std::byte* frame,
                 .setImageIndices(image_index)
                 .setSwapchains(context.swapchain)
                 .setWaitSemaphores(path.image_rendered_semaphore);
-        try {
-                CHECK(context.queue.presentKHR(present_info), "Error presenting image.");
+
+        auto present_result = context.queue.presentKHR(&present_info);
+        if (present_result != vk::Result::eSuccess) {
+                using res = vk::Result;
+                switch (present_result) {
+                        // skip recoverable errors, othervise return/throw error 
+                        case res::eErrorOutOfDateKHR: break;
+                        case res::eSuboptimalKHR: break;
+                        default: CHECK(false, "Error presenting image:"s + vk::to_string(present_result));
+                }
         }
-        catch (vk::OutOfDateKHRError& error) { std::cout << error.what() << std::endl; }
+        
         current_path_id++;
         current_path_id %= concurent_paths_count;
 
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_display::resize_window() {
-        auto [width, height] = window->get_window_size();
-        vk::Extent2D new_size{ width, height };
-        if (new_size != context.window_size && new_size.width * new_size.height != 0) {
-                context.recreate_swapchain(vk::Extent2D{ width, height }, render_pass);
+RETURN_VAL Vulkan_display::window_parameters_changed() {
+        Window_parameters new_parameters = window->get_window_parameters();
+        if (new_parameters != context.get_window_parameters() && new_parameters.width * new_parameters.height != 0) {
+                context.recreate_swapchain(new_parameters, render_pass);
                 update_render_area();
         }
         return RETURN_VAL();

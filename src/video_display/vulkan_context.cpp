@@ -205,7 +205,6 @@ namespace vulkan_display_detail {
                 std::vector<vk::PresentModeKHR> modes;
                 CHECKED_ASSIGN(modes, gpu.getSurfacePresentModesKHR(surface));
 
-                bool vsync = true;
                 vk::PresentModeKHR first_choice{}, second_choice{};
                 if (vsync) {
                         first_choice = vk::PresentModeKHR::eFifo;
@@ -302,9 +301,10 @@ namespace vulkan_display_detail {
                 return RETURN_VAL();
         }
 
-        RETURN_VAL Vulkan_context::init(VkSurfaceKHR surface, uint32_t width, uint32_t height) {
+        RETURN_VAL Vulkan_context::init(VkSurfaceKHR surface, Window_parameters parameters) {
                 this->surface = surface;
-                this->window_size = vk::Extent2D{ width, height };
+                window_size = vk::Extent2D{parameters.width, parameters.height};
+                vsync = parameters.vsync;
 
                 PASS_RESULT(create_physical_device());
                 PASS_RESULT(get_queue_family_index());
@@ -329,10 +329,12 @@ namespace vulkan_display_detail {
                 return RETURN_VAL();
         }
 
-        RETURN_VAL Vulkan_context::recreate_swapchain(vk::Extent2D window_size, vk::RenderPass render_pass) {
+        RETURN_VAL Vulkan_context::recreate_swapchain(Window_parameters parameters, vk::RenderPass render_pass) {
+                window_size = vk::Extent2D{ parameters.width, parameters.height };
+                vsync = parameters.vsync;
+
                 device.waitIdle();
 
-                window_size = window_size;
                 destroy_framebuffers();
                 destroy_swapchain_views();
                 vk::SwapchainKHR old_swap_chain = swapchain;

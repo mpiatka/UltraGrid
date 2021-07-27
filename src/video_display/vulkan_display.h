@@ -1,11 +1,15 @@
+#pragma once
+
 #include "vulkan_context.h"
 #include <utility>
+
+
 
 class Window_inteface {
 protected:
         ~Window_inteface() = default;
 public:
-        virtual std::pair<uint32_t, uint32_t> get_window_size() = 0;
+        virtual Window_parameters get_window_parameters() = 0;
 };
 
 class Vulkan_display {
@@ -33,7 +37,7 @@ class Vulkan_display {
         vk::CommandPool command_pool;
         std::vector<vk::CommandBuffer> command_buffers;
 
-        unsigned concurent_paths_count = 3;
+        constexpr static unsigned concurent_paths_count = 3;
         unsigned current_path_id = 0;
         struct Path {
                 vk::Semaphore image_acquired_semaphore;
@@ -102,6 +106,8 @@ private:
 
         RETURN_VAL update_render_area();
 
+        RETURN_VAL acquire_new_image(uint32_t& image, const Path& path);
+
 public:
         Vulkan_display() = default;
         Vulkan_display(const Vulkan_display& other) = delete;
@@ -127,6 +133,6 @@ public:
                 uint32_t image_height, 
                 vk::Format format = vk::Format::eR8G8B8A8Srgb);
 
-        RETURN_VAL resize_window();
+        RETURN_VAL window_parameters_changed();
 
 };
