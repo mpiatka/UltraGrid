@@ -48,7 +48,7 @@
    *   needs decoder to use either pitch (toggling fullscreen or resize) or
    *   forcing decoder to reconfigure pitch.
    */
-
+//#define HAVE_CONFIG_H
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #include "config_unix.h"
@@ -81,23 +81,27 @@
 #include <SDL2/SDL_vulkan.h>
 #include<SDL2/SDL_syswm.h>
 
+#include<array>
+#include <cassert>
 #include <condition_variable>
 #include <cstdint>
-#include <list>
 #include <mutex>
 #include <queue>
 #include <string>
 #include <unordered_map>
 #include <utility> // pair
+#include <cstdint>
+#include<string_view>
 
 #define MAGIC_VULKAN_SDL2   0x3cc234a2
 #define MAX_BUFFER_SIZE   1
-#define MOD_NAME "[VULKAN_SDL] "
+#define MOD_NAME "[VULKAN_SDL2]"
 
 using rang::fg;
 using rang::style;
 using namespace std;
 using namespace std::chrono;
+using namespace std::string_literals;
 
 static void show_help(void);
 static void display_sdl2_new_message(struct module*);
@@ -116,12 +120,13 @@ struct state_vulkan_sdl2 final : Window_inteface {
 
         int                     display_idx{ 0 };
         int                     x{ SDL_WINDOWPOS_UNDEFINED },
-                y{ SDL_WINDOWPOS_UNDEFINED };
+                                y{ SDL_WINDOWPOS_UNDEFINED };
         int                     renderer_idx{ -1 };
-        SDL_Window* window{ nullptr };
+        SDL_Window*             window{ nullptr };
         //SDL_Renderer           *renderer{nullptr};
         //SDL_Texture            *texture{nullptr};
 
+        bool                    validation{ true }; // todo: change to false
         bool                    fs{ false };
         bool                    deinterlace{ false };
         bool                    keep_aspect{ false };
@@ -129,6 +134,7 @@ struct state_vulkan_sdl2 final : Window_inteface {
         bool                    fixed_size{ false };
         int                     fixed_w{ 0 }, fixed_h{ 0 };
         uint32_t                window_flags{ 0 }; ///< user requested flags
+        
 
         mutex                   lock;
         condition_variable      frame_consumed_cv;
@@ -136,7 +142,7 @@ struct state_vulkan_sdl2 final : Window_inteface {
 
         struct video_desc       current_desc {};
         struct video_desc       current_display_desc {};
-        struct video_frame* last_frame{ nullptr };
+        struct video_frame*     last_frame{ nullptr };
 
         queue<struct video_frame*> free_frame_queue;
 
@@ -166,8 +172,10 @@ struct state_vulkan_sdl2 final : Window_inteface {
 };
 
 
-static const list<pair<char, string>> display_sdl2_keybindings{ {'d', "toggle deinterlace"},
-        {'f', "toggle fullscreen"}, {'q', "quit"} };
+static constexpr std::array<std::pair<const char *, const char *>, 3> display_sdl2_keybindings
+        {{ {"d", "toggle deinterlace"},
+           {"f", "toggle fullscreen"},
+           {"q", "quit"} }};
 
 
 static void display_frame(struct state_vulkan_sdl2* s, struct video_frame* frame) {
@@ -193,7 +201,7 @@ static void display_frame(struct state_vulkan_sdl2* s, struct video_frame* frame
                 //unsigned char *pixels;
                 //int pitch;
                 //SDL_LockTexture(s->texture, NULL, (void **) &pixels, &pitch);
-
+                //vc_deinterlace_ex();
                 vc_deinterlace((unsigned char*)frame->tiles[0].data, vc_get_linesize(frame->tiles[0].width, frame->color_spec), frame->tiles[0].height);
                 //SDL_UnlockTexture(s->texture);
 
@@ -202,8 +210,6 @@ static void display_frame(struct state_vulkan_sdl2* s, struct video_frame* frame
                 s->vulkan->render(reinterpret_cast<std::byte*>(frame->tiles[0].data),
                         frame->tiles[0].width, frame->tiles[0].height,
                         frame->color_spec == RGBA ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8Srgb);
-                //s->vulkan->render(reinterpret_cast<unsigned char*>(s->image2.data()), 
-                //	s->image2_width, s->image2_height, vk::Format::eR8G8B8A8Srgb);
         }
         catch (exception& e) {
                 LOG(5) << e.what();
@@ -413,6 +419,7 @@ static void show_help(void)
         cout << style::bold << "\t     keep-aspect" << style::reset << " - keep window aspect ratio respecive to the video\n";
         cout << style::bold << "\t         novsync" << style::reset << " - disable sync on VBlank\n";
         cout << style::bold << "\t      nodecorate" << style::reset << " - disable window border\n";
+        cout << style::bold << "\t      validation" << style::reset << " - enable vulkan validation layers\n";
         cout << style::bold << "\tfixed_size[=WxH]" << style::reset << " - use fixed sized window\n";
         cout << style::bold << "\t    window_flags" << style::reset << " - flags to be passed to SDL_CreateWindow (use prefix 0x for hex)\n";
         cout << style::bold << "\t\t  <ridx>" << style::reset << " - renderer index: ";
@@ -475,9 +482,9 @@ static auto get_supported_pfs() {
         for (auto item : pf_mapping) {
                 codecs.push_back(item.first);
         }
-        if (get_commandline_param("sdl2-r10k") != nullptr) {
-                codecs.push_back(R10k);
-        }
+        //if (get_commandline_param("sdl2-r10k") != nullptr) {
+        //        codecs.push_back(R10k);
+        //}
         return codecs;
 }
 
@@ -630,6 +637,9 @@ static void* display_sdl2_init(struct module* parent, const char* fmt, unsigned 
                 }
                 else if (strcmp(tok, "keep-aspect") == 0) {
                         s->keep_aspect = true;
+                } 
+                else if (strcmp(tok, "validation") == 0) {
+                        s->validation = true;
                 }
                 else if (strncmp(tok, "fixed_size", strlen("fixed_size")) == 0) {
                         s->fixed_size = true;
@@ -691,7 +701,7 @@ static void* display_sdl2_init(struct module* parent, const char* fmt, unsigned 
         */
         loadSplashscreen(s);
         for (auto i : display_sdl2_keybindings) {
-                keycontrol_register_key(&s->mod, i.first, to_string(static_cast<int>(i.first)).c_str(), i.second.c_str());
+                keycontrol_register_key(&s->mod, *i.first, i.first, i.second);
         }
 
         log_msg(LOG_LEVEL_NOTICE, "SDL2 initialized successfully.\n");
@@ -725,9 +735,9 @@ static void* display_sdl2_init(struct module* parent, const char* fmt, unsigned 
         assert(extension_count > 0);
         try {
                 s->vulkan = std::make_unique<Vulkan_display>();
-                s->vulkan->create_instance(required_extensions);
-                auto& instance = s->vulkan->get_instance();
-
+                s->vulkan->create_instance(required_extensions, s->validation);
+                const auto& instance = s->vulkan->get_instance();
+                
 #define MSYS2
 #ifdef MSYS2
                 SDL_SysWMinfo wmInfo;
@@ -742,11 +752,13 @@ static void* display_sdl2_init(struct module* parent, const char* fmt, unsigned 
                 }
 #else
                 VkSurfaceKHR surface;
-                if (!SDL_Vulkan_CreateSurface(window, instance, &surface)) {
+                if (!SDL_Vulkan_CreateSurface(s->window, instance, &surface)) {
                         throw std::runtime_error("SDL cannot create surface.");
                 }
 #endif
+
                 s->vulkan->init(surface, s);
+                std::cout << "Vulkan display initialised." << std::endl;
         }
         catch (std::exception& e) {
                 LOG(5) << e.what() << "\n";

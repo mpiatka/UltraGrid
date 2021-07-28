@@ -82,8 +82,8 @@ namespace vulkan_display_detail {
         struct Vulkan_context {
                 vk::Instance instance;
 
+                bool validation_enabled;
                 std::unique_ptr<vk::DispatchLoaderDynamic> dynamic_dispatch_loader;
-
                 vk::DebugUtilsMessengerEXT messenger;
 
                 vk::PhysicalDevice gpu;
@@ -109,6 +109,7 @@ namespace vulkan_display_detail {
 
                 vk::Extent2D window_size{ 0, 0 };
                 bool vsync;
+
         private:
 
                 RETURN_VAL init_validation_layers_error_messenger();
@@ -148,7 +149,7 @@ namespace vulkan_display_detail {
 
                 ~Vulkan_context();
 
-                RETURN_VAL create_instance(std::vector<const char*>& required_extensions);
+                RETURN_VAL create_instance(std::vector<const char*>& required_extensions, bool enable_validation);
 
                 RETURN_VAL init(VkSurfaceKHR surface, Window_parameters parameters);
 

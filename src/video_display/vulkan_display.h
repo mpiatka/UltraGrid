@@ -116,9 +116,14 @@ public:
         Vulkan_display& operator=(Vulkan_display&& other) = delete;
 
         ~Vulkan_display();
-
-        RETURN_VAL create_instance(std::vector<const char*>& required_extensions) {
-                context.create_instance(required_extensions);
+        
+        /**
+         * @param required_extensions   Vulkan instance extensions requested by aplication,
+         *                              usually needed for creating vulkan surface
+         * @param enable_validation     Enable vulkan validation layers, they should be disabled in release build.            
+         */
+        RETURN_VAL create_instance(std::vector<const char*>& required_extensions, bool enable_validation) {
+                context.create_instance(required_extensions, enable_validation);
         }
 
         const vk::Instance& get_instance() {
@@ -133,6 +138,8 @@ public:
                 uint32_t image_height, 
                 vk::Format format = vk::Format::eR8G8B8A8Srgb);
 
+        /**
+         * @brief Hint to vulkan display that some window parameters spicified in struct Window_parameters changed
+         */
         RETURN_VAL window_parameters_changed();
-
 };

@@ -461,6 +461,7 @@ RETURN_VAL Vulkan_display::create_description_sets() {
 
 RETURN_VAL Vulkan_display::init(VkSurfaceKHR surface, Window_inteface* window) {
         // Order of following calls is important
+        assert(surface != VK_NULL_HANDLE);
         this->window = window;
         auto window_parameters = window->get_window_parameters();
         PASS_RESULT(context.init(surface, window_parameters));

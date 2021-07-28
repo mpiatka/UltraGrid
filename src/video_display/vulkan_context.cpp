@@ -1,5 +1,6 @@
 #define DEBUG
 #include "vulkan_context.h"
+#include<cassert>
 #include<iostream>
 
 using namespace vulkan_display_detail;
@@ -32,7 +33,7 @@ namespace {
                 const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
                 [[maybe_unused]] void* pUserData)
         {
-                if (false && strstr(pCallbackData->pMessage, "VUID-vkDestroyDevice-device-00378") != NULL) {
+                if (false && std::strstr(pCallbackData->pMessage, "VUID-vkDestroyDevice-device-00378") != NULL) {
                         return VK_FALSE;
                 }
                 std::cout << "validation layer: " << pCallbackData->pMessage << '\n' << std::endl;
@@ -105,15 +106,18 @@ namespace {
 
 namespace vulkan_display_detail {
 
-        RETURN_VAL Vulkan_context::create_instance(std::vector<c_str>& required_extensions) {
-#ifdef DEBUG
-                std::vector validation_layers{ "VK_LAYER_KHRONOS_validation" };
-                PASS_RESULT(check_validation_layers(validation_layers));
-#else
-                std::vector<c_str> validation_layers;
-#endif
-                const char* debug_extension = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
-                required_extensions.push_back(debug_extension);
+        RETURN_VAL Vulkan_context::create_instance(std::vector<c_str>& required_extensions, bool enable_validation) {
+                this->validation_enabled = enable_validation;
+
+                std::vector<c_str> validation_layers{};
+                if (enable_validation) {
+                        validation_layers.push_back("VK_LAYER_KHRONOS_validation");
+                        PASS_RESULT(check_validation_layers(validation_layers));
+
+                        const char* debug_extension = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+                        required_extensions.push_back(debug_extension);
+                }
+                
                 PASS_RESULT(check_instance_extensions(required_extensions));
 
                 vk::ApplicationInfo app_info{};
@@ -126,10 +130,10 @@ namespace vulkan_display_detail {
                         .setPEnabledExtensionNames(required_extensions);
                 CHECKED_ASSIGN(instance, vk::createInstance(instance_info));
 
-#ifdef DEBUG
-                dynamic_dispatch_loader = std::make_unique<vk::DispatchLoaderDynamic>(instance, vkGetInstanceProcAddr);
-                PASS_RESULT(init_validation_layers_error_messenger());
-#endif
+                if (enable_validation){
+                        dynamic_dispatch_loader = std::make_unique<vk::DispatchLoaderDynamic>(instance, vkGetInstanceProcAddr);
+                        PASS_RESULT(init_validation_layers_error_messenger());
+                }
 
                 return RETURN_VAL();
         }
@@ -352,7 +356,9 @@ namespace vulkan_display_detail {
                 device.destroy(swapchain);
                 instance.destroy(surface);
                 device.destroy();
-                instance.destroy(messenger, nullptr, *dynamic_dispatch_loader);
+                if (validation_enabled) {
+                        instance.destroy(messenger, nullptr, *dynamic_dispatch_loader);
+                }
                 instance.destroy();
         }
 
