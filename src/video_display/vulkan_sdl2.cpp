@@ -119,14 +119,16 @@ struct state_vulkan_sdl2 final : Window_inteface {
         unsigned long long int  frames{ 0 };
 
         int                     display_idx{ 0 };
-        int                     x{ SDL_WINDOWPOS_UNDEFINED },
-                                y{ SDL_WINDOWPOS_UNDEFINED };
-        int                     renderer_idx{ -1 };
+        int                     x{ SDL_WINDOWPOS_UNDEFINED };
+        int                     y{ SDL_WINDOWPOS_UNDEFINED };
+        //int                     renderer_idx{ -1 };
         SDL_Window*             window{ nullptr };
         //SDL_Renderer           *renderer{nullptr};
         //SDL_Texture            *texture{nullptr};
-
+        
+        uint32_t                gpu_idx{ NO_GPU_SELECTED };
         bool                    validation{ true }; // todo: change to false
+
         bool                    fs{ false };
         bool                    deinterlace{ false };
         bool                    keep_aspect{ false };
@@ -212,7 +214,7 @@ static void display_frame(struct state_vulkan_sdl2* s, struct video_frame* frame
                         frame->color_spec == RGBA ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8Srgb);
         }
         catch (exception& e) {
-                LOG(5) << e.what();
+                LOG(LOG_LEVEL_ERROR) << e.what() << std::endl;
                 exit_uv(EXIT_FAILURE);
         }
         //SDL_RenderCopy(s->renderer, s->texture, NULL, NULL);
@@ -401,35 +403,46 @@ static void sdl2_print_displays() {
         cout << "\n";
 }
 
-static void show_help(void)
-{
+static void print_gpus() {
+        Vulkan_display vulkan;
+        std::vector<const char*>required_extensions{};
+        vulkan.create_instance(required_extensions, false);
+
+        std::cout << "\n\tVulkan GPUs:\n";
+
+        std::vector<std::pair<std::string, bool>> gpus;
+        vulkan.get_available_gpus(gpus);
+        gpus[1].second = false;
+        uint32_t counter = 0;
+        for (const auto& gpu : gpus) {
+                std::cout << (gpu.second ? fg::reset : fg::red);
+                std::cout << "\t\t " << counter++ << "\t - " << gpu.first;
+                std::cout << (gpu.second ? "" : " - unsuitable") << fg::reset << '\n';
+        }
+}
+
+static void show_help(void){
         SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS);
-        printf("SDL options:\n");
-        cout << style::bold << fg::red << "\t-d sdl" << fg::reset << "[[:fs|:d|:display=<didx>|:driver=<drv>|:novsync|:renderer=<ridx>|:nodecorate|:fixed_size[=WxH]|:window_flags=<f>|:pos=<x>,<y>|:keep-aspect]*|:help]\n" << style::reset;
-        printf("\twhere:\n");
+        auto& cout = std::cout;
+        cout<<"SDL options:\n";
+        cout << style::bold << fg::red << "\t-d vulkan_sdl2" << fg::reset;
+        cout << "[:fs|:d|:display=<dis_id>|:novsync|:nodecorate|:fixed_size[=WxH]|:window_flags=<f>|:pos=<x>,<y>|:keep-aspect|:validation|:gpu=<gpu_id>|:help]\n";
+        
+        cout << style::reset << ("\twhere:\n");
+
         cout << style::bold << "\t\t       d" << style::reset << " - deinterlace\n";
         cout << style::bold << "\t\t      fs" << style::reset << " - fullscreen\n";
-        cout << style::bold << "\t\t  <didx>" << style::reset << " - display index, available indices: ";
+        cout << style::bold << "\t\t<dis_id>" << style::reset << " - display index, available indices: ";
         sdl2_print_displays();
-        cout << style::bold << "\t\t   <drv>" << style::reset << " - one of following: ";
-        for (int i = 0; i < SDL_GetNumVideoDrivers(); ++i) {
-                cout << (i == 0 ? "" : ", ") << style::bold << SDL_GetVideoDriver(i) << style::reset;
-        }
-        cout << style::bold << "\n";
         cout << style::bold << "\t     keep-aspect" << style::reset << " - keep window aspect ratio respecive to the video\n";
-        cout << style::bold << "\t         novsync" << style::reset << " - disable sync on VBlank\n";
+        cout << style::bold << "\t         novsync" << style::reset << " - disable vsync\n";
         cout << style::bold << "\t      nodecorate" << style::reset << " - disable window border\n";
-        cout << style::bold << "\t      validation" << style::reset << " - enable vulkan validation layers\n";
         cout << style::bold << "\tfixed_size[=WxH]" << style::reset << " - use fixed sized window\n";
         cout << style::bold << "\t    window_flags" << style::reset << " - flags to be passed to SDL_CreateWindow (use prefix 0x for hex)\n";
-        cout << style::bold << "\t\t  <ridx>" << style::reset << " - renderer index: ";
-        for (int i = 0; i < SDL_GetNumRenderDrivers(); ++i) {
-                SDL_RendererInfo renderer_info;
-                if (SDL_GetRenderDriverInfo(i, &renderer_info) == 0) {
-                        cout << (i == 0 ? "" : ", ") << style::bold << i << style::reset << " - " << style::bold << renderer_info.name << style::reset;
-                }
-        }
-        printf("\n");
+        cout << style::bold << "\t      validation" << style::reset << " - enable vulkan validation layers\n";
+        cout << style::bold << "\t        <gpu_id>" << style::reset << " - gpu index selected from the following list\n";
+        print_gpus();
+
         cout << "\n\tKeyboard shortcuts:\n";
         for (auto i : display_sdl2_keybindings) {
                 cout << style::bold << "\t\t'" << i.first << style::reset << "'\t - " << i.second << "\n";
@@ -471,9 +484,9 @@ static const ug_to_sdl_pf pf_mapping[] = {
         return it->second;
 }*/
 
-ADD_TO_PARAM("sdl2-r10k",
+/*ADD_TO_PARAM("sdl2-r10k",
         "* sdl2-r10k\n"
-        "  Enable 10-bit RGB support for SDL2 (EXPERIMENTAL)\n");
+        "  Enable 10-bit RGB support for SDL2 (EXPERIMENTAL)\n");*/
 
 static auto get_supported_pfs() {
         vector<codec_t> codecs;
@@ -487,20 +500,6 @@ static auto get_supported_pfs() {
         //}
         return codecs;
 }
-
-/*static bool create_texture(struct state_vulkan_sdl2* s, struct video_desc desc) {
-        if (s->texture) {
-                SDL_DestroyTexture(s->texture);
-        }
-
-        s->texture = SDL_CreateTexture(s->renderer, get_ug_to_sdl_format(desc.color_spec), SDL_TEXTUREACCESS_STREAMING, desc.width, desc.height);
-        if (!s->texture) {
-                log_msg(LOG_LEVEL_ERROR, "[SDL] Unable to create texture: %s\n", SDL_GetError());
-                return false;
-        }
-
-        return true;
-}*/
 
 /*static int display_sdl2_reconfigure_real(void* state, struct video_desc desc)
 {
@@ -604,7 +603,7 @@ static void* display_sdl2_init(struct module* parent, const char* fmt, unsigned 
                 log_msg(LOG_LEVEL_ERROR, "UltraGrid SDL2 module currently doesn't support audio!\n");
                 return NULL;
         }
-        const char* driver = NULL;
+        
         struct state_vulkan_sdl2* s = new state_vulkan_sdl2{ parent };
 
         if (fmt == NULL) {
@@ -670,8 +669,8 @@ static void* display_sdl2_init(struct module* parent, const char* fmt, unsigned 
                         s->x = atoi(tok);
                         s->y = atoi(strchr(tok, ',') + 1);
                 }
-                else if (strncmp(tok, "renderer=", strlen("renderer=")) == 0) { //todo
-                        s->renderer_idx = atoi(tok + strlen("renderer="));
+                else if (strncmp(tok, "gpu=", strlen("gpu=")) == 0) {
+                        s->gpu_idx = atoi(tok + strlen("gpu="));
                 }
                 else {
                         log_msg(LOG_LEVEL_ERROR, "[SDL] Wrong option: %s\n", tok);
@@ -682,23 +681,16 @@ static void* display_sdl2_init(struct module* parent, const char* fmt, unsigned 
         }
 
 
-        int ret = SDL_Init(SDL_INIT_EVENTS);
+        int ret = SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS);
         if (ret < 0) {
                 log_msg(LOG_LEVEL_ERROR, "Unable to initialize SDL2: %s\n", SDL_GetError());
                 delete s;
                 return NULL;
         }
-        /*ret = SDL_VideoInit(driver);
-        if (ret < 0) {
-                log_msg(LOG_LEVEL_ERROR, "Unable to initialize SDL2 video: %s\n", SDL_GetError());
-                delete s;
-                return NULL;
-        }
-        log_msg(LOG_LEVEL_NOTICE, "[SDL] Using driver: %s\n", SDL_GetCurrentVideoDriver());
-
-        SDL_ShowCursor(SDL_DISABLE);
+        
+        //SDL_ShowCursor(SDL_DISABLE);
         SDL_DisableScreenSaver();
-        */
+        
         loadSplashscreen(s);
         for (auto i : display_sdl2_keybindings) {
                 keycontrol_register_key(&s->mod, *i.first, i.first, i.second);
@@ -707,26 +699,27 @@ static void* display_sdl2_init(struct module* parent, const char* fmt, unsigned 
         log_msg(LOG_LEVEL_NOTICE, "SDL2 initialized successfully.\n");
 
 
-        int window_flags = s->window_flags | SDL_WINDOW_RESIZABLE;
-        if (s->fs) {
-                window_flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
-        }
+
         const char* window_title = "UltraGrid - SDL2 Display";
         if (get_commandline_param("window-title")) {
                 window_title = get_commandline_param("window-title");
         }
-        int width = s->fixed_w ? s->fixed_w : 960;
-        int height = s->fixed_h ? s->fixed_h : 540;
+
         int x = s->x == SDL_WINDOWPOS_UNDEFINED ? SDL_WINDOWPOS_CENTERED_DISPLAY(s->display_idx) : s->x;
         int y = s->y == SDL_WINDOWPOS_UNDEFINED ? SDL_WINDOWPOS_CENTERED_DISPLAY(s->display_idx) : s->y;
+        int width = s->fixed_w ? s->fixed_w : 960;
+        int height = s->fixed_h ? s->fixed_h : 540;
 
-        window_flags |= SDL_WINDOW_VULKAN;
+        int window_flags = s->window_flags | SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN;
+        if (s->fs) {
+                window_flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+        }
+
         s->window = SDL_CreateWindow(window_title, x, y, width, height, window_flags);
         if (!s->window) {
                 log_msg(LOG_LEVEL_ERROR, "[SDL] Unable to create window: %s\n", SDL_GetError());
-                return FALSE;
+                return nullptr;
         }
-
 
         uint32_t extension_count = 0;
         SDL_Vulkan_GetInstanceExtensions(s->window, &extension_count, nullptr);
@@ -751,18 +744,20 @@ static void* display_sdl2_init(struct module* parent, const char* fmt, unsigned 
                         throw std::runtime_error("SDL cannot create surface.");
                 }
 #else
-                VkSurfaceKHR surface;
+                VkSurfaceKHR surface = nullptr;
                 if (!SDL_Vulkan_CreateSurface(s->window, instance, &surface)) {
+                        std::cout << SDL_GetError() << std::endl;
+                        assert(false);
                         throw std::runtime_error("SDL cannot create surface.");
                 }
 #endif
 
-                s->vulkan->init(surface, s);
-                std::cout << "Vulkan display initialised." << std::endl;
+                s->vulkan->init(surface, s, s->gpu_idx);
+                LOG(LOG_LEVEL_NOTICE) << "Vulkan display initialised." << std::endl;
         }
         catch (std::exception& e) {
-                LOG(5) << e.what() << "\n";
-                exit_uv(EXIT_FAILURE);
+                LOG(LOG_LEVEL_ERROR) << e.what() << "\n";
+                return nullptr;
         }
         return (void*)s;
 }
@@ -794,7 +789,7 @@ static void display_sdl2_done(void* state) {
                 SDL_DestroyWindow(s->window);
         }
 
-        //SDL_ShowCursor(SDL_ENABLE);
+        SDL_ShowCursor(SDL_ENABLE);
 
         //SDL_VideoQuit();
         SDL_QuitSubSystem(SDL_INIT_EVENTS);

@@ -4,10 +4,9 @@
 #define VULKAN_HPP_NO_EXCEPTIONS
 #endif
 
-#define VULKAN_HPP_TYPESAFE_CONVERSION
 #include <vulkan/vulkan.hpp>
 
-#include<string>
+#include <string>
 
 inline vk::Result to_vk_result(bool b) {
         return b ? vk::Result::eSuccess : vk::Result::eErrorUnknown;
@@ -75,9 +74,13 @@ struct Window_parameters {
         }
 };
 
+constexpr uint32_t NO_GPU_SELECTED = UINT32_MAX;
+
 namespace vulkan_display_detail {
         using c_str = const char*;
         using namespace std::literals;
+
+        constexpr uint32_t NO_QUEUE_FAMILY_INDEX_FOUND = UINT32_MAX;
 
         struct Vulkan_context {
                 vk::Instance instance;
@@ -89,7 +92,7 @@ namespace vulkan_display_detail {
                 vk::PhysicalDevice gpu;
                 vk::Device device;
 
-                uint32_t queue_family_index = UINT32_MAX;
+                uint32_t queue_family_index = NO_QUEUE_FAMILY_INDEX_FOUND;
                 vk::Queue queue;
 
                 vk::SurfaceKHR surface;
@@ -114,9 +117,7 @@ namespace vulkan_display_detail {
 
                 RETURN_VAL init_validation_layers_error_messenger();
 
-                RETURN_VAL create_physical_device();
-
-                RETURN_VAL get_queue_family_index();
+                RETURN_VAL create_physical_device(uint32_t gpu_index);
 
                 RETURN_VAL create_logical_device();
 
@@ -151,7 +152,14 @@ namespace vulkan_display_detail {
 
                 RETURN_VAL create_instance(std::vector<const char*>& required_extensions, bool enable_validation);
 
-                RETURN_VAL init(VkSurfaceKHR surface, Window_parameters parameters);
+                /**
+                 * @brief returns all available grafhics cards
+                 *  first parameter is gpu name,
+                 *  second parameter is true, if gpu is suitable for use by vulkan 
+                 */
+                RETURN_VAL get_available_gpus(std::vector<std::pair<std::string, bool>>& gpus);
+                
+                RETURN_VAL init(VkSurfaceKHR surface, Window_parameters parameters, uint32_t gpu_index);
 
                 RETURN_VAL create_framebuffers(vk::RenderPass render_pass);
 

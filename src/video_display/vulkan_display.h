@@ -4,7 +4,6 @@
 #include <utility>
 
 
-
 class Window_inteface {
 protected:
         ~Window_inteface() = default;
@@ -130,7 +129,11 @@ public:
                 return context.instance;
         }
 
-        RETURN_VAL init(VkSurfaceKHR surface, Window_inteface* window);
+        RETURN_VAL get_available_gpus(std::vector<std::pair<std::string, bool>>& gpus) {
+                return context.get_available_gpus(gpus);
+        }
+
+        RETURN_VAL init(VkSurfaceKHR surface, Window_inteface* window, uint32_t gpu_index = NO_GPU_SELECTED);
 
         RETURN_VAL render(
                 std::byte* frame,

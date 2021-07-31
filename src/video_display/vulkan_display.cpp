@@ -39,10 +39,8 @@ namespace {
         }
 
         RETURN_VAL get_memory_type(
-                uint32_t& memory_type,
-                uint32_t memory_type_bits,
-                vk::MemoryPropertyFlags requested_properties,
-                vk::PhysicalDevice gpu)
+                uint32_t& memory_type, uint32_t memory_type_bits,
+                vk::MemoryPropertyFlags requested_properties, vk::PhysicalDevice gpu)
         {
                 auto supported_properties = gpu.getMemoryProperties();
                 for (uint32_t i = 0; i < supported_properties.memoryTypeCount; i++) {
@@ -118,8 +116,7 @@ vk::ImageMemoryBarrier  Vulkan_display::create_memory_barrier( Vulkan_display::T
         return memory_barrier;
 }
 
-RETURN_VAL Vulkan_display::create_texture_sampler()
-{
+RETURN_VAL Vulkan_display::create_texture_sampler() {
         vk::SamplerCreateInfo sampler_info;
         sampler_info
                 .setAddressModeU(vk::SamplerAddressMode::eClampToBorder)
@@ -459,12 +456,13 @@ RETURN_VAL Vulkan_display::create_description_sets() {
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_display::init(VkSurfaceKHR surface, Window_inteface* window) {
+RETURN_VAL Vulkan_display::init(VkSurfaceKHR surface, 
+        Window_inteface* window, uint32_t gpu_index) {
         // Order of following calls is important
-        assert(surface != VK_NULL_HANDLE);
+        assert(surface);
         this->window = window;
         auto window_parameters = window->get_window_parameters();
-        PASS_RESULT(context.init(surface, window_parameters));
+        PASS_RESULT(context.init(surface, window_parameters, gpu_index));
         device = context.device;
         PASS_RESULT(create_shader(vertex_shader, "shaders/vert.spv", device));
         PASS_RESULT(create_shader(fragment_shader, "shaders/frag.spv", device));
@@ -480,23 +478,27 @@ RETURN_VAL Vulkan_display::init(VkSurfaceKHR surface, Window_inteface* window) {
 }
 
 Vulkan_display::~Vulkan_display() {
-        device.waitIdle();
-        device.destroy(descriptor_pool);
+        std::cout << "Vulkan_display desctuctor called." << std::endl;
+        if (device) {
+                device.waitIdle();
+                device.destroy(descriptor_pool);
 
-        destroy_transfer_images();
-        device.destroy(command_pool);
-        device.destroy(render_pass);
-        device.destroy(fragment_shader);
-        device.destroy(vertex_shader);
-        for (auto& path : concurent_paths) {
-                device.destroy(path.image_acquired_semaphore);
-                device.destroy(path.image_rendered_semaphore);
-                device.destroy(path.path_available_fence);
+                destroy_transfer_images();
+                device.destroy(command_pool);
+                device.destroy(render_pass);
+                device.destroy(fragment_shader);
+                device.destroy(vertex_shader);
+                for (auto& path : concurent_paths) {
+                        device.destroy(path.image_acquired_semaphore);
+                        device.destroy(path.image_rendered_semaphore);
+                        device.destroy(path.path_available_fence);
+                }
+                device.destroy(pipeline);
+                device.destroy(pipeline_layout);
+                device.destroy(descriptor_set_layout);
+                device.destroy(sampler);
         }
-        device.destroy(pipeline);
-        device.destroy(pipeline_layout);
-        device.destroy(descriptor_set_layout);
-        device.destroy(sampler);
+        std::cout << "Vulkan_display desctuction completed." << std::endl;
 }
 
 RETURN_VAL Vulkan_display::record_graphics_commands(unsigned current_path_id, uint32_t image_index) {

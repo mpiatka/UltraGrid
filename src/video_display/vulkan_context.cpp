@@ -1,7 +1,6 @@
-#define DEBUG
 #include "vulkan_context.h"
-#include<cassert>
-#include<iostream>
+#include <cassert>
+#include <iostream>
 
 using namespace vulkan_display_detail;
 
@@ -65,33 +64,110 @@ namespace {
                 return RETURN_VAL();
         }
 
-        RETURN_VAL check_device_extensions(const std::vector<c_str>& required_extensions, const vk::PhysicalDevice& device) {
+
+        RETURN_VAL check_device_extensions(bool& result, bool propagate_error, 
+                const std::vector<c_str>& required_extensions, const vk::PhysicalDevice& device)
+        {
                 std::vector<vk::ExtensionProperties> extensions;
                 CHECKED_ASSIGN(extensions, device.enumerateDeviceExtensionProperties(nullptr));
 
                 for (auto& req_exten : required_extensions) {
                         auto extension_equals = [req_exten](auto exten) { return strcmp(req_exten, exten.extensionName) == 0; };
                         bool found = std::any_of(extensions.begin(), extensions.end(), extension_equals);
-                        CHECK(found, "Device extension "s + req_exten + " is not supported.");
+                        if (!found) {
+                                result = false;
+                                if (propagate_error) {
+                                        CHECK(false, "Device extension "s + req_exten + " is not supported.");
+                                }
+                                return RETURN_VAL();
+                        }
+                }
+                result = true;
+                return RETURN_VAL();
+        }
+
+        RETURN_VAL get_queue_family_index(uint32_t& index, vk::PhysicalDevice gpu, vk::SurfaceKHR surface) {
+                assert(gpu);
+
+                std::vector<vk::QueueFamilyProperties> families = gpu.getQueueFamilyProperties();
+
+                index = NO_QUEUE_FAMILY_INDEX_FOUND;
+                for (uint32_t i = 0; i < families.size(); i++) {
+                        VkBool32 surface_supported = true;
+                        if (surface) {
+                                CHECKED_ASSIGN(surface_supported, gpu.getSurfaceSupportKHR(i, surface));
+                        }
+
+                        if (surface_supported && (families[i].queueFlags & vk::QueueFlagBits::eGraphics)) {
+                                index = i;
+                                break;
+                        }
                 }
                 return RETURN_VAL();
         }
 
-        vk::PhysicalDevice choose_GPU(const std::vector<vk::PhysicalDevice>& gpus) {
+        const std::vector required_gpu_extensions = { "VK_KHR_swapchain" };
+        
+        RETURN_VAL is_gpu_suitable(bool& result, bool propagate_error, vk::PhysicalDevice gpu, vk::SurfaceKHR surface = nullptr) {
+                PASS_RESULT(check_device_extensions(result, propagate_error, required_gpu_extensions, gpu));
+                if (!result) return RETURN_VAL();
+                uint32_t index;
+                PASS_RESULT(get_queue_family_index(index, gpu, surface));
+                if (index == NO_QUEUE_FAMILY_INDEX_FOUND) {
+                        result = false;
+                }
+                RETURN_VAL();
+        }
+
+        RETURN_VAL choose_suitable_GPU(vk::PhysicalDevice& suitable_gpu, const std::vector<vk::PhysicalDevice>& gpus, vk::SurfaceKHR surface) {
+                assert(surface);
+                bool is_suitable;
                 for (auto& gpu : gpus) {
                         auto properties = gpu.getProperties();
-                        if (properties.deviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
-                                return gpu;
+                        if (properties.deviceType == vk::PhysicalDeviceType::eDiscreteGpu){
+                                PASS_RESULT(is_gpu_suitable(is_suitable, false, gpu, surface));
+                                if (is_suitable) {
+                                        suitable_gpu = gpu;
+                                        return RETURN_VAL();
+                                }
                         }
                 }
 
                 for (auto& gpu : gpus) {
                         auto properties = gpu.getProperties();
                         if (properties.deviceType == vk::PhysicalDeviceType::eIntegratedGpu) {
-                                return gpu;
+                                PASS_RESULT(is_gpu_suitable(is_suitable, false, gpu, surface));
+                                if (is_suitable) {
+                                        suitable_gpu = gpu;
+                                        return RETURN_VAL();
+                                }
                         }
                 }
-                return gpus[0];
+
+                for (auto& gpu : gpus) {
+                        PASS_RESULT(is_gpu_suitable(is_suitable, false, gpu, surface));
+                        if (is_suitable) {
+                                suitable_gpu = gpu;
+                                return RETURN_VAL();
+                        }
+                }
+
+                CHECK(false, "No suitable gpu found.");
+        }
+
+        vk::PhysicalDevice choose_gpu_by_index(std::vector<vk::PhysicalDevice>& gpus, uint32_t gpu_index) {
+                CHECK(gpu_index < gpus.size(), "GPU index is not valid.");
+                std::vector<std::pair<std::string, vk::PhysicalDevice>> gpu_names;
+                gpu_names.reserve(gpus.size());
+
+                auto get_gpu_name = [](auto gpu) -> std::pair<std::string, vk::PhysicalDevice> {
+                        return { gpu.getProperties().deviceName, gpu };
+                };
+
+                std::transform(gpus.begin(), gpus.end(), std::back_inserter(gpu_names), get_gpu_name);
+
+                std::sort(gpu_names.begin(), gpu_names.end());
+                return gpu_names[gpu_index].second;
         }
 
         vk::CompositeAlphaFlagBitsKHR get_composite_alpha(vk::CompositeAlphaFlagsKHR capabilities) {
@@ -151,42 +227,43 @@ namespace vulkan_display_detail {
                 return RETURN_VAL();
         }
 
-        RETURN_VAL Vulkan_context::create_physical_device() {
-                assert(instance != vk::Instance{});
+        RETURN_VAL Vulkan_context::get_available_gpus(std::vector<std::pair<std::string, bool>>& gpus) {
+                assert(instance);
+                
+                std::vector<vk::PhysicalDevice> physical_devices;
+                CHECKED_ASSIGN(physical_devices, instance.enumeratePhysicalDevices());
+                gpus.clear();
+                gpus.reserve(physical_devices.size());
+                for (const auto& gpu : physical_devices) {
+                        auto properties = gpu.getProperties();
+                        gpus.emplace_back(properties.deviceName, true);
+                }
+                std::sort(gpus.begin(), gpus.end());
+                return RETURN_VAL();
+        }
+
+        RETURN_VAL Vulkan_context::create_physical_device(uint32_t gpu_index) {
+                assert(instance);
+                assert(surface);
                 std::vector<vk::PhysicalDevice> gpus;
                 CHECKED_ASSIGN(gpus, instance.enumeratePhysicalDevices());
 
-                gpu = choose_GPU(gpus);
+                if (gpu_index == NO_GPU_SELECTED) {
+                        PASS_RESULT(choose_suitable_GPU(gpu, gpus, surface));
+                }
+                else {
+                        gpu = choose_gpu_by_index(gpus, gpu_index);
+                        bool suitable;
+                        PASS_RESULT(is_gpu_suitable(suitable, true, gpu, surface));
+                }
                 auto properties = gpu.getProperties();
                 std::cout << "Vulkan uses GPU called: "s + properties.deviceName.data() << std::endl;
                 return RETURN_VAL();
         }
 
-        RETURN_VAL Vulkan_context::get_queue_family_index() {
-                assert(gpu != vk::PhysicalDevice{});
-
-                std::vector<vk::QueueFamilyProperties> families = gpu.getQueueFamilyProperties();
-
-                queue_family_index = UINT32_MAX;
-                for (uint32_t i = 0; i < families.size(); i++) {
-                        VkBool32 surface_supported;
-                        CHECKED_ASSIGN(surface_supported, gpu.getSurfaceSupportKHR(i, surface));
-
-                        if (surface_supported && (families[i].queueFlags & vk::QueueFlagBits::eGraphics)) {
-                                queue_family_index = i;
-                                break;
-                        }
-                }
-                CHECK(queue_family_index != UINT32_MAX, "No suitable GPU queue found.");
-                return RETURN_VAL();
-        }
-
         RETURN_VAL Vulkan_context::create_logical_device() {
-                assert(gpu != vk::PhysicalDevice{});
-                assert(queue_family_index != INT32_MAX);
-
-                std::vector<c_str> required_extensions = { "VK_KHR_swapchain" };
-                PASS_RESULT(check_device_extensions(required_extensions, gpu));
+                assert(gpu);
+                assert(queue_family_index != NO_QUEUE_FAMILY_INDEX_FOUND);
 
                 float priorities[] = { 1.0 };
                 vk::DeviceQueueCreateInfo queue_info{};
@@ -199,7 +276,7 @@ namespace vulkan_display_detail {
                 device_info
                         .setQueueCreateInfoCount(1)
                         .setPQueueCreateInfos(&queue_info)
-                        .setPEnabledExtensionNames(required_extensions);
+                        .setPEnabledExtensionNames(required_gpu_extensions);
 
                 CHECKED_ASSIGN(device, gpu.createDevice(device_info));
                 return RETURN_VAL();
@@ -305,13 +382,13 @@ namespace vulkan_display_detail {
                 return RETURN_VAL();
         }
 
-        RETURN_VAL Vulkan_context::init(VkSurfaceKHR surface, Window_parameters parameters) {
+        RETURN_VAL Vulkan_context::init(VkSurfaceKHR surface, Window_parameters parameters, uint32_t gpu_index) {
                 this->surface = surface;
                 window_size = vk::Extent2D{parameters.width, parameters.height};
                 vsync = parameters.vsync;
 
-                PASS_RESULT(create_physical_device());
-                PASS_RESULT(get_queue_family_index());
+                PASS_RESULT(create_physical_device(gpu_index));
+                PASS_RESULT(get_queue_family_index(queue_family_index, gpu, surface));
                 PASS_RESULT(create_logical_device());
                 queue = device.getQueue(queue_family_index, 0);
                 PASS_RESULT(create_swap_chain());
@@ -349,17 +426,22 @@ namespace vulkan_display_detail {
         }
 
         Vulkan_context::~Vulkan_context() {
-                device.waitIdle();
-
-                destroy_framebuffers();
-                destroy_swapchain_views();
-                device.destroy(swapchain);
-                instance.destroy(surface);
-                device.destroy();
-                if (validation_enabled) {
-                        instance.destroy(messenger, nullptr, *dynamic_dispatch_loader);
+                std::cout << "Vulkan context destructor called." << std::endl;
+                if (device) {
+                        device.waitIdle();
+                        destroy_framebuffers();
+                        destroy_swapchain_views();
+                        device.destroy(swapchain);
+                        device.destroy();
                 }
-                instance.destroy();
+                if (instance) {
+                        instance.destroy(surface);
+                        if (validation_enabled) {
+                                instance.destroy(messenger, nullptr, *dynamic_dispatch_loader);
+                        }
+                        instance.destroy();
+                }
+                std::cout << "Vulkan context destructor completed." << std::endl;
         }
 
 } //vulkan_display_detail
