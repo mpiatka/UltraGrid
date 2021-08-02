@@ -21,7 +21,7 @@ class Vulkan_display {
 
         vk::ShaderModule vertex_shader;
         vk::ShaderModule fragment_shader;
-        
+
         vk::RenderPass render_pass;
         vk::ClearValue clear_color;
 
@@ -29,7 +29,7 @@ class Vulkan_display {
         vk::DescriptorSetLayout descriptor_set_layout;
         vk::DescriptorPool descriptor_pool;
         std::vector<vk::DescriptorSet> descriptor_sets;
-        
+
         vk::PipelineLayout pipeline_layout;
         vk::Pipeline pipeline;
 
@@ -55,7 +55,7 @@ class Vulkan_display {
                 vk::AccessFlagBits access;
         };
         std::vector<Transfer_image> transfer_images;
-        
+
         vk::Extent2D transfer_image_size;
         size_t transfer_image_row_pitch;
         vk::DeviceSize transfer_image_byte_size;
@@ -66,7 +66,9 @@ class Vulkan_display {
                 uint32_t y;
                 uint32_t width;
                 uint32_t height;
-        } render_area {};
+        } render_area{};
+
+        bool minimalised = false;
 private:
         vk::ImageMemoryBarrier create_memory_barrier(
                 Vulkan_display::Transfer_image& image,
@@ -105,8 +107,6 @@ private:
 
         RETURN_VAL update_render_area();
 
-        RETURN_VAL acquire_new_image(uint32_t& image, const Path& path);
-
 public:
         Vulkan_display() = default;
         Vulkan_display(const Vulkan_display& other) = delete;
@@ -115,20 +115,25 @@ public:
         Vulkan_display& operator=(Vulkan_display&& other) = delete;
 
         ~Vulkan_display();
-        
+
         /**
          * @param required_extensions   Vulkan instance extensions requested by aplication,
          *                              usually needed for creating vulkan surface
-         * @param enable_validation     Enable vulkan validation layers, they should be disabled in release build.            
+         * @param enable_validation     Enable vulkan validation layers, they should be disabled in release build.
          */
         RETURN_VAL create_instance(std::vector<const char*>& required_extensions, bool enable_validation) {
-                context.create_instance(required_extensions, enable_validation);
+                return context.create_instance(required_extensions, enable_validation);
         }
 
         const vk::Instance& get_instance() {
                 return context.instance;
         }
 
+        /**
+         * @brief returns all available grafhics cards
+         *  first parameter is gpu name,
+         *  second parameter is true only if the gpu is suitable for Vulkan_display
+         */
         RETURN_VAL get_available_gpus(std::vector<std::pair<std::string, bool>>& gpus) {
                 return context.get_available_gpus(gpus);
         }
@@ -137,12 +142,17 @@ public:
 
         RETURN_VAL render(
                 std::byte* frame,
-                uint32_t image_width, 
-                uint32_t image_height, 
+                uint32_t image_width,
+                uint32_t image_height,
                 vk::Format format = vk::Format::eR8G8B8A8Srgb);
 
         /**
          * @brief Hint to vulkan display that some window parameters spicified in struct Window_parameters changed
          */
-        RETURN_VAL window_parameters_changed();
+        RETURN_VAL window_parameters_changed(Window_parameters new_parameters);
+
+        RETURN_VAL window_parameters_changed() {
+                PASS_RESULT(window_parameters_changed(window->get_window_parameters()));
+                return RETURN_VAL();
+        }
 };
