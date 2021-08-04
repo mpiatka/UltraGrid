@@ -105,6 +105,7 @@ constexpr int MAX_BUFFER_SIZE = 1;
 
 
 void display_sdl2_new_message(module*);
+int display_sdl2_putf(void* state, video_frame* frame, int nonblock);
 
 struct state_vulkan_sdl2 final : Window_inteface {
         module                  mod;
@@ -224,8 +225,8 @@ void display_frame(state_vulkan_sdl2* s, video_frame* frame) {
         //SDL_RenderCopy(s->renderer, s->texture, NULL, NULL);
         //SDL_RenderPresent(s->renderer);
 
-
 //free_frame:
+
         if (frame == s->last_frame) {
                 return; // we are only redrawing on window resize
         }
@@ -458,14 +459,14 @@ struct ug_to_sdl_pf {
         uint32_t second;
 };
 
-constexpr std::array<ug_to_sdl_pf, 2> pf_mapping[] = {
+constexpr std::array<ug_to_sdl_pf, 2> pf_mapping{{
         //{ I420, SDL_PIXELFORMAT_IYUV },
         //{ UYVY, SDL_PIXELFORMAT_UYVY },
         //{ YUYV, SDL_PIXELFORMAT_YUY2 },
         //{ BGR, SDL_PIXELFORMAT_BGR24 },
         { RGB, SDL_PIXELFORMAT_RGB24 },
         { RGBA, SDL_PIXELFORMAT_RGBA32 },
-};
+}};
 
 /*uint32_t get_ug_to_sdl_format(codec_t ug_codec) {
         if (ug_codec == R10k) {
@@ -531,7 +532,7 @@ void loadSplashscreen(state_vulkan_sdl2* s) {
 
 void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
         if (flags & DISPLAY_FLAG_AUDIO_ANY) {
-                log_msg(LOG_LEVEL_ERROR, "UltraGrid SDL2 module currently doesn't support audio!\n");
+                log_msg(LOG_LEVEL_ERROR, "UltraGrid VULKAN_SDL2 module currently doesn't support audio!\n");
                 return NULL;
         }
 

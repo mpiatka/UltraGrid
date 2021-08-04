@@ -443,7 +443,6 @@ RETURN_VAL Vulkan_context::acquire_next_swapchain_image(uint32_t& image_index, v
 }
 
 Vulkan_context::~Vulkan_context() {
-        std::cout << "Vulkan context destructor called." << std::endl;
         if (device) {
                 // static_cast to silence nodiscard warning
                 static_cast<void>(device.waitIdle());
@@ -459,7 +458,6 @@ Vulkan_context::~Vulkan_context() {
                 }
                 instance.destroy();
         }
-        std::cout << "Vulkan context destructor completed." << std::endl;
 }
 
 

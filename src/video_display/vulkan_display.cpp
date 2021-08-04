@@ -314,7 +314,7 @@ RETURN_VAL Vulkan_display::create_transfer_images(uint32_t width, uint32_t heigh
         using mem_bits = vk::MemoryPropertyFlagBits;
         uint32_t memory_type;
         PASS_RESULT(get_memory_type(memory_type, memory_requirements.memoryTypeBits,
-                mem_bits::eHostVisible | mem_bits::eHostCoherent, context.gpu));
+                mem_bits::eHostVisible | mem_bits::eHostCached, context.gpu));
 
         vk::DeviceSize image_size = add_padding(memory_requirements.size, memory_requirements.alignment);
         vk::MemoryAllocateInfo allocInfo{};
@@ -481,7 +481,6 @@ RETURN_VAL Vulkan_display::init(VkSurfaceKHR surface,
 }
 
 Vulkan_display::~Vulkan_display() {
-        std::cout << "Vulkan_display desctuctor called." << std::endl;
         if (device) {
                 // static_cast to disable nodiscard warning
                 static_cast<void>(device.waitIdle());
@@ -502,7 +501,6 @@ Vulkan_display::~Vulkan_display() {
                 device.destroy(descriptor_set_layout);
                 device.destroy(sampler);
         }
-        std::cout << "Vulkan_display desctuction completed." << std::endl;
 }
 
 RETURN_VAL Vulkan_display::record_graphics_commands(unsigned current_path_id, uint32_t image_index) {
@@ -575,6 +573,13 @@ RETURN_VAL Vulkan_display::render(std::byte* frame,
         transport_image(transfer_images[current_path_id].ptr, frame, image_width, image_height,
                 format, transfer_image_row_pitch);
 
+        vk::MappedMemoryRange mapped_memory_range{};
+        mapped_memory_range
+                .setMemory(transfer_image_memory)
+                .setOffset(transfer_images[current_path_id].ptr - transfer_images[0].ptr)
+                .setSize(transfer_image_byte_size);
+        device.flushMappedMemoryRanges(mapped_memory_range);
+        
         uint32_t image_index;
         PASS_RESULT(context.acquire_next_swapchain_image(image_index, path.image_acquired_semaphore));
 
