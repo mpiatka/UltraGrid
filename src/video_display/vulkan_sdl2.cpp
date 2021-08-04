@@ -107,7 +107,7 @@ constexpr int MAX_BUFFER_SIZE = 1;
 void display_sdl2_new_message(module*);
 int display_sdl2_putf(void* state, video_frame* frame, int nonblock);
 
-struct state_vulkan_sdl2 final : Window_inteface {
+struct state_vulkan_sdl2 {
         module                  mod;
 
         Uint32                  sdl_user_new_frame_event;
@@ -120,7 +120,7 @@ struct state_vulkan_sdl2 final : Window_inteface {
         int                     x{ SDL_WINDOWPOS_UNDEFINED };
         int                     y{ SDL_WINDOWPOS_UNDEFINED };
 
-        SDL_Window* window{ nullptr };
+        SDL_Window*             window{ nullptr };
 
 
         uint32_t                gpu_idx{ NO_GPU_SELECTED };
@@ -139,13 +139,28 @@ struct state_vulkan_sdl2 final : Window_inteface {
         std::condition_variable frame_consumed_cv;
         int                     buffered_frames_count{ 0 };
 
-        video_desc       current_desc{};
-        video_desc       current_display_desc{};
-        video_frame* last_frame{ nullptr };
+        video_desc              current_desc{};
+        video_desc              current_display_desc{};
+        video_frame*            last_frame{ nullptr };
 
         std::queue<video_frame*> free_frame_queue;
 
-        std::unique_ptr<Vulkan_display> vulkan = nullptr;
+        std::unique_ptr<vulkan_display> vulkan = nullptr;
+
+         struct window_callback final : window_changed_callback {
+                SDL_Window* window;
+                
+                window_parameters get_window_parameters() override {
+                        int width, height;
+                        SDL_Vulkan_GetDrawableSize(window, &width, &height);
+                        if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) {
+                                width = 0;
+                                height = 0;
+                        }
+                        return { static_cast<uint32_t>(width), static_cast<uint32_t>(height), true };
+                }
+        };
+        window_callback window_callback;
 
         state_vulkan_sdl2(module* parent) {
                 module_init_default(&mod);
@@ -158,18 +173,9 @@ struct state_vulkan_sdl2 final : Window_inteface {
                 assert(sdl_user_new_frame_event != (Uint32)-1);
                 sdl_user_new_message_event = sdl_user_new_frame_event + 1;
         }
+
         ~state_vulkan_sdl2() {
                 module_done(&mod);
-        }
-
-        Window_parameters get_window_parameters() override {
-                int width, height;
-                SDL_Vulkan_GetDrawableSize(window, &width, &height);
-                if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) {
-                        width = 0;
-                        height = 0;
-                }
-                return { static_cast<uint32_t>(width), static_cast<uint32_t>(height), true };
         }
 };
 
@@ -312,7 +318,7 @@ bool display_sdl2_process_key(state_vulkan_sdl2* s, int64_t key) {
 }
 
 void display_sdl2_run(void* state) {
-        auto s = reinterpret_cast<state_vulkan_sdl2*>(state);
+        auto s = static_cast<state_vulkan_sdl2*>(state);
         assert(s->mod.priv_magic == MAGIC_VULKAN_SDL2);
         bool should_exit_sdl = false;
 
@@ -328,7 +334,7 @@ void display_sdl2_run(void* state) {
                         lk.unlock();
                         s->frame_consumed_cv.notify_one();
                         if (sdl_event.user.data1 != NULL) {
-                                display_frame(s, reinterpret_cast<video_frame*>(sdl_event.user.data1));
+                                display_frame(s, static_cast<video_frame*>(sdl_event.user.data1));
                         } else { // poison pill received
                                 should_exit_sdl = true;
                         }
@@ -399,7 +405,7 @@ void sdl2_print_displays() {
 }
 
 void print_gpus() {
-        Vulkan_display vulkan;
+        vulkan_display vulkan;
         std::vector<const char*>required_extensions{};
         vulkan.create_instance(required_extensions, false);
 
@@ -447,7 +453,7 @@ void show_help() {
 }
 
 int display_sdl2_reconfigure(void* state, video_desc desc) {
-        auto s = reinterpret_cast<state_vulkan_sdl2*>(state);
+        auto s = static_cast<state_vulkan_sdl2*>(state);
         assert(s->mod.priv_magic == MAGIC_VULKAN_SDL2);
 
         s->current_desc = desc;
@@ -648,7 +654,7 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
         SDL_Vulkan_GetInstanceExtensions(s->window, &extension_count, required_extensions.data());
         assert(extension_count > 0);
         try {
-                s->vulkan = std::make_unique<Vulkan_display>();
+                s->vulkan = std::make_unique<vulkan_display>();
                 s->vulkan->create_instance(required_extensions, s->validation);
                 const auto& instance = s->vulkan->get_instance();
 
@@ -673,7 +679,7 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
                 }
 #endif
 
-                s->vulkan->init(surface, s, s->gpu_idx);
+                s->vulkan->init(surface, &s->window_callback, s->gpu_idx);
                 LOG(LOG_LEVEL_NOTICE) << "Vulkan display initialised." << std::endl;
         }
         catch (std::exception& e) {
@@ -684,7 +690,7 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
 }
 
 void display_sdl2_done(void* state) {
-        auto s = reinterpret_cast<state_vulkan_sdl2*>(state);
+        auto s = static_cast<state_vulkan_sdl2*>(state);
         assert(s->mod.priv_magic == MAGIC_VULKAN_SDL2);
 
         SDL_ShowCursor(SDL_ENABLE);
@@ -712,7 +718,7 @@ void display_sdl2_done(void* state) {
 }
 
 video_frame* display_sdl2_getf(void* state) {
-        auto s = reinterpret_cast<state_vulkan_sdl2*>(state);
+        auto s = static_cast<state_vulkan_sdl2*>(state);
         assert(s->mod.priv_magic == MAGIC_VULKAN_SDL2);
 
         std::scoped_lock lock(s->lock);
@@ -731,7 +737,7 @@ video_frame* display_sdl2_getf(void* state) {
 }
 
 int display_sdl2_putf(void* state, video_frame* frame, int nonblock) {
-        auto s = reinterpret_cast<state_vulkan_sdl2*>(state);
+        auto s = static_cast<state_vulkan_sdl2*>(state);
         assert(s->mod.priv_magic == MAGIC_VULKAN_SDL2);
 
         std::unique_lock<std::mutex> lk(s->lock);

@@ -189,7 +189,7 @@ vk::CompositeAlphaFlagBitsKHR get_composite_alpha(vk::CompositeAlphaFlagsKHR cap
 
 namespace vulkan_display_detail { //------------------------------------------------------------------------
 
-RETURN_VAL Vulkan_context::create_instance(std::vector<c_str>& required_extensions, bool enable_validation) {
+RETURN_VAL vulkan_context::create_instance(std::vector<c_str>& required_extensions, bool enable_validation) {
         this->validation_enabled = enable_validation;
 
         std::vector<c_str> validation_layers{};
@@ -221,7 +221,7 @@ RETURN_VAL Vulkan_context::create_instance(std::vector<c_str>& required_extensio
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_context::init_validation_layers_error_messenger() {
+RETURN_VAL vulkan_context::init_validation_layers_error_messenger() {
         vk::DebugUtilsMessengerCreateInfoEXT messenger_info{};
         using severity = vk::DebugUtilsMessageSeverityFlagBitsEXT;
         using type = vk::DebugUtilsMessageTypeFlagBitsEXT;
@@ -234,7 +234,7 @@ RETURN_VAL Vulkan_context::init_validation_layers_error_messenger() {
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_context::get_available_gpus(std::vector<std::pair<std::string, bool>>& gpus) {
+RETURN_VAL vulkan_context::get_available_gpus(std::vector<std::pair<std::string, bool>>& gpus) {
         assert(instance);
 
         std::vector<vk::PhysicalDevice> physical_devices;
@@ -249,7 +249,7 @@ RETURN_VAL Vulkan_context::get_available_gpus(std::vector<std::pair<std::string,
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_context::create_physical_device(uint32_t gpu_index) {
+RETURN_VAL vulkan_context::create_physical_device(uint32_t gpu_index) {
         assert(instance);
         assert(surface);
         std::vector<vk::PhysicalDevice> gpus;
@@ -267,7 +267,7 @@ RETURN_VAL Vulkan_context::create_physical_device(uint32_t gpu_index) {
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_context::create_logical_device() {
+RETURN_VAL vulkan_context::create_logical_device() {
         assert(gpu);
         assert(queue_family_index != NO_QUEUE_FAMILY_INDEX_FOUND);
 
@@ -288,7 +288,7 @@ RETURN_VAL Vulkan_context::create_logical_device() {
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_context::get_present_mode() {
+RETURN_VAL vulkan_context::get_present_mode() {
         std::vector<vk::PresentModeKHR> modes;
         CHECKED_ASSIGN(modes, gpu.getSurfacePresentModesKHR(surface));
 
@@ -314,7 +314,7 @@ RETURN_VAL Vulkan_context::get_present_mode() {
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_context::get_surface_format() {
+RETURN_VAL vulkan_context::get_surface_format() {
         std::vector<vk::SurfaceFormatKHR> formats;
         CHECKED_ASSIGN(formats, gpu.getSurfaceFormatsKHR(surface));
 
@@ -330,7 +330,7 @@ RETURN_VAL Vulkan_context::get_surface_format() {
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_context::create_swap_chain(vk::SwapchainKHR old_swapchain) {
+RETURN_VAL vulkan_context::create_swap_chain(vk::SwapchainKHR old_swapchain) {
         auto& capabilities = swapchain_atributes.capabilities;
         CHECKED_ASSIGN(capabilities, gpu.getSurfaceCapabilitiesKHR(surface));
 
@@ -369,7 +369,7 @@ RETURN_VAL Vulkan_context::create_swap_chain(vk::SwapchainKHR old_swapchain) {
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_context::create_swapchain_views() {
+RETURN_VAL vulkan_context::create_swapchain_views() {
         std::vector<vk::Image> images;
         CHECKED_ASSIGN(images, device.getSwapchainImagesKHR(swapchain));
         uint32_t image_count = static_cast<uint32_t>(images.size());
@@ -378,7 +378,7 @@ RETURN_VAL Vulkan_context::create_swapchain_views() {
 
         swapchain_images.resize(image_count);
         for (uint32_t i = 0; i < image_count; i++) {
-                Swapchain_image& image = swapchain_images[i];
+                swapchain_image& image = swapchain_images[i];
                 image.image = std::move(images[i]);
 
                 image_view_info.setImage(swapchain_images[i].image);
@@ -387,7 +387,7 @@ RETURN_VAL Vulkan_context::create_swapchain_views() {
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_context::init(VkSurfaceKHR surface, Window_parameters parameters, uint32_t gpu_index) {
+RETURN_VAL vulkan_context::init(VkSurfaceKHR surface, window_parameters parameters, uint32_t gpu_index) {
         this->surface = surface;
         window_size = vk::Extent2D{ parameters.width, parameters.height };
         vsync = parameters.vsync;
@@ -401,7 +401,7 @@ RETURN_VAL Vulkan_context::init(VkSurfaceKHR surface, Window_parameters paramete
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_context::create_framebuffers(vk::RenderPass render_pass) {
+RETURN_VAL vulkan_context::create_framebuffers(vk::RenderPass render_pass) {
         vk::FramebufferCreateInfo framebuffer_info;
         framebuffer_info
                 .setRenderPass(render_pass)
@@ -416,7 +416,7 @@ RETURN_VAL Vulkan_context::create_framebuffers(vk::RenderPass render_pass) {
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_context::recreate_swapchain(Window_parameters parameters, vk::RenderPass render_pass) {
+RETURN_VAL vulkan_context::recreate_swapchain(window_parameters parameters, vk::RenderPass render_pass) {
         window_size = vk::Extent2D{ parameters.width, parameters.height };
         vsync = parameters.vsync;
 
@@ -432,7 +432,7 @@ RETURN_VAL Vulkan_context::recreate_swapchain(Window_parameters parameters, vk::
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_context::acquire_next_swapchain_image(uint32_t& image_index, vk::Semaphore acquire_semaphore) {
+RETURN_VAL vulkan_context::acquire_next_swapchain_image(uint32_t& image_index, vk::Semaphore acquire_semaphore) {
         auto acquired = device.acquireNextImageKHR(swapchain, UINT64_MAX, acquire_semaphore, nullptr, &image_index);
         if (acquired == vk::Result::eSuboptimalKHR || acquired == vk::Result::eErrorOutOfDateKHR) {
                 image_index = SWAPCHAIN_IMAGE_OUT_OF_DATE;
@@ -442,7 +442,7 @@ RETURN_VAL Vulkan_context::acquire_next_swapchain_image(uint32_t& image_index, v
         return RETURN_VAL();
 }
 
-Vulkan_context::~Vulkan_context() {
+vulkan_context::~vulkan_context() {
         if (device) {
                 // static_cast to silence nodiscard warning
                 static_cast<void>(device.waitIdle());

@@ -95,7 +95,7 @@ RETURN_VAL transport_image(std::byte* dest, std::byte* source,
 
 } //namespace -------------------------------------------------------------
 
-vk::ImageMemoryBarrier  Vulkan_display::create_memory_barrier(Vulkan_display::Transfer_image& image,
+vk::ImageMemoryBarrier  vulkan_display::create_memory_barrier(vulkan_display::transfer_image& image,
         vk::ImageLayout new_layout, vk::AccessFlagBits new_access_mask,
         uint32_t src_queue_family_index, uint32_t dst_queue_family_index)
 {
@@ -118,7 +118,7 @@ vk::ImageMemoryBarrier  Vulkan_display::create_memory_barrier(Vulkan_display::Tr
         return memory_barrier;
 }
 
-RETURN_VAL Vulkan_display::create_texture_sampler() {
+RETURN_VAL vulkan_display::create_texture_sampler() {
         vk::SamplerCreateInfo sampler_info;
         sampler_info
                 .setAddressModeU(vk::SamplerAddressMode::eClampToBorder)
@@ -132,7 +132,7 @@ RETURN_VAL Vulkan_display::create_texture_sampler() {
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_display::create_render_pass() {
+RETURN_VAL vulkan_display::create_render_pass() {
         vk::RenderPassCreateInfo render_pass_info;
 
         vk::AttachmentDescription color_attachment;
@@ -175,7 +175,7 @@ RETURN_VAL Vulkan_display::create_render_pass() {
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_display::create_descriptor_set_layout() {
+RETURN_VAL vulkan_display::create_descriptor_set_layout() {
         vk::DescriptorSetLayoutBinding descriptor_set_layout_bindings;
         descriptor_set_layout_bindings
                 .setBinding(1)
@@ -192,7 +192,7 @@ RETURN_VAL Vulkan_display::create_descriptor_set_layout() {
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_display::create_graphics_pipeline() {
+RETURN_VAL vulkan_display::create_graphics_pipeline() {
         create_descriptor_set_layout();
 
         vk::PipelineLayoutCreateInfo pipeline_layout_info{};
@@ -269,7 +269,7 @@ RETURN_VAL Vulkan_display::create_graphics_pipeline() {
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_display::create_concurrent_paths()
+RETURN_VAL vulkan_display::create_concurrent_paths()
 {
         vk::SemaphoreCreateInfo semaphore_info;
 
@@ -287,7 +287,7 @@ RETURN_VAL Vulkan_display::create_concurrent_paths()
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_display::create_transfer_images(uint32_t width, uint32_t height, vk::Format format) {
+RETURN_VAL vulkan_display::create_transfer_images(uint32_t width, uint32_t height, vk::Format format) {
         transfer_image_size = vk::Extent2D{ width, height };
         transfer_image_format = format;
         vk::ImageCreateInfo image_info;
@@ -347,7 +347,7 @@ RETURN_VAL Vulkan_display::create_transfer_images(uint32_t width, uint32_t heigh
         return RETURN_VAL();
 }
 
-void Vulkan_display::destroy_transfer_images() {
+void vulkan_display::destroy_transfer_images() {
         for (auto& image : transfer_images) {
                 device.destroy(image.view);
                 device.destroy(image.image);
@@ -358,7 +358,7 @@ void Vulkan_display::destroy_transfer_images() {
         }
 }
 
-RETURN_VAL Vulkan_display::create_command_pool() {
+RETURN_VAL vulkan_display::create_command_pool() {
         vk::CommandPoolCreateInfo pool_info{};
         using bits = vk::CommandPoolCreateFlagBits;
         pool_info
@@ -368,7 +368,7 @@ RETURN_VAL Vulkan_display::create_command_pool() {
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_display::create_command_buffers() {
+RETURN_VAL vulkan_display::create_command_buffers() {
         vk::CommandBufferAllocateInfo allocate_info{};
         allocate_info
                 .setCommandPool(command_pool)
@@ -378,7 +378,7 @@ RETURN_VAL Vulkan_display::create_command_buffers() {
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_display::create_descriptor_pool()
+RETURN_VAL vulkan_display::create_descriptor_pool()
 {
         assert(concurent_paths_count != 0);
         std::array<vk::DescriptorPoolSize, 1> descriptor_sizes{};
@@ -393,7 +393,7 @@ RETURN_VAL Vulkan_display::create_descriptor_pool()
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_display::update_render_area() {
+RETURN_VAL vulkan_display::update_render_area() {
         vk::Extent2D wnd_size = context.window_size;
         vk::Extent2D img_size = transfer_image_size;
 
@@ -426,7 +426,7 @@ RETURN_VAL Vulkan_display::update_render_area() {
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_display::create_description_sets() {
+RETURN_VAL vulkan_display::create_description_sets() {
         assert(descriptor_pool);
         std::vector<vk::DescriptorSetLayout> layouts(concurent_paths_count, descriptor_set_layout);
         vk::DescriptorSetAllocateInfo allocate_info;
@@ -459,8 +459,8 @@ RETURN_VAL Vulkan_display::create_description_sets() {
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_display::init(VkSurfaceKHR surface,
-        Window_inteface* window, uint32_t gpu_index) {
+RETURN_VAL vulkan_display::init(VkSurfaceKHR surface,
+        window_changed_callback* window, uint32_t gpu_index) {
         // Order of following calls is important
         assert(surface);
         this->window = window;
@@ -480,7 +480,7 @@ RETURN_VAL Vulkan_display::init(VkSurfaceKHR surface,
         return RETURN_VAL();
 }
 
-Vulkan_display::~Vulkan_display() {
+vulkan_display::~vulkan_display() {
         if (device) {
                 // static_cast to disable nodiscard warning
                 static_cast<void>(device.waitIdle());
@@ -503,7 +503,7 @@ Vulkan_display::~Vulkan_display() {
         }
 }
 
-RETURN_VAL Vulkan_display::record_graphics_commands(unsigned current_path_id, uint32_t image_index) {
+RETURN_VAL vulkan_display::record_graphics_commands(unsigned current_path_id, uint32_t image_index) {
         vk::CommandBuffer& cmd_buffer = command_buffers[current_path_id];
         cmd_buffer.reset();
 
@@ -545,7 +545,7 @@ RETURN_VAL Vulkan_display::record_graphics_commands(unsigned current_path_id, ui
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_display::render(std::byte* frame,
+RETURN_VAL vulkan_display::render(std::byte* frame,
         uint32_t image_width, uint32_t image_height, vk::Format format)
 {
         auto window_parameters = window->get_window_parameters();
@@ -564,7 +564,7 @@ RETURN_VAL Vulkan_display::render(std::byte* frame,
                 update_render_area();
         }
 
-        Path& path = concurent_paths[current_path_id];
+        path& path = concurent_paths[current_path_id];
 
         CHECK(device.waitForFences(path.path_available_fence, VK_TRUE, UINT64_MAX),
                 "Waiting for fence failed.");
@@ -628,7 +628,7 @@ RETURN_VAL Vulkan_display::render(std::byte* frame,
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_display::window_parameters_changed(Window_parameters new_parameters) {
+RETURN_VAL vulkan_display::window_parameters_changed(window_parameters new_parameters) {
         if (new_parameters != context.get_window_parameters() && new_parameters.width * new_parameters.height != 0) {
                 context.recreate_swapchain(new_parameters, render_pass);
                 update_render_area();

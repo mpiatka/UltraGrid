@@ -4,16 +4,16 @@
 #include <utility>
 
 
-class Window_inteface {
+class window_changed_callback {
 protected:
-        ~Window_inteface() = default;
+        ~window_changed_callback() = default;
 public:
-        virtual Window_parameters get_window_parameters() = 0;
+        virtual window_parameters get_window_parameters() = 0;
 };
 
-class Vulkan_display {
-        Window_inteface* window = nullptr;
-        vulkan_display_detail::Vulkan_context context;
+class vulkan_display {
+        window_changed_callback* window = nullptr;
+        vulkan_display_detail::vulkan_context context;
         vk::Device device;
 
         vk::Viewport viewport;
@@ -38,23 +38,23 @@ class Vulkan_display {
 
         constexpr static unsigned concurent_paths_count = 3;
         unsigned current_path_id = 0;
-        struct Path {
+        struct path {
                 vk::Semaphore image_acquired_semaphore;
                 vk::Semaphore image_rendered_semaphore;
                 vk::Fence path_available_fence;
         };
-        std::vector<Path> concurent_paths;
+        std::vector<path> concurent_paths;
 
         vk::DeviceMemory transfer_image_memory;
 
-        struct Transfer_image {
+        struct transfer_image {
                 vk::Image image;
                 vk::ImageView view;
                 std::byte* ptr;
                 vk::ImageLayout layout;
                 vk::AccessFlagBits access;
         };
-        std::vector<Transfer_image> transfer_images;
+        std::vector<transfer_image> transfer_images;
 
         vk::Extent2D transfer_image_size;
         size_t transfer_image_row_pitch;
@@ -71,7 +71,7 @@ class Vulkan_display {
         bool minimalised = false;
 private:
         vk::ImageMemoryBarrier create_memory_barrier(
-                Vulkan_display::Transfer_image& image,
+                vulkan_display::transfer_image& image,
                 vk::ImageLayout new_layout,
                 vk::AccessFlagBits new_access_mask,
                 uint32_t src_queue_family_index = VK_QUEUE_FAMILY_IGNORED,
@@ -108,13 +108,13 @@ private:
         RETURN_VAL update_render_area();
 
 public:
-        Vulkan_display() = default;
-        Vulkan_display(const Vulkan_display& other) = delete;
-        Vulkan_display& operator=(const Vulkan_display& other) = delete;
-        Vulkan_display(Vulkan_display&& other) = delete;
-        Vulkan_display& operator=(Vulkan_display&& other) = delete;
+        vulkan_display() = default;
+        vulkan_display(const vulkan_display& other) = delete;
+        vulkan_display& operator=(const vulkan_display& other) = delete;
+        vulkan_display(vulkan_display&& other) = delete;
+        vulkan_display& operator=(vulkan_display&& other) = delete;
 
-        ~Vulkan_display();
+        ~vulkan_display();
 
         /**
          * @param required_extensions   Vulkan instance extensions requested by aplication,
@@ -132,13 +132,13 @@ public:
         /**
          * @brief returns all available grafhics cards
          *  first parameter is gpu name,
-         *  second parameter is true only if the gpu is suitable for Vulkan_display
+         *  second parameter is true only if the gpu is suitable for vulkan_display
          */
         RETURN_VAL get_available_gpus(std::vector<std::pair<std::string, bool>>& gpus) {
                 return context.get_available_gpus(gpus);
         }
 
-        RETURN_VAL init(VkSurfaceKHR surface, Window_inteface* window, uint32_t gpu_index = NO_GPU_SELECTED);
+        RETURN_VAL init(VkSurfaceKHR surface, window_changed_callback* window, uint32_t gpu_index = NO_GPU_SELECTED);
 
         RETURN_VAL render(
                 std::byte* frame,
@@ -149,7 +149,7 @@ public:
         /**
          * @brief Hint to vulkan display that some window parameters spicified in struct Window_parameters changed
          */
-        RETURN_VAL window_parameters_changed(Window_parameters new_parameters);
+        RETURN_VAL window_parameters_changed(window_parameters new_parameters);
 
         RETURN_VAL window_parameters_changed() {
                 PASS_RESULT(window_parameters_changed(window->get_window_parameters()));

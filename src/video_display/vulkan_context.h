@@ -61,9 +61,9 @@ extern std::string vulkan_display_error_message;
 //EXCEPTIONS ARE ENABLED
 #include<exception>
 
-struct  Vulkan_display_exception : public std::runtime_error {
-        Vulkan_display_exception() = default;
-        Vulkan_display_exception(const std::string& msg) :
+struct  vulkan_display_exception : public std::runtime_error {
+        vulkan_display_exception() = default;
+        vulkan_display_exception(const std::string& msg) :
                 std::runtime_error{ msg } { }
 };
 
@@ -71,24 +71,24 @@ struct  Vulkan_display_exception : public std::runtime_error {
 
 #define PASS_RESULT(expr) { expr; }
 
-#define CHECK(expr, msg) { if (to_vk_result(expr) != vk::Result::eSuccess) throw Vulkan_display_exception{msg}; }
+#define CHECK(expr, msg) { if (to_vk_result(expr) != vk::Result::eSuccess) throw vulkan_display_exception{msg}; }
 
 #define CHECKED_ASSIGN(variable, expr) { variable = expr; }
 
 #endif //NO_EXCEPTIONS -------------------------------------------------------
 
 
-struct Window_parameters {
+struct window_parameters {
         uint32_t width;
         uint32_t height;
         bool vsync;
 
-        bool operator==(const Window_parameters& other) const {
+        bool operator==(const window_parameters& other) const {
                 return width == other.width &&
                         height == other.height &&
                         vsync == other.vsync;
         }
-        bool operator!=(const Window_parameters& other) const {
+        bool operator!=(const window_parameters& other) const {
                 return !(*this == other);
         }
 };
@@ -106,7 +106,7 @@ using namespace std::literals;
 constexpr uint32_t NO_QUEUE_FAMILY_INDEX_FOUND = UINT32_MAX;
 constexpr uint32_t SWAPCHAIN_IMAGE_OUT_OF_DATE = UINT32_MAX;
 
-struct Vulkan_context {
+struct vulkan_context {
         vk::Instance instance;
 
         bool validation_enabled;
@@ -127,12 +127,12 @@ struct Vulkan_context {
                 vk::PresentModeKHR mode = vk::PresentModeKHR::eFifo;
         } swapchain_atributes;
 
-        struct Swapchain_image {
+        struct swapchain_image {
                 vk::Image image;
                 vk::ImageView view;
                 vk::Framebuffer framebuffer;
         };
-        std::vector<Swapchain_image> swapchain_images;
+        std::vector<swapchain_image> swapchain_images;
 
         vk::Extent2D window_size{ 0, 0 };
         bool vsync;
@@ -166,19 +166,19 @@ private:
         }
 
 public:
-        Vulkan_context() = default;
-        Vulkan_context(const Vulkan_context& other) = delete;
-        Vulkan_context& operator=(const Vulkan_context& other) = delete;
-        Vulkan_context(Vulkan_context&& other) = delete;
-        Vulkan_context& operator=(Vulkan_context&& other) = delete;
+        vulkan_context() = default;
+        vulkan_context(const vulkan_context& other) = delete;
+        vulkan_context& operator=(const vulkan_context& other) = delete;
+        vulkan_context(vulkan_context&& other) = delete;
+        vulkan_context& operator=(vulkan_context&& other) = delete;
 
-        ~Vulkan_context();
+        ~vulkan_context();
 
         RETURN_VAL create_instance(std::vector<const char*>& required_extensions, bool enable_validation);
 
         RETURN_VAL get_available_gpus(std::vector<std::pair<std::string, bool>>& gpus);
 
-        RETURN_VAL init(VkSurfaceKHR surface, Window_parameters parameters, uint32_t gpu_index);
+        RETURN_VAL init(VkSurfaceKHR surface, window_parameters parameters, uint32_t gpu_index);
 
         RETURN_VAL create_framebuffers(vk::RenderPass render_pass);
 
@@ -188,11 +188,11 @@ public:
                 return swapchain_images[framebuffer_id].framebuffer;
         }
 
-        Window_parameters get_window_parameters() {
+        window_parameters get_window_parameters() {
                 return { window_size.width, window_size.height, vsync };
         }
 
-        RETURN_VAL recreate_swapchain(Window_parameters parameters, vk::RenderPass render_pass);
+        RETURN_VAL recreate_swapchain(window_parameters parameters, vk::RenderPass render_pass);
 };
 
 }//namespace 
