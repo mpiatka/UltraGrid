@@ -62,6 +62,7 @@
 #include "hwaccel_libav_common.h"
 #include "hwaccel_vdpau.h"
 #include "hwaccel_vaapi.h"
+#include <libavcodec/videotoolbox.h>
 
 #define MOD_NAME "[lavd] "
 
@@ -457,36 +458,37 @@ int videotoolbox_init(struct AVCodecContext *s,
         if(ret < 0)
                 return ret;
 
-        AVHWDeviceContext *device_ctx = (AVHWDeviceContext*)device_ref->data;
-
         AVBufferRef *hw_frames_ctx = NULL;
         ret = create_hw_frame_ctx(device_ref,
                         s->coded_width,
                         s->coded_height,
                         AV_PIX_FMT_VIDEOTOOLBOX,
                         s->sw_pix_fmt,
-                        0,
+                        0, //has to be 0, ffmpeg can't allocate frames by itself
                         &hw_frames_ctx);
+
         if(ret < 0)
                 goto fail;
 
-        s->hw_frames_ctx = hw_frames_ctx;
-        s->hwaccel_context = device_ctx;
-
-        state->type = HWACCEL_VIDEOTOOLBOX;
-        state->copy = true;
-        state->tmp_frame = av_frame_alloc();
-        if(!state->tmp_frame){
+        AVFrame *frame = av_frame_alloc();
+        if(!frame){
                 ret = -1;
                 goto fail;
         }
+
+        state->type = HWACCEL_VIDEOTOOLBOX;
+        state->copy = true;
+        state->tmp_frame = frame;
+
+        s->hw_frames_ctx = hw_frames_ctx;
+        s->hw_device_ctx = device_ref;
 
         return 0;
 
 fail:
         av_frame_free(&state->tmp_frame);
-        av_buffer_unref(&hw_frames_ctx);
         av_buffer_unref(&device_ref);
+        av_buffer_unref(&hw_frames_ctx);
         return ret;
 }
 
