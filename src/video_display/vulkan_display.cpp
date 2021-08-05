@@ -314,7 +314,7 @@ RETURN_VAL vulkan_display::create_transfer_images(uint32_t width, uint32_t heigh
         using mem_bits = vk::MemoryPropertyFlagBits;
         uint32_t memory_type;
         PASS_RESULT(get_memory_type(memory_type, memory_requirements.memoryTypeBits,
-                mem_bits::eHostVisible | mem_bits::eHostCached, context.gpu));
+                mem_bits::eHostVisible | mem_bits::eHostCoherent, context.gpu));
 
         vk::DeviceSize image_size = add_padding(memory_requirements.size, memory_requirements.alignment);
         vk::MemoryAllocateInfo allocInfo{};
@@ -460,11 +460,11 @@ RETURN_VAL vulkan_display::create_description_sets() {
 }
 
 RETURN_VAL vulkan_display::init(VkSurfaceKHR surface,
-        window_changed_callback* window, uint32_t gpu_index) {
+        window_changed_callback* window_callback, uint32_t gpu_index) {
         // Order of following calls is important
         assert(surface);
-        this->window = window;
-        auto window_parameters = window->get_window_parameters();
+        this->window_callback = window_callback;
+        auto window_parameters = window_callback->get_window_parameters();
         PASS_RESULT(context.init(surface, window_parameters, gpu_index));
         device = context.device;
         PASS_RESULT(create_shader(vertex_shader, "shaders/vert.spv", device));
@@ -548,7 +548,7 @@ RETURN_VAL vulkan_display::record_graphics_commands(unsigned current_path_id, ui
 RETURN_VAL vulkan_display::render(std::byte* frame,
         uint32_t image_width, uint32_t image_height, vk::Format format)
 {
-        auto window_parameters = window->get_window_parameters();
+        auto window_parameters = window_callback->get_window_parameters();
         if (window_parameters.height * window_parameters.width == 0) {
                 // window is minimalised
                 return RETURN_VAL();
@@ -572,19 +572,12 @@ RETURN_VAL vulkan_display::render(std::byte* frame,
 
         transport_image(transfer_images[current_path_id].ptr, frame, image_width, image_height,
                 format, transfer_image_row_pitch);
-
-        vk::MappedMemoryRange mapped_memory_range{};
-        mapped_memory_range
-                .setMemory(transfer_image_memory)
-                .setOffset(transfer_images[current_path_id].ptr - transfer_images[0].ptr)
-                .setSize(transfer_image_byte_size);
-        device.flushMappedMemoryRanges(mapped_memory_range);
         
         uint32_t image_index;
         PASS_RESULT(context.acquire_next_swapchain_image(image_index, path.image_acquired_semaphore));
 
         while (image_index == SWAPCHAIN_IMAGE_OUT_OF_DATE) {
-                window_parameters = window->get_window_parameters();
+                window_parameters = window_callback->get_window_parameters();
                 if (window_parameters.width * window_parameters.height == 0) {
                         // window is minimalised
                         return RETURN_VAL();

@@ -107,6 +107,25 @@ constexpr int MAX_BUFFER_SIZE = 1;
 void display_sdl2_new_message(module*);
 int display_sdl2_putf(void* state, video_frame* frame, int nonblock);
 
+class window_callback final : public window_changed_callback {
+        SDL_Window* window = nullptr;
+public:
+        window_callback(SDL_Window* window):
+                window{window} { }
+        
+        window_parameters get_window_parameters() override {
+                assert(window);
+                int width, height;
+                SDL_Vulkan_GetDrawableSize(window, &width, &height);
+                if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) {
+                        width = 0;
+                        height = 0;
+                }
+                return { static_cast<uint32_t>(width), static_cast<uint32_t>(height), true };
+        }
+};
+
+
 struct state_vulkan_sdl2 {
         module                  mod;
 
@@ -147,20 +166,7 @@ struct state_vulkan_sdl2 {
 
         std::unique_ptr<vulkan_display> vulkan = nullptr;
 
-         struct window_callback final : window_changed_callback {
-                SDL_Window* window;
-                
-                window_parameters get_window_parameters() override {
-                        int width, height;
-                        SDL_Vulkan_GetDrawableSize(window, &width, &height);
-                        if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) {
-                                width = 0;
-                                height = 0;
-                        }
-                        return { static_cast<uint32_t>(width), static_cast<uint32_t>(height), true };
-                }
-        };
-        window_callback window_callback;
+        window_callback window_callback { nullptr };
 
         state_vulkan_sdl2(module* parent) {
                 module_init_default(&mod);
@@ -329,7 +335,7 @@ void display_sdl2_run(void* state) {
                 }
                 if (sdl_event.type == s->sdl_user_new_frame_event) {
                         std::unique_lock<std::mutex> lk(s->lock);
-                        LOG(LOG_LEVEL_INFO) << "Buffered frames count:" << s->buffered_frames_count << '\n';
+                        //LOG(LOG_LEVEL_INFO) << "Buffered frames count:" << s->buffered_frames_count << '\n';
                         s->buffered_frames_count -= 1;
                         lk.unlock();
                         s->frame_consumed_cv.notify_one();
@@ -647,6 +653,7 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
                 log_msg(LOG_LEVEL_ERROR, "[SDL] Unable to create window: %s\n", SDL_GetError());
                 return nullptr;
         }
+        s->window_callback = ::window_callback{ s->window };
 
         uint32_t extension_count = 0;
         SDL_Vulkan_GetInstanceExtensions(s->window, &extension_count, nullptr);

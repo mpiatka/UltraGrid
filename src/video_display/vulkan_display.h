@@ -12,7 +12,7 @@ public:
 };
 
 class vulkan_display {
-        window_changed_callback* window = nullptr;
+        window_changed_callback* window_callback = nullptr;
         vulkan_display_detail::vulkan_context context;
         vk::Device device;
 
@@ -152,7 +152,7 @@ public:
         RETURN_VAL window_parameters_changed(window_parameters new_parameters);
 
         RETURN_VAL window_parameters_changed() {
-                PASS_RESULT(window_parameters_changed(window->get_window_parameters()));
+                PASS_RESULT(window_parameters_changed(window_callback->get_window_parameters()));
                 return RETURN_VAL();
         }
 };
