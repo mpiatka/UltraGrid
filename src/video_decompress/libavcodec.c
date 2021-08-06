@@ -62,7 +62,6 @@
 #include "hwaccel_libav_common.h"
 #include "hwaccel_vdpau.h"
 #include "hwaccel_vaapi.h"
-#include <libavcodec/videotoolbox.h>
 
 #define MOD_NAME "[lavd] "
 
@@ -449,6 +448,7 @@ static bool has_conversion(enum AVPixelFormat pix_fmt, codec_t *ug_pix_fmt) {
         return false;
 }
 
+#if HAVE_MACOSX
 int videotoolbox_init(struct AVCodecContext *s,
                 struct hw_accel_state *state,
                 codec_t out_codec)
@@ -491,6 +491,7 @@ fail:
         av_buffer_unref(&hw_frames_ctx);
         return ret;
 }
+#endif
 
 static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribute__((unused)), const enum AVPixelFormat *fmt)
 {
@@ -523,14 +524,12 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribu
                 {AV_PIX_FMT_VIDEOTOOLBOX, videotoolbox_init}
 #endif
         };
-        log_msg(LOG_LEVEL_WARNING, "[lavd]  try hw accel\n");
 
         if (hwaccel && state->out_codec != VIDEO_CODEC_NONE) { // not probing internal format
                 struct state_libavcodec_decompress *state = (struct state_libavcodec_decompress *) s->opaque; 
                 for(const enum AVPixelFormat *it = fmt; *it != AV_PIX_FMT_NONE; it++){
                         for(unsigned i = 0; i < sizeof(accels) / sizeof(accels[0]); i++){
                                 if(*it == accels[i].pix_fmt){
-                                        log_msg(LOG_LEVEL_WARNING, "[lavd]  init hw accel\n");
                                         int ret = accels[i].init_func(s, &state->hwaccel, state->out_codec);
                                         if(ret < 0){
                                                 hwaccel_state_reset(&state->hwaccel);
