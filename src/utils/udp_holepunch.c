@@ -203,7 +203,7 @@ static bool initialize_punch(struct Punch_ctx *ctx,
         send_msg(ctx->coord_sock, room_name);
 
         ctx->juice_agent = create_agent(c, ctx);
-        
+
         exchange_coord_desc(ctx->juice_agent, ctx->coord_sock);
 
         return true;
