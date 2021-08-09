@@ -14,14 +14,7 @@ using namespace vulkan_display_detail;
 
 namespace {
 
-vk::DeviceSize add_padding(vk::DeviceSize size, vk::DeviceSize allignment) {
-        vk::DeviceSize remainder = size % allignment;
-        if (remainder == 0)
-                return size;
-        return size + allignment - remainder;
-}
-
-RETURN_VAL create_shader(vk::ShaderModule& shader,
+RETURN_TYPE create_shader(vk::ShaderModule& shader,
         const std::filesystem::path& file_path,
         const vk::Device& device)
 {
@@ -36,33 +29,18 @@ RETURN_VAL create_shader(vk::ShaderModule& shader,
         vk::ShaderModuleCreateInfo shader_info;
         shader_info.setCode(shader_code);
         CHECKED_ASSIGN(shader, device.createShaderModule(shader_info));
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL get_memory_type(
-        uint32_t& memory_type, uint32_t memory_type_bits,
-        vk::MemoryPropertyFlags requested_properties, vk::PhysicalDevice gpu)
-{
-        auto supported_properties = gpu.getMemoryProperties();
-        for (uint32_t i = 0; i < supported_properties.memoryTypeCount; i++) {
-                auto& mem_type = supported_properties.memoryTypes[i];
-                if (((mem_type.propertyFlags & requested_properties) == requested_properties) &&
-                        ((1 << i) & memory_type_bits))
-                {
-                        memory_type = i;
-                        return RETURN_VAL();
-                }
-        }
-        CHECK(false, "No available memory for transfer images found.");
-        return RETURN_VAL();
-}
 
-RETURN_VAL transport_image(std::byte* destination, std::byte* source,
-        size_t image_width, size_t image_height, // image width and height should be in pixels
-        vk::Format from_format, size_t row_pitch)
+
+RETURN_TYPE transport_image(std::byte* destination, std::byte* source,
+        image_description description, size_t row_pitch)
 {
+        auto image_width = description.size.width;
+        auto image_height = description.size.height;
         using f = vk::Format;
-        switch (from_format) {
+        switch (description.format) {
         case f::eR8G8B8A8Srgb: {
                 auto row_size = image_width * 4;
                 assert(row_size <= row_pitch);
@@ -96,133 +74,44 @@ RETURN_VAL transport_image(std::byte* destination, std::byte* source,
         default:
                 CHECK(false, "Unsupported picture format");
         }
-        return RETURN_VAL();
+        return RETURN_TYPE();
+}
+
+RETURN_TYPE update_render_area_viewport_scissor(render_area& render_area, vk::Viewport& viewport, vk::Rect2D& scissor, 
+        vk::Extent2D window_size, vk::Extent2D transfer_image_size) {
+
+        double wnd_aspect = static_cast<double>(window_size.width) / window_size.height;
+        double img_aspect = static_cast<double>(transfer_image_size.width) / transfer_image_size.height;
+
+        if (wnd_aspect > img_aspect) {
+                render_area.height = window_size.height;
+                render_area.width = static_cast<uint32_t>(std::round(window_size.height * img_aspect));
+                render_area.x = (window_size.width - render_area.width) / 2;
+                render_area.y = 0;
+        } else {
+                render_area.width = window_size.width;
+                render_area.height = static_cast<uint32_t>(std::round(window_size.width / img_aspect));
+                render_area.x = 0;
+                render_area.y = (window_size.height - render_area.height) / 2;
+        }
+
+        viewport
+                .setX(static_cast<float>(render_area.x))
+                .setY(static_cast<float>(render_area.y))
+                .setWidth(static_cast<float>(render_area.width))
+                .setHeight(static_cast<float>(render_area.height))
+                .setMinDepth(0.f)
+                .setMaxDepth(1.f);
+        scissor
+                .setOffset({ static_cast<int32_t>(render_area.x), static_cast<int32_t>(render_area.y) })
+                .setExtent({ render_area.width, render_area.height });
+        return RETURN_TYPE();
 }
 
 } //namespace -------------------------------------------------------------
 
-RETURN_VAL transfer_image::create(vk::Device device, vk::PhysicalDevice gpu,
-        vk::Extent2D size, vk::Format format) 
-{
-        destroy(device, false);
 
-        this->size = size;
-        this->format = format;
-        this->layout = vk::ImageLayout::ePreinitialized;
-        this->access = vk::AccessFlagBits::eHostWrite;
-        this->update_desciptor_set = true;
-
-        vk::ImageCreateInfo image_info;
-        image_info
-                .setImageType(vk::ImageType::e2D)
-                .setExtent(vk::Extent3D{ size, 1 })
-                .setMipLevels(1)
-                .setArrayLayers(1)
-                .setFormat(format)
-                .setTiling(vk::ImageTiling::eLinear)
-                .setInitialLayout(vk::ImageLayout::ePreinitialized)
-                .setUsage(vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst)
-                .setSharingMode(vk::SharingMode::eExclusive)
-                .setSamples(vk::SampleCountFlagBits::e1);
-        CHECKED_ASSIGN(image, device.createImage(image_info));
-
-        vk::MemoryRequirements memory_requirements = device.getImageMemoryRequirements(image);
-        vk::DeviceSize byte_size = add_padding(memory_requirements.size, memory_requirements.alignment);
-
-        using mem_bits = vk::MemoryPropertyFlagBits;
-        uint32_t memory_type;
-        PASS_RESULT(get_memory_type(memory_type, memory_requirements.memoryTypeBits,
-                mem_bits::eHostVisible | mem_bits::eHostCoherent, gpu));
-
-        vk::MemoryAllocateInfo allocInfo{ byte_size , memory_type };
-        CHECKED_ASSIGN(memory, device.allocateMemory(allocInfo));
-
-        PASS_RESULT(device.bindImageMemory(image, memory, 0));
-
-        void* void_ptr;
-        CHECKED_ASSIGN(void_ptr, device.mapMemory(memory, 0, memory_requirements.size));
-        CHECK(void_ptr != nullptr, "Image memory cannot be mapped.");
-        ptr = reinterpret_cast<std::byte*>(void_ptr);
-
-        vk::ImageViewCreateInfo view_info = default_image_view_create_info(format);
-        view_info.setImage(image);
-        CHECKED_ASSIGN(view, device.createImageView(view_info));
-
-        vk::ImageSubresource subresource{ vk::ImageAspectFlagBits::eColor, 0, 0 };
-        row_pitch = device.getImageSubresourceLayout(image, subresource).rowPitch;
-
-        if (!is_available_fence) {
-                vk::FenceCreateInfo fence_info{ vk::FenceCreateFlagBits::eSignaled };
-                CHECKED_ASSIGN(is_available_fence, device.createFence(fence_info));
-        }
-}
-
-vk::ImageMemoryBarrier  transfer_image::create_memory_barrier(
-        vk::ImageLayout new_layout, vk::AccessFlagBits new_access_mask,
-        uint32_t src_queue_family_index, uint32_t dst_queue_family_index)
-{
-        vk::ImageMemoryBarrier memory_barrier{};
-        memory_barrier
-                .setImage(image)
-                .setOldLayout(layout)
-                .setNewLayout(new_layout)
-                .setSrcAccessMask(access)
-                .setDstAccessMask(new_access_mask)
-                .setSrcQueueFamilyIndex(src_queue_family_index)
-                .setDstQueueFamilyIndex(dst_queue_family_index);
-        memory_barrier.subresourceRange
-                .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                .setLayerCount(1)
-                .setLevelCount(1);
-
-        layout = new_layout;
-        access = new_access_mask;
-        return memory_barrier;
-}
-
-RETURN_VAL transfer_image::update_description_set(vk::Device device, vk::DescriptorSet descriptor_set, vk::Sampler sampler) {
-        if (update_desciptor_set || sampler != this->sampler) {
-                update_desciptor_set = false;
-                this->sampler = sampler;
-                vk::DescriptorImageInfo description_image_info;
-                description_image_info
-                        .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-                        .setSampler(sampler)
-                        .setImageView(view);
-
-                vk::WriteDescriptorSet descriptor_writes{};
-                descriptor_writes
-                        .setDstBinding(1)
-                        .setDstArrayElement(0)
-                        .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-                        .setPImageInfo(&description_image_info)
-                        .setDescriptorCount(1)
-                        .setDstSet(descriptor_set);
-
-                device.updateDescriptorSets(descriptor_writes, nullptr);
-                return RETURN_VAL();
-        }
-}
-
-RETURN_VAL transfer_image::destroy(vk::Device device, bool destroy_fence) {
-        if (is_available_fence) {
-                auto result = device.waitForFences(is_available_fence, true, UINT64_MAX);
-                CHECK(result, "Waiting for transfer image fence failed.");
-
-                device.destroy(view);
-                device.destroy(image);
-
-                device.unmapMemory(memory);
-                device.freeMemory(memory);
-                if (destroy_fence) {
-                        device.destroy(is_available_fence);
-                }
-        }
-}
-
-//vulkan_display methods---------------------------------------------------
-
-RETURN_VAL vulkan_display::create_texture_sampler() {
+RETURN_TYPE vulkan_display::create_texture_sampler() {
         vk::SamplerCreateInfo sampler_info;
         sampler_info
                 .setAddressModeU(vk::SamplerAddressMode::eClampToBorder)
@@ -233,10 +122,10 @@ RETURN_VAL vulkan_display::create_texture_sampler() {
                 .setAnisotropyEnable(false)
                 .setUnnormalizedCoordinates(false);
         CHECKED_ASSIGN(sampler, device.createSampler(sampler_info));
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL vulkan_display::create_render_pass() {
+RETURN_TYPE vulkan_display::create_render_pass() {
         vk::RenderPassCreateInfo render_pass_info;
 
         vk::AttachmentDescription color_attachment;
@@ -276,10 +165,10 @@ RETURN_VAL vulkan_display::create_render_pass() {
         clear_color_value.setFloat32({ 0.01f, 0.01f, 0.01f, 1.0f });
         clear_color.setColor(clear_color_value);
 
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL vulkan_display::create_descriptor_set_layout() {
+RETURN_TYPE vulkan_display::create_descriptor_set_layout() {
         vk::DescriptorSetLayoutBinding descriptor_set_layout_bindings;
         descriptor_set_layout_bindings
                 .setBinding(1)
@@ -294,10 +183,10 @@ RETURN_VAL vulkan_display::create_descriptor_set_layout() {
 
         CHECKED_ASSIGN(descriptor_set_layout,
                 device.createDescriptorSetLayout(descriptor_set_layout_info));
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL vulkan_display::create_graphics_pipeline() {
+RETURN_TYPE vulkan_display::create_graphics_pipeline() {
         create_descriptor_set_layout();
 
         vk::PipelineLayoutCreateInfo pipeline_layout_info{};
@@ -371,57 +260,57 @@ RETURN_VAL vulkan_display::create_graphics_pipeline() {
         vk::Result result;
         std::tie(result, pipeline) = device.createGraphicsPipeline(VK_NULL_HANDLE, pipeline_info);
         CHECK(result, "Pipeline cannot be created.");
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL vulkan_display::create_concurrent_paths()
+RETURN_TYPE vulkan_display::create_image_semaphores()
 {
         vk::SemaphoreCreateInfo semaphore_info;
 
-        concurent_paths.resize(concurent_paths_count);
+        image_semaphores.resize(transfer_image_count);
 
-        for (auto& path : concurent_paths) {
-                CHECKED_ASSIGN(path.image_acquired_semaphore, device.createSemaphore(semaphore_info));
-                CHECKED_ASSIGN(path.image_rendered_semaphore, device.createSemaphore(semaphore_info));
+        for (auto& image_semaphores : image_semaphores) {
+                CHECKED_ASSIGN(image_semaphores.image_acquired, device.createSemaphore(semaphore_info));
+                CHECKED_ASSIGN(image_semaphores.image_rendered, device.createSemaphore(semaphore_info));
         }
 
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL vulkan_display::create_command_pool() {
+RETURN_TYPE vulkan_display::create_command_pool() {
         vk::CommandPoolCreateInfo pool_info{};
         using bits = vk::CommandPoolCreateFlagBits;
         pool_info
                 .setQueueFamilyIndex(context.queue_family_index)
                 .setFlags(bits::eTransient | bits::eResetCommandBuffer);
         CHECKED_ASSIGN(command_pool, device.createCommandPool(pool_info));
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL vulkan_display::create_command_buffers() {
+RETURN_TYPE vulkan_display::create_command_buffers() {
         vk::CommandBufferAllocateInfo allocate_info{};
         allocate_info
                 .setCommandPool(command_pool)
                 .setLevel(vk::CommandBufferLevel::ePrimary)
-                .setCommandBufferCount(static_cast<uint32_t>(concurent_paths_count));
+                .setCommandBufferCount(static_cast<uint32_t>(transfer_image_count));
         CHECKED_ASSIGN(command_buffers, device.allocateCommandBuffers(allocate_info));
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL vulkan_display::allocate_description_sets() {
-        assert(concurent_paths_count != 0);
+RETURN_TYPE vulkan_display::allocate_description_sets() {
+        assert(transfer_image_count != 0);
         assert(descriptor_set_layout);
         vk::DescriptorPoolSize descriptor_sizes{};
         descriptor_sizes
                 .setType(vk::DescriptorType::eCombinedImageSampler)
-                .setDescriptorCount(concurent_paths_count);
+                .setDescriptorCount(transfer_image_count);
         vk::DescriptorPoolCreateInfo pool_info{};
         pool_info
                 .setPoolSizes(descriptor_sizes)
-                .setMaxSets(concurent_paths_count);
+                .setMaxSets(transfer_image_count);
         CHECKED_ASSIGN(descriptor_pool, device.createDescriptorPool(pool_info));
         
-        std::vector<vk::DescriptorSetLayout> layouts(concurent_paths_count, descriptor_set_layout);
+        std::vector<vk::DescriptorSetLayout> layouts(transfer_image_count, descriptor_set_layout);
         
         vk::DescriptorSetAllocateInfo allocate_info;
         allocate_info
@@ -430,46 +319,15 @@ RETURN_VAL vulkan_display::allocate_description_sets() {
 
         CHECKED_ASSIGN(descriptor_sets, device.allocateDescriptorSets(allocate_info));
         
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL vulkan_display::update_render_area() {
-        vk::Extent2D wnd_size = context.window_size;
-
-        double wnd_aspect = static_cast<double>(wnd_size.width) / wnd_size.height;
-        double img_aspect = static_cast<double>(current_image_size.width) / current_image_size.height;
-
-        if (wnd_aspect > img_aspect) {
-                render_area.height = wnd_size.height;
-                render_area.width = static_cast<uint32_t>(std::round(wnd_size.height * img_aspect));
-                render_area.x = (wnd_size.width - render_area.width) / 2;
-                render_area.y = 0;
-        } else {
-                render_area.width = wnd_size.width;
-                render_area.height = static_cast<uint32_t>(std::round(wnd_size.width / img_aspect));
-                render_area.x = 0;
-                render_area.y = (wnd_size.height - render_area.height) / 2;
-
-        }
-
-        viewport
-                .setX(static_cast<float>(render_area.x))
-                .setY(static_cast<float>(render_area.y))
-                .setWidth(static_cast<float>(render_area.width))
-                .setHeight(static_cast<float>(render_area.height))
-                .setMinDepth(0.f)
-                .setMaxDepth(1.f);
-        scissor
-                .setOffset({ static_cast<int32_t>(render_area.x), static_cast<int32_t>(render_area.y) })
-                .setExtent({ render_area.width, render_area.height });
-        return RETURN_VAL();
-}
-
-RETURN_VAL vulkan_display::init(VkSurfaceKHR surface,
+RETURN_TYPE vulkan_display::init(VkSurfaceKHR surface, uint32_t transfer_image_count,
         window_changed_callback* window, uint32_t gpu_index) {
         // Order of following calls is important
         assert(surface);
         this->window = window;
+        this->transfer_image_count = transfer_image_count;
         auto window_parameters = window->get_window_parameters();
         PASS_RESULT(context.init(surface, window_parameters, gpu_index));
         device = context.device;
@@ -481,10 +339,16 @@ RETURN_VAL vulkan_display::init(VkSurfaceKHR surface,
         PASS_RESULT(create_graphics_pipeline());
         PASS_RESULT(create_command_pool());
         PASS_RESULT(create_command_buffers());
-        PASS_RESULT(create_concurrent_paths());
+        PASS_RESULT(create_image_semaphores());
         PASS_RESULT(allocate_description_sets();)
-        transfer_images.resize(concurent_paths_count);
-        return RETURN_VAL();
+        
+        transfer_images.reserve(transfer_image_count);
+        auto& queue = available_img_queue.get_underlying_unsynchronized_queue();
+        for (uint32_t i = 0; i < transfer_image_count; i++) {
+                transfer_images.emplace_back(device, i);
+                queue.push(&transfer_images.back());
+        }
+        return RETURN_TYPE();
 }
 
 vulkan_display::~vulkan_display() {
@@ -496,14 +360,13 @@ vulkan_display::~vulkan_display() {
                 for (auto& image : transfer_images) {
                         image.destroy(device);
                 }
-
                 device.destroy(command_pool);
                 device.destroy(render_pass);
                 device.destroy(fragment_shader);
                 device.destroy(vertex_shader);
-                for (auto& path : concurent_paths) {
-                        device.destroy(path.image_acquired_semaphore);
-                        device.destroy(path.image_rendered_semaphore);
+                for (auto& image_semaphores : image_semaphores) {
+                        device.destroy(image_semaphores.image_acquired);
+                        device.destroy(image_semaphores.image_rendered);
                 }
                 device.destroy(pipeline);
                 device.destroy(pipeline_layout);
@@ -512,15 +375,15 @@ vulkan_display::~vulkan_display() {
         }
 }
 
-RETURN_VAL vulkan_display::record_graphics_commands(unsigned current_path_id, uint32_t image_index) {
-        vk::CommandBuffer& cmd_buffer = command_buffers[current_path_id];
+RETURN_TYPE vulkan_display::record_graphics_commands(transfer_image& transfer_image, uint32_t swapchain_image_id) {
+        vk::CommandBuffer& cmd_buffer = command_buffers[transfer_image.id];
         cmd_buffer.reset();
 
         vk::CommandBufferBeginInfo begin_info{};
         begin_info.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
         PASS_RESULT(cmd_buffer.begin(begin_info));
 
-        auto render_begin_memory_barrier = transfer_images[current_path_id].create_memory_barrier(
+        auto render_begin_memory_barrier = transfer_image.create_memory_barrier(
                 vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
         cmd_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eHost, vk::PipelineStageFlagBits::eFragmentShader,
                 vk::DependencyFlagBits::eByRegion, nullptr, nullptr, render_begin_memory_barrier);
@@ -530,7 +393,7 @@ RETURN_VAL vulkan_display::record_graphics_commands(unsigned current_path_id, ui
                 .setRenderPass(render_pass)
                 .setRenderArea(vk::Rect2D{ {0,0}, context.window_size })
                 .setClearValues(clear_color)
-                .setFramebuffer(context.get_framebuffer(image_index));
+                .setFramebuffer(context.get_framebuffer(swapchain_image_id));
         cmd_buffer.beginRenderPass(render_pass_begin_info, vk::SubpassContents::eInline);
 
         cmd_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
@@ -539,81 +402,99 @@ RETURN_VAL vulkan_display::record_graphics_commands(unsigned current_path_id, ui
         cmd_buffer.setViewport(0, viewport);
         cmd_buffer.pushConstants(pipeline_layout, vk::ShaderStageFlagBits::eFragment, 0, sizeof(render_area), &render_area);
         cmd_buffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                pipeline_layout, 0, descriptor_sets[current_path_id], nullptr);
+                pipeline_layout, 0, descriptor_sets[transfer_image.id], nullptr);
         cmd_buffer.draw(6, 1, 0, 0);
 
         cmd_buffer.endRenderPass();
 
-        auto render_end_memory_barrier = transfer_images[current_path_id].create_memory_barrier(
+        auto render_end_memory_barrier = transfer_image.create_memory_barrier(
                 vk::ImageLayout::eGeneral, vk::AccessFlagBits::eHostWrite);
         cmd_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eFragmentShader, vk::PipelineStageFlagBits::eHost,
                 vk::DependencyFlagBits::eByRegion, nullptr, nullptr, render_end_memory_barrier);
 
         PASS_RESULT(cmd_buffer.end());
 
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL vulkan_display::render(std::byte* frame,
-        uint32_t image_width, uint32_t image_height, vk::Format format)
-{
+RETURN_TYPE vulkan_display::acquire_image(transfer_image* & result, image_description description) {
+        result = available_img_queue.pop();
+        transfer_image& transfer_image = *result;
+
+        std::scoped_lock lock(device_mutex);
+        CHECK(device.waitForFences(transfer_image.is_available_fence, VK_TRUE, UINT64_MAX),
+                "Waiting for fence failed.");
+        if (transfer_image.description != description) {
+                //todo another formats
+                transfer_image.create(device, context.gpu, description);
+        }
+        transfer_image.update_description_set(device, descriptor_sets[transfer_image.id], sampler);
+}
+
+RETURN_TYPE vulkan_display::copy_and_queue_image(std::byte* frame, image_description description) {
+        transfer_image* image;
+        acquire_image(image, description);
+        transport_image(image->ptr, frame, description, image->row_pitch);
+        queue_image(image);
+}
+
+
+RETURN_TYPE vulkan_display::display_queued_image() {
         auto window_parameters = window->get_window_parameters();
         if (window_parameters.width * window_parameters.height == 0) {
-                // window is minimalised
-                return RETURN_VAL();
-        }
-
-        path& path = concurent_paths[current_path_id];
-        transfer_image* transfer_image = &transfer_images[current_path_id];
-
-        if (vk::Extent2D{ image_width, image_height } != transfer_image->size) {
-                //todo another formats
-                PASS_RESULT(device.waitIdle());
-                current_image_size = vk::Extent2D{ image_width, image_height };
-                for (auto& image : transfer_images) {
-                        image.create(device, context.gpu, current_image_size, vk::Format::eR8G8B8A8Srgb);
+                auto image = filled_img_queue.try_pop();
+                if (image.has_value()) {
+                        available_img_queue.push(*image);
                 }
-                transfer_image = &transfer_images[current_path_id];
-                update_render_area();
+                return RETURN_TYPE();
         }
-        transfer_image->update_description_set(device, descriptor_sets[current_path_id], sampler);
-        CHECK(device.waitForFences(transfer_image->is_available_fence, VK_TRUE, UINT64_MAX),
-                "Waiting for fence failed.");
-        device.resetFences(transfer_image->is_available_fence);
+        transfer_image* transfer_image_ptr = filled_img_queue.pop();
+        transfer_image& transfer_image = *transfer_image_ptr;
 
-        transport_image(transfer_image->ptr, frame, image_width, image_height,
-                format, transfer_image->row_pitch);
+        auto& semaphores = image_semaphores[transfer_image.id];
         
-        uint32_t image_index;
-        PASS_RESULT(context.acquire_next_swapchain_image(image_index, path.image_acquired_semaphore));
+        uint32_t swapchain_image_id;
+        std::unique_lock lock(device_mutex);
+        if (transfer_image.description != current_image_description) {
+                current_image_description = transfer_image.description;
+                auto parameters = context.get_window_parameters();
+                update_render_area_viewport_scissor(render_area, viewport, scissor, 
+                        { parameters.width, parameters.height }, current_image_description.size);
+        }
 
-        while (image_index == SWAPCHAIN_IMAGE_OUT_OF_DATE) {
+        PASS_RESULT(context.acquire_next_swapchain_image(swapchain_image_id, semaphores.image_acquired));
+        while (swapchain_image_id == SWAPCHAIN_IMAGE_OUT_OF_DATE) {
                 window_parameters = window->get_window_parameters();
                 if (window_parameters.width * window_parameters.height == 0) {
                         // window is minimalised
-                        return RETURN_VAL();
+                        auto image = filled_img_queue.try_pop();
+                        if (image.has_value()) {
+                                available_img_queue.push(*image);
+                        }
+                        return RETURN_TYPE();
                 }
                 window_parameters_changed(window_parameters);
-                PASS_RESULT(context.acquire_next_swapchain_image(image_index, path.image_acquired_semaphore));
+                PASS_RESULT(context.acquire_next_swapchain_image(swapchain_image_id, semaphores.image_acquired));
         }
-
-        record_graphics_commands(current_path_id, image_index);
-
+        lock.unlock();
+        
+        record_graphics_commands(transfer_image, swapchain_image_id);
+        device.resetFences(transfer_image.is_available_fence);
         std::vector<vk::PipelineStageFlags> wait_masks{ vk::PipelineStageFlagBits::eColorAttachmentOutput };
         vk::SubmitInfo submit_info{};
         submit_info
-                .setCommandBuffers(command_buffers[current_path_id])
+                .setCommandBuffers(command_buffers[transfer_image.id])
                 .setWaitDstStageMask(wait_masks)
-                .setWaitSemaphores(path.image_acquired_semaphore)
-                .setSignalSemaphores(path.image_rendered_semaphore);
+                .setWaitSemaphores(semaphores.image_acquired)
+                .setSignalSemaphores(semaphores.image_rendered);
 
-        PASS_RESULT(context.queue.submit(submit_info, transfer_image->is_available_fence));
+        PASS_RESULT(context.queue.submit(submit_info, transfer_image.is_available_fence));
 
         vk::PresentInfoKHR present_info{};
         present_info
-                .setImageIndices(image_index)
+                .setImageIndices(swapchain_image_id)
                 .setSwapchains(context.swapchain)
-                .setWaitSemaphores(path.image_rendered_semaphore);
+                .setWaitSemaphores(semaphores.image_rendered);
 
         auto present_result = context.queue.presentKHR(&present_info);
         if (present_result != vk::Result::eSuccess) {
@@ -626,16 +507,15 @@ RETURN_VAL vulkan_display::render(std::byte* frame,
                 }
         }
 
-        current_path_id++;
-        current_path_id %= concurent_paths_count;
-
-        return RETURN_VAL();
+        available_img_queue.push(transfer_image_ptr);
+        return RETURN_TYPE();
 }
 
-RETURN_VAL vulkan_display::window_parameters_changed(window_parameters new_parameters) {
+RETURN_TYPE vulkan_display::window_parameters_changed(window_parameters new_parameters) {
         if (new_parameters != context.get_window_parameters() && new_parameters.width * new_parameters.height != 0) {
                 context.recreate_swapchain(new_parameters, render_pass);
-                update_render_area();
+                update_render_area_viewport_scissor(render_area, viewport, scissor,
+                        { new_parameters.width, new_parameters.height }, current_image_description.size);
         }
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }

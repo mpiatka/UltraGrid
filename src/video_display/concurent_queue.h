@@ -14,6 +14,10 @@ class concurrent_queue {
 public:
         concurrent_queue() = default;
 
+        std::queue<T>& get_underlying_unsynchronized_queue() {
+                return queue;
+        }
+
         void push(const T& value) {
                 emplace(value);
         }
@@ -35,14 +39,14 @@ public:
         template<typename... Args>
         void emplace(Args&&... args) {
                 std::unique_lock lock{ mutex };
-                queue.emplace(std::forward(args));
+                queue.emplace(std::forward<Args>(args)...);
                 lock.unlock();
                 queue_non_empty.notify_one();
         }
 
         T pop() {
                 std::unique_lock lock{ mutex };
-                queue_non_empty.wait(lock, [&q = this->queue]() { return q.empty(); });
+                queue_non_empty.wait(lock, [&q = this->queue]() { return !q.empty(); });
                 T result = std::move(queue.front());
                 queue.pop();
                 return result;

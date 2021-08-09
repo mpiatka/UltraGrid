@@ -1293,7 +1293,7 @@ fi
 echo $vulkan_req $sdl $sdl_version $found_vulkan
 if test $vulkan_req != no -a $sdl = yes -a $sdl_version = 2 -a $found_vulkan = yes
 then
-        VULKAN_OBJ="src/video_display/vulkan_sdl2.o src/video_display/vulkan_display.o src/video_display/vulkan_context.o"
+        VULKAN_OBJ="src/video_display/vulkan_sdl2.o src/video_display/vulkan_display.o src/video_display/vulkan_context.o src/video_display/vulkan_transfer_image.o"
         AC_DEFINE([HAVE_VULKAN], [1],  [Build with vulkan support])
         VULKAN_LIBS="$VULKAN_LIBS $SDL_LIB"
         ADD_MODULE("display_vulkan_sdl2", "$VULKAN_OBJ", "$VULKAN_LIBS")

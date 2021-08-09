@@ -226,9 +226,10 @@ void display_frame(state_vulkan_sdl2* s, video_frame* frame) {
                         vc_get_linesize(frame->tiles[0].width, frame->color_spec), frame->tiles[0].height);
         }
         try {
-                s->vulkan->render(reinterpret_cast<std::byte*>(frame->tiles[0].data),
-                        frame->tiles[0].width, frame->tiles[0].height,
-                        frame->color_spec == RGBA ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8Srgb);
+                s->vulkan->copy_and_queue_image(reinterpret_cast<std::byte*>(frame->tiles[0].data),
+                        image_description{ frame->tiles[0].width, frame->tiles[0].height,
+                        frame->color_spec == RGBA ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8Srgb });
+                s->vulkan->display_queued_image();
         }
         catch (std::exception& e) {
                 LOG(LOG_LEVEL_ERROR) << e.what() << std::endl;
@@ -686,7 +687,7 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
                 }
 #endif
 
-                s->vulkan->init(surface, &s->window_callback, s->gpu_idx);
+                s->vulkan->init(surface, 3, &s->window_callback, s->gpu_idx);
                 LOG(LOG_LEVEL_NOTICE) << "Vulkan display initialised." << std::endl;
         }
         catch (std::exception& e) {

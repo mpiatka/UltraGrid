@@ -42,7 +42,7 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
         return VK_FALSE;
 }
 
-RETURN_VAL check_validation_layers(const std::vector<c_str>& required_layers) {
+RETURN_TYPE check_validation_layers(const std::vector<c_str>& required_layers) {
         std::vector<vk::LayerProperties>  layers;
         CHECKED_ASSIGN(layers, vk::enumerateInstanceLayerProperties());
         //for (auto& l : layers) puts(l.layerName);
@@ -52,10 +52,10 @@ RETURN_VAL check_validation_layers(const std::vector<c_str>& required_layers) {
                 bool found = std::any_of(layers.begin(), layers.end(), layer_equals);
                 CHECK(found, "Layer "s + req_layer + " is not supported.");
         }
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL check_instance_extensions(const std::vector<c_str>& required_extensions) {
+RETURN_TYPE check_instance_extensions(const std::vector<c_str>& required_extensions) {
         std::vector<vk::ExtensionProperties> extensions;
         CHECKED_ASSIGN(extensions, vk::enumerateInstanceExtensionProperties(nullptr));
 
@@ -64,11 +64,11 @@ RETURN_VAL check_instance_extensions(const std::vector<c_str>& required_extensio
                 bool found = std::any_of(extensions.begin(), extensions.end(), extension_equals);
                 CHECK(found, "Instance extension "s + req_exten + " is not supported.");
         }
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
 
-RETURN_VAL check_device_extensions(bool& result, bool propagate_error,
+RETURN_TYPE check_device_extensions(bool& result, bool propagate_error,
         const std::vector<c_str>& required_extensions, const vk::PhysicalDevice& device)
 {
         std::vector<vk::ExtensionProperties> extensions;
@@ -82,14 +82,14 @@ RETURN_VAL check_device_extensions(bool& result, bool propagate_error,
                         if (propagate_error) {
                                 CHECK(false, "Device extension "s + req_exten + " is not supported.");
                         }
-                        return RETURN_VAL();
+                        return RETURN_TYPE();
                 }
         }
         result = true;
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL get_queue_family_index(uint32_t& index, vk::PhysicalDevice gpu, vk::SurfaceKHR surface) {
+RETURN_TYPE get_queue_family_index(uint32_t& index, vk::PhysicalDevice gpu, vk::SurfaceKHR surface) {
         assert(gpu);
 
         std::vector<vk::QueueFamilyProperties> families = gpu.getQueueFamilyProperties();
@@ -106,23 +106,23 @@ RETURN_VAL get_queue_family_index(uint32_t& index, vk::PhysicalDevice gpu, vk::S
                         break;
                 }
         }
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
 const std::vector required_gpu_extensions = { "VK_KHR_swapchain" };
 
-RETURN_VAL is_gpu_suitable(bool& result, bool propagate_error, vk::PhysicalDevice gpu, vk::SurfaceKHR surface = nullptr) {
+RETURN_TYPE is_gpu_suitable(bool& result, bool propagate_error, vk::PhysicalDevice gpu, vk::SurfaceKHR surface = nullptr) {
         PASS_RESULT(check_device_extensions(result, propagate_error, required_gpu_extensions, gpu));
-        if (!result) return RETURN_VAL();
+        if (!result) return RETURN_TYPE();
         uint32_t index;
         PASS_RESULT(get_queue_family_index(index, gpu, surface));
         if (index == NO_QUEUE_FAMILY_INDEX_FOUND) {
                 result = false;
         }
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL choose_suitable_GPU(vk::PhysicalDevice& suitable_gpu, const std::vector<vk::PhysicalDevice>& gpus, vk::SurfaceKHR surface) {
+RETURN_TYPE choose_suitable_GPU(vk::PhysicalDevice& suitable_gpu, const std::vector<vk::PhysicalDevice>& gpus, vk::SurfaceKHR surface) {
         assert(surface);
         bool is_suitable;
         for (auto& gpu : gpus) {
@@ -131,7 +131,7 @@ RETURN_VAL choose_suitable_GPU(vk::PhysicalDevice& suitable_gpu, const std::vect
                         PASS_RESULT(is_gpu_suitable(is_suitable, false, gpu, surface));
                         if (is_suitable) {
                                 suitable_gpu = gpu;
-                                return RETURN_VAL();
+                                return RETURN_TYPE();
                         }
                 }
         }
@@ -142,7 +142,7 @@ RETURN_VAL choose_suitable_GPU(vk::PhysicalDevice& suitable_gpu, const std::vect
                         PASS_RESULT(is_gpu_suitable(is_suitable, false, gpu, surface));
                         if (is_suitable) {
                                 suitable_gpu = gpu;
-                                return RETURN_VAL();
+                                return RETURN_TYPE();
                         }
                 }
         }
@@ -151,15 +151,15 @@ RETURN_VAL choose_suitable_GPU(vk::PhysicalDevice& suitable_gpu, const std::vect
                 PASS_RESULT(is_gpu_suitable(is_suitable, false, gpu, surface));
                 if (is_suitable) {
                         suitable_gpu = gpu;
-                        return RETURN_VAL();
+                        return RETURN_TYPE();
                 }
         }
 
         CHECK(false, "No suitable gpu found.");
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL choose_gpu_by_index(vk::PhysicalDevice& gpu, std::vector<vk::PhysicalDevice>& gpus, uint32_t gpu_index) {
+RETURN_TYPE choose_gpu_by_index(vk::PhysicalDevice& gpu, std::vector<vk::PhysicalDevice>& gpus, uint32_t gpu_index) {
         CHECK(gpu_index < gpus.size(), "GPU index is not valid.");
         std::vector<std::pair<std::string, vk::PhysicalDevice>> gpu_names;
         gpu_names.reserve(gpus.size());
@@ -172,7 +172,7 @@ RETURN_VAL choose_gpu_by_index(vk::PhysicalDevice& gpu, std::vector<vk::Physical
 
         std::sort(gpu_names.begin(), gpu_names.end());
         gpu = gpu_names[gpu_index].second;
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
 vk::CompositeAlphaFlagBitsKHR get_composite_alpha(vk::CompositeAlphaFlagsKHR capabilities) {
@@ -189,7 +189,7 @@ vk::CompositeAlphaFlagBitsKHR get_composite_alpha(vk::CompositeAlphaFlagsKHR cap
 
 namespace vulkan_display_detail { //------------------------------------------------------------------------
 
-RETURN_VAL vulkan_context::create_instance(std::vector<c_str>& required_extensions, bool enable_validation) {
+RETURN_TYPE vulkan_context::create_instance(std::vector<c_str>& required_extensions, bool enable_validation) {
         this->validation_enabled = enable_validation;
 
         std::vector<c_str> validation_layers{};
@@ -218,10 +218,10 @@ RETURN_VAL vulkan_context::create_instance(std::vector<c_str>& required_extensio
                 PASS_RESULT(init_validation_layers_error_messenger());
         }
 
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL vulkan_context::init_validation_layers_error_messenger() {
+RETURN_TYPE vulkan_context::init_validation_layers_error_messenger() {
         vk::DebugUtilsMessengerCreateInfoEXT messenger_info{};
         using severity = vk::DebugUtilsMessageSeverityFlagBitsEXT;
         using type = vk::DebugUtilsMessageTypeFlagBitsEXT;
@@ -231,10 +231,10 @@ RETURN_VAL vulkan_context::init_validation_layers_error_messenger() {
                 .setPfnUserCallback(debugCallback)
                 .setPUserData(nullptr);
         CHECKED_ASSIGN(messenger, instance.createDebugUtilsMessengerEXT(messenger_info, nullptr, *dynamic_dispatch_loader));
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL vulkan_context::get_available_gpus(std::vector<std::pair<std::string, bool>>& gpus) {
+RETURN_TYPE vulkan_context::get_available_gpus(std::vector<std::pair<std::string, bool>>& gpus) {
         assert(instance);
 
         std::vector<vk::PhysicalDevice> physical_devices;
@@ -246,10 +246,10 @@ RETURN_VAL vulkan_context::get_available_gpus(std::vector<std::pair<std::string,
                 gpus.emplace_back(properties.deviceName, true);
         }
         std::sort(gpus.begin(), gpus.end());
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL vulkan_context::create_physical_device(uint32_t gpu_index) {
+RETURN_TYPE vulkan_context::create_physical_device(uint32_t gpu_index) {
         assert(instance);
         assert(surface);
         std::vector<vk::PhysicalDevice> gpus;
@@ -264,10 +264,10 @@ RETURN_VAL vulkan_context::create_physical_device(uint32_t gpu_index) {
         }
         auto properties = gpu.getProperties();
         std::cout << "Vulkan uses GPU called: "s + properties.deviceName.data() << std::endl;
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL vulkan_context::create_logical_device() {
+RETURN_TYPE vulkan_context::create_logical_device() {
         assert(gpu);
         assert(queue_family_index != NO_QUEUE_FAMILY_INDEX_FOUND);
 
@@ -285,10 +285,10 @@ RETURN_VAL vulkan_context::create_logical_device() {
                 .setPEnabledExtensionNames(required_gpu_extensions);
 
         CHECKED_ASSIGN(device, gpu.createDevice(device_info));
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL vulkan_context::get_present_mode() {
+RETURN_TYPE vulkan_context::get_present_mode() {
         std::vector<vk::PresentModeKHR> modes;
         CHECKED_ASSIGN(modes, gpu.getSurfacePresentModesKHR(surface));
 
@@ -304,17 +304,17 @@ RETURN_VAL vulkan_context::get_present_mode() {
         if (std::any_of(modes.begin(), modes.end(), [first_choice](auto mode) { return mode == first_choice; })) {
                 swapchain_atributes.mode = first_choice;
                 swapchain_atributes.mode = first_choice;
-                return RETURN_VAL();
+                return RETURN_TYPE();
         }
         if (std::any_of(modes.begin(), modes.end(), [second_choice](auto mode) { return mode == second_choice; })) {
                 swapchain_atributes.mode = second_choice;
-                return RETURN_VAL();
+                return RETURN_TYPE();
         }
         swapchain_atributes.mode = modes[0];
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL vulkan_context::get_surface_format() {
+RETURN_TYPE vulkan_context::get_surface_format() {
         std::vector<vk::SurfaceFormatKHR> formats;
         CHECKED_ASSIGN(formats, gpu.getSurfaceFormatsKHR(surface));
 
@@ -324,13 +324,13 @@ RETURN_VAL vulkan_context::get_surface_format() {
 
         if (std::any_of(formats.begin(), formats.end(), [default_format](auto& format) {return format == default_format; })) {
                 swapchain_atributes.format = default_format;
-                return RETURN_VAL();
+                return RETURN_TYPE();
         }
         swapchain_atributes.format = formats[0];
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL vulkan_context::create_swap_chain(vk::SwapchainKHR old_swapchain) {
+RETURN_TYPE vulkan_context::create_swap_chain(vk::SwapchainKHR old_swapchain) {
         auto& capabilities = swapchain_atributes.capabilities;
         CHECKED_ASSIGN(capabilities, gpu.getSurfaceCapabilitiesKHR(surface));
 
@@ -366,10 +366,10 @@ RETURN_VAL vulkan_context::create_swap_chain(vk::SwapchainKHR old_swapchain) {
                 .setClipped(true)
                 .setOldSwapchain(old_swapchain);
         CHECKED_ASSIGN(swapchain, device.createSwapchainKHR(swapchain_info));
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL vulkan_context::create_swapchain_views() {
+RETURN_TYPE vulkan_context::create_swapchain_views() {
         std::vector<vk::Image> images;
         CHECKED_ASSIGN(images, device.getSwapchainImagesKHR(swapchain));
         uint32_t image_count = static_cast<uint32_t>(images.size());
@@ -384,10 +384,10 @@ RETURN_VAL vulkan_context::create_swapchain_views() {
                 image_view_info.setImage(swapchain_images[i].image);
                 CHECKED_ASSIGN(image.view, device.createImageView(image_view_info));
         }
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL vulkan_context::init(VkSurfaceKHR surface, window_parameters parameters, uint32_t gpu_index) {
+RETURN_TYPE vulkan_context::init(VkSurfaceKHR surface, window_parameters parameters, uint32_t gpu_index) {
         this->surface = surface;
         window_size = vk::Extent2D{ parameters.width, parameters.height };
         vsync = parameters.vsync;
@@ -398,10 +398,10 @@ RETURN_VAL vulkan_context::init(VkSurfaceKHR surface, window_parameters paramete
         queue = device.getQueue(queue_family_index, 0);
         PASS_RESULT(create_swap_chain());
         PASS_RESULT(create_swapchain_views());
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL vulkan_context::create_framebuffers(vk::RenderPass render_pass) {
+RETURN_TYPE vulkan_context::create_framebuffers(vk::RenderPass render_pass) {
         vk::FramebufferCreateInfo framebuffer_info;
         framebuffer_info
                 .setRenderPass(render_pass)
@@ -413,10 +413,10 @@ RETURN_VAL vulkan_context::create_framebuffers(vk::RenderPass render_pass) {
                 framebuffer_info.setAttachments(swapchain_images[i].view);
                 CHECKED_ASSIGN(swapchain_images[i].framebuffer, device.createFramebuffer(framebuffer_info));
         }
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL vulkan_context::recreate_swapchain(window_parameters parameters, vk::RenderPass render_pass) {
+RETURN_TYPE vulkan_context::recreate_swapchain(window_parameters parameters, vk::RenderPass render_pass) {
         window_size = vk::Extent2D{ parameters.width, parameters.height };
         vsync = parameters.vsync;
 
@@ -429,17 +429,17 @@ RETURN_VAL vulkan_context::recreate_swapchain(window_parameters parameters, vk::
         device.destroySwapchainKHR(old_swap_chain);
         create_swapchain_views();
         create_framebuffers(render_pass);
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
-RETURN_VAL vulkan_context::acquire_next_swapchain_image(uint32_t& image_index, vk::Semaphore acquire_semaphore) {
+RETURN_TYPE vulkan_context::acquire_next_swapchain_image(uint32_t& image_index, vk::Semaphore acquire_semaphore) {
         auto acquired = device.acquireNextImageKHR(swapchain, UINT64_MAX, acquire_semaphore, nullptr, &image_index);
         if (acquired == vk::Result::eSuboptimalKHR || acquired == vk::Result::eErrorOutOfDateKHR) {
                 image_index = SWAPCHAIN_IMAGE_OUT_OF_DATE;
-                return RETURN_VAL();
+                return RETURN_TYPE();
         }
         CHECK(acquired, "Next swapchain image cannot be acquired."s + vk::to_string(acquired));
-        return RETURN_VAL();
+        return RETURN_TYPE();
 }
 
 vulkan_context::~vulkan_context() {
