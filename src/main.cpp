@@ -1268,7 +1268,8 @@ static int adjust_params(struct ug_options *opt) {
                         return EXIT_FAILURE;
                 }
 
-                printf("remote: %s\n rx: %d\n tx: %d\n", punched_host, opt->video_rx_port, opt->video_tx_port);
+                log_msg(LOG_LEVEL_INFO, "[holepunch] remote: %s\n rx: %d\n tx: %d\n",
+						punched_host, opt->video_rx_port, opt->video_tx_port);
                 opt->requested_receiver = punched_host;
                 opt->audio.host = punched_host;
         }
