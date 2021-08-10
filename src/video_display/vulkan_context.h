@@ -78,6 +78,8 @@ struct  vulkan_display_exception : public std::runtime_error {
 #endif //NO_EXCEPTIONS -------------------------------------------------------
 
 
+namespace vulkan_display {
+
 struct window_parameters {
         uint32_t width;
         uint32_t height;
@@ -96,6 +98,8 @@ struct window_parameters {
 constexpr uint32_t NO_GPU_SELECTED = UINT32_MAX;
 
 vk::ImageViewCreateInfo default_image_view_create_info(vk::Format format);
+
+} // namespace vulkan_display ---------------------------------------------
 
 
 namespace vulkan_display_detail {
@@ -166,6 +170,8 @@ private:
         }
 
 public:
+        using window_parameters = vulkan_display::window_parameters;
+
         vulkan_context() = default;
         vulkan_context(const vulkan_context& other) = delete;
         vulkan_context& operator=(const vulkan_context& other) = delete;
@@ -178,7 +184,7 @@ public:
 
         RETURN_TYPE get_available_gpus(std::vector<std::pair<std::string, bool>>& gpus);
 
-        RETURN_TYPE init(VkSurfaceKHR surface, window_parameters parameters, uint32_t gpu_index);
+        RETURN_TYPE init(VkSurfaceKHR surface, window_parameters, uint32_t gpu_index);
 
         RETURN_TYPE create_framebuffers(vk::RenderPass render_pass);
 
@@ -195,4 +201,4 @@ public:
         RETURN_TYPE recreate_swapchain(window_parameters parameters, vk::RenderPass render_pass);
 };
 
-}//namespace 
+}//namespace vulkan_display_detail

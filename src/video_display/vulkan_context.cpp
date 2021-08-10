@@ -8,6 +8,9 @@ using namespace vulkan_display_detail;
 std::string vulkan_display_error_message{};
 #endif // NO_EXCEPTIONS
 
+
+namespace vulkan_display {
+
 vk::ImageViewCreateInfo default_image_view_create_info(vk::Format format) {
         vk::ImageViewCreateInfo image_view_info{};
         image_view_info
@@ -26,6 +29,9 @@ vk::ImageViewCreateInfo default_image_view_create_info(vk::Format format) {
                 .setLayerCount(1);
         return image_view_info;
 }
+
+} // namespace vulkan_display
+
 
 namespace {
 
@@ -255,7 +261,7 @@ RETURN_TYPE vulkan_context::create_physical_device(uint32_t gpu_index) {
         std::vector<vk::PhysicalDevice> gpus;
         CHECKED_ASSIGN(gpus, instance.enumeratePhysicalDevices());
 
-        if (gpu_index == NO_GPU_SELECTED) {
+        if (gpu_index == vulkan_display::NO_GPU_SELECTED) {
                 PASS_RESULT(choose_suitable_GPU(gpu, gpus, surface));
         } else {
                 PASS_RESULT(choose_gpu_by_index(gpu, gpus, gpu_index));
@@ -374,7 +380,8 @@ RETURN_TYPE vulkan_context::create_swapchain_views() {
         CHECKED_ASSIGN(images, device.getSwapchainImagesKHR(swapchain));
         uint32_t image_count = static_cast<uint32_t>(images.size());
 
-        vk::ImageViewCreateInfo image_view_info = default_image_view_create_info(swapchain_atributes.format.format);
+        vk::ImageViewCreateInfo image_view_info = 
+                vulkan_display::default_image_view_create_info(swapchain_atributes.format.format);
 
         swapchain_images.resize(image_count);
         for (uint32_t i = 0; i < image_count; i++) {

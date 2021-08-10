@@ -94,6 +94,8 @@
 using rang::fg;
 using rang::style;
 
+
+namespace vkd = vulkan_display;
 namespace chrono = std::chrono;
 using namespace std::string_literals;
 
@@ -107,13 +109,13 @@ constexpr int MAX_BUFFER_SIZE = 1;
 void display_sdl2_new_message(module*);
 int display_sdl2_putf(void* state, video_frame* frame, int nonblock);
 
-class window_callback final : public window_changed_callback {
+class window_callback final : public vkd::window_changed_callback {
         SDL_Window* window = nullptr;
 public:
         window_callback(SDL_Window* window):
                 window{window} { }
         
-        window_parameters get_window_parameters() override {
+        vkd::window_parameters get_window_parameters() override {
                 assert(window);
                 int width, height;
                 SDL_Vulkan_GetDrawableSize(window, &width, &height);
@@ -142,7 +144,7 @@ struct state_vulkan_sdl2 {
         SDL_Window*             window{ nullptr };
 
 
-        uint32_t                gpu_idx{ NO_GPU_SELECTED };
+        uint32_t                gpu_idx{ vkd::NO_GPU_SELECTED };
         bool                    validation{ true }; // todo: change to false
 
         bool                    fs{ false };
@@ -164,7 +166,7 @@ struct state_vulkan_sdl2 {
 
         std::queue<video_frame*> free_frame_queue;
 
-        std::unique_ptr<vulkan_display> vulkan = nullptr;
+        std::unique_ptr<vkd::vulkan_display> vulkan = nullptr;
 
         window_callback window_callback { nullptr };
 
@@ -227,7 +229,7 @@ void display_frame(state_vulkan_sdl2* s, video_frame* frame) {
         }
         try {
                 s->vulkan->copy_and_queue_image(reinterpret_cast<std::byte*>(frame->tiles[0].data),
-                        image_description{ frame->tiles[0].width, frame->tiles[0].height,
+                        vkd::image_description{ frame->tiles[0].width, frame->tiles[0].height,
                         frame->color_spec == RGBA ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8Srgb });
                 s->vulkan->display_queued_image();
         }
@@ -412,7 +414,7 @@ void sdl2_print_displays() {
 }
 
 void print_gpus() {
-        vulkan_display vulkan;
+        vkd::vulkan_display vulkan;
         std::vector<const char*>required_extensions{};
         vulkan.create_instance(required_extensions, false);
 
@@ -662,7 +664,7 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
         SDL_Vulkan_GetInstanceExtensions(s->window, &extension_count, required_extensions.data());
         assert(extension_count > 0);
         try {
-                s->vulkan = std::make_unique<vulkan_display>();
+                s->vulkan = std::make_unique<vkd::vulkan_display>();
                 s->vulkan->create_instance(required_extensions, s->validation);
                 const auto& instance = s->vulkan->get_instance();
 

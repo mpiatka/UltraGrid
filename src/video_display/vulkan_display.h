@@ -7,21 +7,25 @@
 #include <mutex>
 #include <utility>
 
+namespace vulkan_display_detail {
+
+struct render_area {
+        uint32_t x;
+        uint32_t y;
+        uint32_t width;
+        uint32_t height;
+};
+
+} // vulkan_display_detail
+
+namespace vulkan_display {
+
 class window_changed_callback {
 protected:
         ~window_changed_callback() = default;
 public:
         virtual window_parameters get_window_parameters() = 0;
 };
-
-namespace vulkan_display_detail {
-        struct render_area {
-                uint32_t x;
-                uint32_t y;
-                uint32_t width;
-                uint32_t height;
-        };
-}
 
 class vulkan_display {
         window_changed_callback* window = nullptr;
@@ -50,14 +54,14 @@ class vulkan_display {
         vk::CommandPool command_pool;
         std::vector<vk::CommandBuffer> command_buffers;
 
-        
+
         struct image_semaphores {
                 vk::Semaphore image_acquired;
                 vk::Semaphore image_rendered;
         };
         std::vector<image_semaphores> image_semaphores;
 
-        
+
         using transfer_image = vulkan_display_detail::transfer_image;
         unsigned transfer_image_count;
         std::vector<transfer_image> transfer_images;
@@ -65,10 +69,10 @@ class vulkan_display {
 
         concurrent_queue<transfer_image*> available_img_queue;
         concurrent_queue<transfer_image*> filled_img_queue;
-       
+
 
         bool minimalised = false;
-private:     
+private:
 
         RETURN_TYPE create_texture_sampler();
 
@@ -126,10 +130,10 @@ public:
         RETURN_TYPE init(VkSurfaceKHR surface, uint32_t transfer_image_count,
                 window_changed_callback* window, uint32_t gpu_index = NO_GPU_SELECTED);
 
-        RETURN_TYPE acquire_image(transfer_image*& image, image_description description);
+        RETURN_TYPE acquire_image(image& image, image_description description);
 
-        RETURN_TYPE queue_image(transfer_image* image) {
-                filled_img_queue.push(image);
+        RETURN_TYPE queue_image(image image) {
+                filled_img_queue.push(&image.get_transfer_image());
         }
 
         RETURN_TYPE copy_and_queue_image(std::byte* frame, image_description description);
@@ -146,3 +150,5 @@ public:
                 return RETURN_TYPE();
         }
 };
+
+} //vulkan_display

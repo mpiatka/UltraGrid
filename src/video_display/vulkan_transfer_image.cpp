@@ -40,7 +40,7 @@ RETURN_TYPE transfer_image::init(vk::Device device, uint32_t id) {
 }
 
 RETURN_TYPE transfer_image::create(vk::Device device, vk::PhysicalDevice gpu,
-        image_description description)
+        vulkan_display::image_description description)
 {
         assert(id != NO_ID);
         destroy(device, false);
@@ -82,7 +82,7 @@ RETURN_TYPE transfer_image::create(vk::Device device, vk::PhysicalDevice gpu,
         CHECK(void_ptr != nullptr, "Image memory cannot be mapped.");
         ptr = reinterpret_cast<std::byte*>(void_ptr);
 
-        vk::ImageViewCreateInfo view_info = default_image_view_create_info(description.format);
+        vk::ImageViewCreateInfo view_info = vulkan_display::default_image_view_create_info(description.format);
         view_info.setImage(image);
         CHECKED_ASSIGN(view, device.createImageView(view_info));
 

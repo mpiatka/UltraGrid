@@ -1,6 +1,7 @@
 #pragma once
 #include "vulkan_context.h"
 
+namespace vulkan_display {
 
 struct image_description {
         vk::Extent2D size;
@@ -21,6 +22,7 @@ struct image_description {
         }
 };
 
+} // vulkan_display-----------------------------------------
 
 namespace vulkan_display_detail {
 
@@ -35,9 +37,9 @@ public:
         uint32_t id;
         vk::ImageView view;
         std::byte* ptr;
-        image_description description;
+        vulkan_display::image_description description;
 
-        size_t row_pitch;
+        vk::DeviceSize row_pitch;
 
         vk::Fence is_available_fence; // is_available_fence isn't signalled when gpu uses the image
 
@@ -46,7 +48,7 @@ public:
 
         RETURN_TYPE init(vk::Device device, uint32_t id);
 
-        RETURN_TYPE create(vk::Device device, vk::PhysicalDevice gpu, image_description description);
+        RETURN_TYPE create(vk::Device device, vk::PhysicalDevice gpu, vulkan_display::image_description description);
 
         vk::ImageMemoryBarrier create_memory_barrier(
                 vk::ImageLayout new_layout,
@@ -66,3 +68,38 @@ public:
 };
 
 } // vulkan_display_detail
+
+
+namespace vulkan_display {
+
+class image {
+        vulkan_display_detail::transfer_image* transfer_image;
+public:
+        image() = default;
+        image(vulkan_display_detail::transfer_image& image) :
+                transfer_image{ &image } { }
+
+        uint32_t get_id() {
+                assert(transfer_image); 
+                return transfer_image->id;
+        }
+        std::byte* get_memory_ptr() {
+                assert(transfer_image);
+                return transfer_image->ptr;
+        }
+        image_description get_description() {
+                assert(transfer_image);
+                return transfer_image->description;
+        }
+        size_t get_row_pitch() {
+                assert(transfer_image);
+                return transfer_image->row_pitch;
+        }
+        vulkan_display_detail::transfer_image& get_transfer_image() {
+                assert(transfer_image);
+                return *transfer_image;
+        }
+};
+
+} //namespace vulkan_display
+
