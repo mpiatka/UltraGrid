@@ -27,13 +27,13 @@ struct image_description {
 namespace vulkan_display_detail {
 
 class transfer_image {
-        static constexpr uint32_t NO_ID = UINT32_MAX;
         vk::DeviceMemory memory;
         vk::Image image;
         vk::ImageLayout layout;
         vk::AccessFlagBits access;
 
 public:
+        static constexpr uint32_t NO_ID = UINT32_MAX;
         uint32_t id;
         vk::ImageView view;
         std::byte* ptr;
@@ -73,11 +73,14 @@ public:
 namespace vulkan_display {
 
 class image {
-        vulkan_display_detail::transfer_image* transfer_image;
+        vulkan_display_detail::transfer_image* transfer_image = nullptr;
 public:
         image() = default;
         image(vulkan_display_detail::transfer_image& image) :
-                transfer_image{ &image } { }
+                transfer_image{ &image } 
+        { 
+                assert(image.id != vulkan_display_detail::transfer_image::NO_ID);
+        }
 
         uint32_t get_id() {
                 assert(transfer_image); 
@@ -95,9 +98,8 @@ public:
                 assert(transfer_image);
                 return transfer_image->row_pitch;
         }
-        vulkan_display_detail::transfer_image& get_transfer_image() {
-                assert(transfer_image);
-                return *transfer_image;
+        vulkan_display_detail::transfer_image* get_transfer_image() {
+                return transfer_image;
         }
 };
 

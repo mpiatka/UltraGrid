@@ -452,6 +452,9 @@ RETURN_TYPE vulkan_display::display_queued_image() {
                 return RETURN_TYPE();
         }
         transfer_image* transfer_image_ptr = filled_img_queue.pop();
+        if (!transfer_image_ptr) {
+                return RETURN_TYPE();
+        }
         transfer_image& transfer_image = *transfer_image_ptr;
 
         auto& semaphores = image_semaphores[transfer_image.id];

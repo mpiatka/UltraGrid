@@ -8,22 +8,14 @@
 
 template<typename T>
 class concurrent_queue {
-        std::condition_variable queue_non_empty;
-        mutable std::mutex mutex;
-        std::queue<T> queue;
+        std::condition_variable queue_non_empty{};
+        mutable std::mutex mutex{};
+        std::queue<T> queue{};
 public:
         concurrent_queue() = default;
 
         std::queue<T>& get_underlying_unsynchronized_queue() {
                 return queue;
-        }
-
-        void push(const T& value) {
-                emplace(value);
-        }
-
-        void push(T&& value) {
-                emplace(std::move(value));
         }
 
         bool empty() const {
@@ -34,6 +26,14 @@ public:
         auto size() const {
                 std::scoped_lock lock{ mutex };
                 return queue.size();
+        }
+
+        void push(const T& value) {
+                emplace(value);
+        }
+
+        void push(T&& value) {
+                emplace(std::move(value));
         }
 
         template<typename... Args>
