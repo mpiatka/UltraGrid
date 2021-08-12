@@ -301,10 +301,12 @@ RETURN_TYPE vulkan_display::init(VkSurfaceKHR surface, uint32_t transfer_image_c
         PASS_RESULT(allocate_description_sets());
 
         transfer_images.reserve(transfer_image_count);
-        auto& queue = available_img_queue.get_underlying_unsynchronized_queue();
+        auto& deque = available_img_queue.get_underlying_unsynchronized_deque();
         for (uint32_t i = 0; i < transfer_image_count; i++) {
                 transfer_images.emplace_back(device, i);
-                queue.push(&transfer_images.back());
+                //push_front - discarded images should be pushed at the front,
+                // because they will not wait in the function device.waitForFences
+                deque.push_front(&transfer_images.back());
         }
         return RETURN_TYPE();
 }
