@@ -68,7 +68,7 @@ class vulkan_display {
         image_description current_image_description;
 
         concurrent_queue<transfer_image*> available_img_queue{};
-        concurrent_queue<transfer_image*> filled_img_queue{};
+        concurrent_queue<image> filled_img_queue{};
 
 
         bool minimalised = false;
@@ -132,9 +132,7 @@ public:
 
         RETURN_TYPE acquire_image(image& image, image_description description);
 
-        RETURN_TYPE queue_image(image image) {
-                filled_img_queue.push(image.get_transfer_image());
-        }
+        RETURN_TYPE queue_image(image img);
 
         RETURN_TYPE copy_and_queue_image(std::byte* frame, image_description description);
 

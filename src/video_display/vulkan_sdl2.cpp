@@ -92,6 +92,7 @@
 #include <unordered_map>
 #include <utility> // pair
 
+
 using rang::fg;
 using rang::style;
 
@@ -103,7 +104,7 @@ using namespace std::string_literals;
 namespace {
 
 constexpr int MAGIC_VULKAN_SDL2 = 0x3cc234a2;
-constexpr int MAX_FRAME_COUNT = 5;
+constexpr int MAX_FRAME_COUNT = 2;
 #define MOD_NAME "[VULKAN_SDL2] "
 
 
@@ -202,21 +203,6 @@ constexpr std::array<std::pair<char, std::string_view>, 3> display_sdl2_keybindi
         {'f', "toggle fullscreen"},
         {'q', "quit"}
 }};
-
-
-/*void display_frame(state_vulkan_sdl2* s, video_frame* frame) {
-        s->frames++;
-        auto tv = chrono::steady_clock::now();
-        double seconds = chrono::duration_cast<chrono::duration<double>>(tv - s->tv).count();
-        if (seconds > 5) {
-                double fps = s->frames / seconds;
-                log_msg(LOG_LEVEL_INFO, "[SDL] %llu frames in %g seconds = %g FPS\n",
-                        s->frames, seconds, fps);
-                s->tv = tv;
-                s->frames = 0;
-        }
-}*/
-
 
 int64_t translate_sdl_key_to_ug(SDL_Keysym sym) {
         sym.mod &= ~(KMOD_NUM | KMOD_CAPS); // remove num+caps lock modifiers
@@ -331,11 +317,11 @@ void display_sdl2_run(void* state) {
                                         int width = sqrt(area / ((double)s->current_display_desc.height / s->current_display_desc.width));
                                         int height = sqrt(area / ((double)s->current_display_desc.width / s->current_display_desc.height));
                                         SDL_SetWindowSize(s->window, width, height);
-                                        debug_msg("[SDL] resizing to %d x %d\n", width, height);
+                                        debug_msg(MOD_NAME "resizing to %d x %d\n", width, height);
                                 } else if (sdl_event.window.event == SDL_WINDOWEVENT_EXPOSED
                                         || sdl_event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)
                                 {
-                                        //display_frame(s, s->last_frame);
+                                        //todo support last frame redrawing
                                 }
                         } else if (sdl_event.type == SDL_QUIT) {
                                 exit_uv(0);
@@ -344,6 +330,16 @@ void display_sdl2_run(void* state) {
                 try {
                         s->vulkan->display_queued_image();
                 } catch (std::exception& e) { log_and_exit(e); }
+                s->frames++;
+                auto tv = chrono::steady_clock::now();
+                double seconds = chrono::duration_cast<chrono::duration<double>>(tv - s->tv).count();
+                if (seconds > 5) {
+                        double fps = s->frames / seconds;
+                        log_msg(LOG_LEVEL_INFO, MOD_NAME "%llu frames in %g seconds = %g FPS\n",
+                                s->frames, seconds, fps);
+                        s->tv = tv;
+                        s->frames = 0;
+                }
         }
 }
 
@@ -382,7 +378,7 @@ void print_gpus() {
 void show_help() {
         SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS);
         auto& cout = std::cout;
-        cout << "SDL options:\n";
+        cout << "VULKAN_SDL2 options:\n";
         cout << style::bold << fg::red << "\t-d vulkan_sdl2" << fg::reset;
         cout << "[:fs|:d|:display=<dis_id>|:novsync|:nodecorate|:fixed_size[=WxH]|:window_flags=<f>|:pos=<x>,<y>|:keep-aspect|:validation|:gpu=<gpu_id>|:help]\n";
 
@@ -413,47 +409,9 @@ int display_sdl2_reconfigure(void* state, video_desc desc) {
         auto s = static_cast<state_vulkan_sdl2*>(state);
         assert(s->mod.priv_magic == MAGIC_VULKAN_SDL2);
 
-        assert(desc.color_spec == RGBA && desc.tile_count == 1);
+        assert(desc.tile_count == 1);
         s->current_desc = desc;
         return 1;
-}
-
-struct ug_to_sdl_pf {
-        codec_t first;
-        uint32_t second;
-};
-
-constexpr std::array<ug_to_sdl_pf, 2> pf_mapping{{
-        //{ I420, SDL_PIXELFORMAT_IYUV },
-        //{ UYVY, SDL_PIXELFORMAT_UYVY },
-        //{ YUYV, SDL_PIXELFORMAT_YUY2 },
-        //{ BGR, SDL_PIXELFORMAT_BGR24 },
-        { RGB, SDL_PIXELFORMAT_RGB24 },
-        { RGBA, SDL_PIXELFORMAT_RGBA32 },
-}};
-
-/*uint32_t get_ug_to_sdl_format(codec_t ug_codec) {
-        if (ug_codec == R10k) {
-                return SDL_PIXELFORMAT_ARGB2101010;
-        }
-
-        const auto *it = find_if(begin(pf_mapping), end(pf_mapping), [ug_codec](const ug_to_sdl_pf &u) { return u.first == ug_codec; });
-        if (it == end(pf_mapping)) {
-                LOG(LOG_LEVEL_ERROR) << MOD_NAME << "Wrong codec: " << get_codec_name(ug_codec) << "\n";
-                return SDL_PIXELFORMAT_UNKNOWN;
-        }
-        return it->second;
-}*/
-
-auto get_supported_pfs() {
-        std::vector<codec_t> codecs;
-        codecs.reserve(sizeof pf_mapping / sizeof pf_mapping[0]);
-
-        for (auto item : pf_mapping) {
-                codecs.push_back(item.first);
-        }
-
-        return codecs;
 }
 
 /**
@@ -583,8 +541,6 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
 
         log_msg(LOG_LEVEL_NOTICE, "SDL2 initialized successfully.\n");
 
-
-
         const char* window_title = "UltraGrid - SDL2 Display";
         if (get_commandline_param("window-title")) {
                 window_title = get_commandline_param("window-title");
@@ -602,7 +558,7 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
 
         s->window = SDL_CreateWindow(window_title, x, y, width, height, window_flags);
         if (!s->window) {
-                log_msg(LOG_LEVEL_ERROR, "[SDL] Unable to create window: %s\n", SDL_GetError());
+                log_msg(LOG_LEVEL_ERROR, MOD_NAME "Unable to create window : % s\n", SDL_GetError());
                 return nullptr;
         }
         s->window_callback = ::window_callback{ s->window };
@@ -639,7 +595,7 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
 #endif
 
                 s->vulkan->init(surface, MAX_FRAME_COUNT, &s->window_callback, s->gpu_idx);
-                LOG(LOG_LEVEL_NOTICE) << "Vulkan display initialised." << std::endl;
+                LOG(LOG_LEVEL_NOTICE) << MOD_NAME "Vulkan display initialised." << std::endl;
         }
         catch (std::exception& e) { log_and_exit(e); }
 
@@ -684,7 +640,7 @@ video_frame* display_sdl2_getf(void* state) {
         
         video_frame& frame = s->video_frames[image.get_id()];
         update_description(desc, frame);
-        frame.tiles[0].data_len = image.get_row_pitch() * image.get_description().size.height;
+        frame.tiles[0].data_len = image.get_row_pitch() * image.get_size().height;
         frame.tiles[0].data = reinterpret_cast<char*>(image.get_memory_ptr());
         return &frame;
 }
@@ -693,12 +649,11 @@ int display_sdl2_putf(void* state, video_frame* frame, int nonblock) {
         auto s = static_cast<state_vulkan_sdl2*>(state);
         assert(s->mod.priv_magic == MAGIC_VULKAN_SDL2);
 
-        //vc_deinterlace(reinterpret_cast<unsigned char*>(frame->tiles[0].data),
-        //        vc_get_linesize(frame->tiles[0].width, frame->color_spec), frame->tiles[0].height);
-
         uint32_t id = std::distance(s->video_frames.data(), frame);
+        auto& image = s->images[id];
         if (nonblock == PUTF_DISCARD) {
                 assert(frame != nullptr);
+                assert(image.get_id() == id);
                 try {
                         s->vulkan->discard_image(s->images[id]);
                 } catch (std::exception& e) { log_and_exit(e); }
@@ -710,12 +665,29 @@ int display_sdl2_putf(void* state, video_frame* frame, int nonblock) {
                 s->vulkan->queue_image(vkd::image{});
                 return 0;
         }
+        assert(image.get_id() == id);
         s->current_desc = video_desc_from_frame(frame);
+        
+
+        bool deinterlace = s->deinterlace;
+        image.set_process_function( [deinterlace](vkd::image& image) 
+        {    
+                if (false) {
+                        vc_deinterlace(reinterpret_cast<unsigned char*>(image.get_memory_ptr()), 
+                                image.get_row_pitch(), 
+                                image.get_description().size.height);
+                }
+        });
+
+        //image.process(); image.set_process_function(nullptr);
+        
         try {
                 s->vulkan->queue_image(s->images[id]);
         } catch (std::exception& e) { log_and_exit(e); }
         return 0;
 }
+
+constexpr std::array <codec_t, 1> codecs = { RGBA };
 
 int display_sdl2_get_property(void* state, int property, void* val, size_t* len) {
         auto s = static_cast<state_vulkan_sdl2*>(state);
@@ -723,14 +695,12 @@ int display_sdl2_get_property(void* state, int property, void* val, size_t* len)
 
         switch (property) {
         case DISPLAY_PROPERTY_CODECS: {
-                auto codecs = get_supported_pfs();
                 size_t codecs_len = codecs.size() * sizeof(codec_t);
-                if (codecs_len <= *len) {
-                        memcpy(val, codecs.data(), codecs_len);
-                        *len = codecs_len;
-                } else {
+                if (codecs_len > *len) {
                         return FALSE;
                 }
+                memcpy(val, codecs.data(), codecs_len);
+                *len = codecs_len;
                 break;
         }
         case DISPLAY_PROPERTY_BUF_PITCH: {

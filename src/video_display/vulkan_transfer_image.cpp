@@ -47,7 +47,7 @@ RETURN_TYPE transfer_image::create(vk::Device device, vk::PhysicalDevice gpu,
 
         this->description = description;
         this->layout = vk::ImageLayout::ePreinitialized;
-        this->access = vk::AccessFlagBits::eHostWrite;
+        this->access = vk::AccessFlagBits::eHostWrite | vk::AccessFlagBits::eHostRead;
         this->update_desciptor_set = true;
 
         vk::ImageCreateInfo image_info;
@@ -91,7 +91,7 @@ RETURN_TYPE transfer_image::create(vk::Device device, vk::PhysicalDevice gpu,
 }
 
 vk::ImageMemoryBarrier  transfer_image::create_memory_barrier(
-        vk::ImageLayout new_layout, vk::AccessFlagBits new_access_mask,
+        vk::ImageLayout new_layout, vk::AccessFlags new_access_mask,
         uint32_t src_queue_family_index, uint32_t dst_queue_family_index)
 {
         vk::ImageMemoryBarrier memory_barrier{};

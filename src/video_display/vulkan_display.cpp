@@ -10,6 +10,7 @@
 #include <memory>
 #include <vector>
 
+
 using namespace vulkan_display_detail;
 
 namespace {
@@ -29,51 +30,6 @@ RETURN_TYPE create_shader(vk::ShaderModule& shader,
         vk::ShaderModuleCreateInfo shader_info;
         shader_info.setCode(shader_code);
         CHECKED_ASSIGN(shader, device.createShaderModule(shader_info));
-        return RETURN_TYPE();
-}
-
-
-
-RETURN_TYPE transport_image(std::byte* destination, std::byte* source,
-        vulkan_display::image_description description, size_t row_pitch)
-{
-        auto image_width = description.size.width;
-        auto image_height = description.size.height;
-        using f = vk::Format;
-        switch (description.format) {
-        case f::eR8G8B8A8Srgb: {
-                auto row_size = image_width * 4;
-                assert(row_size <= row_pitch);
-                for (size_t row = 0; row < image_height; row++) {
-                        memcpy(destination, source, row_size);
-                        source += row_size;
-                        destination += row_pitch;
-                }
-                break;
-        }
-        case f::eR8G8B8Srgb: {
-                for (size_t row = 0; row < image_height; row++) {
-                        //lines are copied from back to the front, 
-                        //so it can be done in place
-
-                        // move to the end of lines
-                        auto dest = destination + image_width * 4;
-                        auto src = source + image_width * 3;
-                        for (size_t col = 0; col < image_width; col++) {
-                                //move sequentially from back to the beginning of the line
-                                dest -= 4;
-                                src -= 3;
-                                memcpy(dest, src, 3);
-                        }
-                        assert(destination == dest && source == src);
-                        destination += row_pitch;
-                        source += image_width * 3; //todo tightly packed for now
-                }
-                break;
-        }
-        default:
-                CHECK(false, "Unsupported picture format");
-        }
         return RETURN_TYPE();
 }
 
@@ -342,9 +298,9 @@ RETURN_TYPE vulkan_display::init(VkSurfaceKHR surface, uint32_t transfer_image_c
         PASS_RESULT(create_command_pool());
         PASS_RESULT(create_command_buffers());
         PASS_RESULT(create_image_semaphores());
-        PASS_RESULT(allocate_description_sets();)
+        PASS_RESULT(allocate_description_sets());
 
-                transfer_images.reserve(transfer_image_count);
+        transfer_images.reserve(transfer_image_count);
         auto& queue = available_img_queue.get_underlying_unsynchronized_queue();
         for (uint32_t i = 0; i < transfer_image_count; i++) {
                 transfer_images.emplace_back(device, i);
@@ -410,7 +366,7 @@ RETURN_TYPE vulkan_display::record_graphics_commands(transfer_image& transfer_im
         cmd_buffer.endRenderPass();
 
         auto render_end_memory_barrier = transfer_image.create_memory_barrier(
-                vk::ImageLayout::eGeneral, vk::AccessFlagBits::eHostWrite);
+                vk::ImageLayout::eGeneral, vk::AccessFlagBits::eHostWrite | vk::AccessFlagBits::eHostRead);
         cmd_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eFragmentShader, vk::PipelineStageFlagBits::eHost,
                 vk::DependencyFlagBits::eByRegion, nullptr, nullptr, render_end_memory_barrier);
 
@@ -422,40 +378,49 @@ RETURN_TYPE vulkan_display::record_graphics_commands(transfer_image& transfer_im
 RETURN_TYPE vulkan_display::acquire_image(image& result, image_description description) {
         auto transfer_image_ptr = available_img_queue.pop();
         transfer_image& transfer_image = *transfer_image_ptr;
-
+        
         std::scoped_lock lock(device_mutex);
         CHECK(device.waitForFences(transfer_image.is_available_fence, VK_TRUE, UINT64_MAX),
                 "Waiting for fence failed.");
+
         if (transfer_image.description != description) {
                 //todo another formats
                 transfer_image.create(device, context.gpu, description);
         }
         transfer_image.update_description_set(device, descriptor_sets[transfer_image.id], sampler);
         result = image{ transfer_image };
+        return RETURN_TYPE();
 }
 
 RETURN_TYPE vulkan_display::copy_and_queue_image(std::byte* frame, image_description description) {
         image image;
         acquire_image(image, description);
-        transport_image(image.get_memory_ptr(), frame, description, image.get_row_pitch());
+        memcpy(image.get_memory_ptr(), frame, image.get_size().height * image.get_row_pitch());
         queue_image(image);
 }
 
+RETURN_TYPE vulkan_display::queue_image(image image) {
+        filled_img_queue.push(image);
+}
 
 RETURN_TYPE vulkan_display::display_queued_image() {
         auto window_parameters = window->get_window_parameters();
         if (window_parameters.width * window_parameters.height == 0) {
                 auto image = filled_img_queue.try_pop();
                 if (image.has_value()) {
-                        available_img_queue.push(*image);
+                        discard_image(*image);
                 }
                 return RETURN_TYPE();
         }
-        transfer_image* transfer_image_ptr = filled_img_queue.pop();
-        if (!transfer_image_ptr) {
+
+        auto image = filled_img_queue.pop();
+        if (!image.get_transfer_image()) {
                 return RETURN_TYPE();
         }
-        transfer_image& transfer_image = *transfer_image_ptr;
+
+        image.preprocess();
+
+        transfer_image& transfer_image = *image.get_transfer_image();
 
         auto& semaphores = image_semaphores[transfer_image.id];
 
@@ -475,7 +440,7 @@ RETURN_TYPE vulkan_display::display_queued_image() {
                         // window is minimalised
                         auto image = filled_img_queue.try_pop();
                         if (image.has_value()) {
-                                available_img_queue.push(*image);
+                                discard_image(*image);
                         }
                         return RETURN_TYPE();
                 }
@@ -513,7 +478,7 @@ RETURN_TYPE vulkan_display::display_queued_image() {
                 }
         }
 
-        available_img_queue.push(transfer_image_ptr);
+        available_img_queue.push(&transfer_image);
         return RETURN_TYPE();
 }
 
