@@ -11,19 +11,37 @@ vk::DeviceSize add_padding(vk::DeviceSize size, vk::DeviceSize allignment) {
         return size + allignment - remainder;
 }
 
+
+/**
+ * Check if the required flags are present among the provided flags
+ */
+template<typename T>
+bool flags_present(T provided_flags, T required_flags) {
+        return (provided_flags & required_flags) == required_flags;
+}
+
 RETURN_TYPE get_memory_type(
         uint32_t& memory_type, uint32_t memory_type_bits,
-        vk::MemoryPropertyFlags requested_properties, vk::PhysicalDevice gpu)
+        vk::MemoryPropertyFlags requested_properties, vk::MemoryPropertyFlags optional_properties,
+        vk::PhysicalDevice gpu)
 {
+        uint32_t possible_memory_type = UINT32_MAX;
         auto supported_properties = gpu.getMemoryProperties();
         for (uint32_t i = 0; i < supported_properties.memoryTypeCount; i++) {
+                // if i-th bit in memory_type_bits is set, than i-th memory type can be used
+                bool is_type_usable = (1 << i) & memory_type_bits;
                 auto& mem_type = supported_properties.memoryTypes[i];
-                if (((mem_type.propertyFlags & requested_properties) == requested_properties) &&
-                        ((1 << i) & memory_type_bits))
-                {
-                        memory_type = i;
-                        return RETURN_TYPE();
+                if (flags_present(mem_type.propertyFlags, requested_properties) && is_type_usable) {
+                        if (flags_present(mem_type.propertyFlags, optional_properties)) {
+                                memory_type = i;
+                                return RETURN_TYPE();
+                        }
+                        possible_memory_type = i;
                 }
+        }
+        if (possible_memory_type != UINT32_MAX) {
+                memory_type = possible_memory_type;
+                return RETURN_TYPE();
         }
         CHECK(false, "No available memory for transfer images found.");
         return RETURN_TYPE();
@@ -70,7 +88,7 @@ RETURN_TYPE transfer_image::create(vk::Device device, vk::PhysicalDevice gpu,
         using mem_bits = vk::MemoryPropertyFlagBits;
         uint32_t memory_type;
         PASS_RESULT(get_memory_type(memory_type, memory_requirements.memoryTypeBits,
-                mem_bits::eHostVisible | mem_bits::eHostCoherent, gpu));
+                mem_bits::eHostVisible | mem_bits::eHostCoherent, mem_bits::eHostCached, gpu));
 
         vk::MemoryAllocateInfo allocInfo{ byte_size , memory_type };
         CHECKED_ASSIGN(memory, device.allocateMemory(allocInfo));
