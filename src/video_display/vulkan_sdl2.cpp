@@ -104,7 +104,7 @@ using namespace std::string_literals;
 namespace {
 
 constexpr int MAGIC_VULKAN_SDL2 = 0x3cc234a2;
-constexpr int MAX_FRAME_COUNT = 2;
+constexpr int MAX_FRAME_COUNT = 5;
 #define MOD_NAME "[VULKAN_SDL2] "
 
 
@@ -130,18 +130,6 @@ public:
         }
 };
 
-void update_description(const video_desc& video_desc, video_frame& frame) {
-        frame.color_spec = video_desc.color_spec;
-        frame.fps = video_desc.fps;
-        frame.interlacing = video_desc.interlacing;
-        frame.tile_count = video_desc.tile_count;
-        for (unsigned i = 0; i < video_desc.tile_count; i++) {
-                frame.tiles[i].width = video_desc.width;
-                frame.tiles[i].height = video_desc.height;
-        }
-}
-
-
 struct state_vulkan_sdl2 {
         module                  mod;
 
@@ -158,7 +146,7 @@ struct state_vulkan_sdl2 {
 
 
         uint32_t                gpu_idx{ vkd::NO_GPU_SELECTED };
-        bool                    validation{ true }; // todo: change to false
+        bool                    validation{ false };//todo change to false
 
         bool                    fs{ false };
         bool                    deinterlace{ false };
@@ -203,6 +191,17 @@ constexpr std::array<std::pair<char, std::string_view>, 3> display_sdl2_keybindi
         {'f', "toggle fullscreen"},
         {'q', "quit"}
 }};
+
+void update_description(const video_desc& video_desc, video_frame& frame) {
+        frame.color_spec = video_desc.color_spec;
+        frame.fps = video_desc.fps;
+        frame.interlacing = video_desc.interlacing;
+        frame.tile_count = video_desc.tile_count;
+        for (unsigned i = 0; i < video_desc.tile_count; i++) {
+                frame.tiles[i].width = video_desc.width;
+                frame.tiles[i].height = video_desc.height;
+        }
+}
 
 int64_t translate_sdl_key_to_ug(SDL_Keysym sym) {
         sym.mod &= ~(KMOD_NUM | KMOD_CAPS); // remove num+caps lock modifiers
@@ -558,7 +557,7 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
 
         s->window = SDL_CreateWindow(window_title, x, y, width, height, window_flags);
         if (!s->window) {
-                log_msg(LOG_LEVEL_ERROR, MOD_NAME "Unable to create window : % s\n", SDL_GetError());
+                log_msg(LOG_LEVEL_ERROR, MOD_NAME "Unable to create window : %s\n", SDL_GetError());
                 return nullptr;
         }
         s->window_callback = ::window_callback{ s->window };
@@ -669,17 +668,13 @@ int display_sdl2_putf(void* state, video_frame* frame, int nonblock) {
         s->current_desc = video_desc_from_frame(frame);
         
 
-        bool deinterlace = s->deinterlace;
-        image.set_process_function( [deinterlace](vkd::image& image) 
-        {    
-                if (false) {
-                        vc_deinterlace(reinterpret_cast<unsigned char*>(image.get_memory_ptr()), 
-                                image.get_row_pitch(), 
-                                image.get_description().size.height);
-                }
-        });
-
-        //image.process(); image.set_process_function(nullptr);
+        if (s->deinterlace) {
+                image.set_process_function([](vkd::image& image) {
+                        vc_deinterlace(reinterpret_cast<unsigned char*>(image.get_memory_ptr()),
+                                image.get_row_pitch(),
+                                image.get_size().height);
+                });
+        }
         
         try {
                 s->vulkan->queue_image(s->images[id]);

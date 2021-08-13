@@ -64,6 +64,32 @@ RETURN_TYPE update_render_area_viewport_scissor(render_area& render_area, vk::Vi
         return RETURN_TYPE();
 }
 
+transfer_image& acquire_transfer_image(concurrent_queue<transfer_image*>& available_img_queue,
+        concurrent_queue<vulkan_display::image>& filled_img_queue, unsigned filled_img_max_count)
+{
+        // first try available_img_queue
+        auto maybe_transfer_image = available_img_queue.try_pop();
+        if (maybe_transfer_image.has_value()) {
+                assert(*maybe_transfer_image);
+                return **maybe_transfer_image;
+        }
+        // if available_img_queue is empty and filled_img_queue is almost full,
+        // take frame from filled_img_queue
+        {
+                auto [lock, deque] = filled_img_queue.get_underlying_deque();
+                while (deque.size() > filled_img_max_count) {
+                        vulkan_display::image front = deque.front();
+                        deque.pop_front();
+                        auto* front_image_ptr = front.get_transfer_image();
+                        if (front_image_ptr) {
+                                return *front_image_ptr;
+                        }
+                }
+        }
+        //else wait for frame from available_img_queue
+        return *available_img_queue.pop();
+}
+
 } //namespace -------------------------------------------------------------
 
 
@@ -286,6 +312,7 @@ RETURN_TYPE vulkan_display::init(VkSurfaceKHR surface, uint32_t transfer_image_c
         assert(surface);
         this->window = window;
         this->transfer_image_count = transfer_image_count;
+        this->filled_img_max_count = (transfer_image_count + 1) / 2;
         auto window_parameters = window->get_window_parameters();
         PASS_RESULT(context.init(surface, window_parameters, gpu_index));
         device = context.device;
@@ -301,7 +328,7 @@ RETURN_TYPE vulkan_display::init(VkSurfaceKHR surface, uint32_t transfer_image_c
         PASS_RESULT(allocate_description_sets());
 
         transfer_images.reserve(transfer_image_count);
-        auto& deque = available_img_queue.get_underlying_unsynchronized_deque();
+        auto[lock, deque] = available_img_queue.get_underlying_deque();
         for (uint32_t i = 0; i < transfer_image_count; i++) {
                 transfer_images.emplace_back(device, i);
                 //push_front - discarded images should be pushed at the front,
@@ -378,18 +405,26 @@ RETURN_TYPE vulkan_display::record_graphics_commands(transfer_image& transfer_im
 }
 
 RETURN_TYPE vulkan_display::acquire_image(image& result, image_description description) {
-        auto transfer_image_ptr = available_img_queue.pop();
-        transfer_image& transfer_image = *transfer_image_ptr;
-        
-        std::scoped_lock lock(device_mutex);
-        CHECK(device.waitForFences(transfer_image.is_available_fence, VK_TRUE, UINT64_MAX),
-                "Waiting for fence failed.");
 
-        if (transfer_image.description != description) {
-                //todo another formats
-                transfer_image.create(device, context.gpu, description);
+        transfer_image& transfer_image = acquire_transfer_image(available_img_queue, 
+                filled_img_queue, filled_img_max_count);
+        assert(transfer_image.id != transfer_image::NO_ID);
+        {
+                std::unique_lock device_lock(device_mutex, std::defer_lock);
+                if (transfer_image.fence_set) {
+                        device_lock.lock();
+                        CHECK(device.waitForFences(transfer_image.is_available_fence, VK_TRUE, UINT64_MAX),
+                                "Waiting for fence failed.");
+                }
+
+                if (transfer_image.description != description) {
+                        if (!device_lock.owns_lock()) {
+                                device_lock.lock();
+                        }
+                        //todo another formats
+                        transfer_image.create(device, context.gpu, description);
+                }
         }
-        transfer_image.update_description_set(device, descriptor_sets[transfer_image.id], sampler);
         result = image{ transfer_image };
         return RETURN_TYPE();
 }
@@ -434,7 +469,6 @@ RETURN_TYPE vulkan_display::display_queued_image() {
                 update_render_area_viewport_scissor(render_area, viewport, scissor,
                         { parameters.width, parameters.height }, current_image_description.size);
         }
-
         PASS_RESULT(context.acquire_next_swapchain_image(swapchain_image_id, semaphores.image_acquired));
         while (swapchain_image_id == SWAPCHAIN_IMAGE_OUT_OF_DATE) {
                 window_parameters = window->get_window_parameters();
@@ -449,9 +483,11 @@ RETURN_TYPE vulkan_display::display_queued_image() {
                 window_parameters_changed(window_parameters);
                 PASS_RESULT(context.acquire_next_swapchain_image(swapchain_image_id, semaphores.image_acquired));
         }
+        transfer_image.update_description_set(device, descriptor_sets[transfer_image.id], sampler);
         lock.unlock();
 
         record_graphics_commands(transfer_image, swapchain_image_id);
+        transfer_image.fence_set = true;
         device.resetFences(transfer_image.is_available_fence);
         std::vector<vk::PipelineStageFlags> wait_masks{ vk::PipelineStageFlagBits::eColorAttachmentOutput };
         vk::SubmitInfo submit_info{};

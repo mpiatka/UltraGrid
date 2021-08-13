@@ -70,7 +70,7 @@ class vulkan_display {
         concurrent_queue<transfer_image*> available_img_queue{};
         concurrent_queue<image> filled_img_queue{};
 
-
+        unsigned filled_img_max_count;
         bool minimalised = false;
 private:
 

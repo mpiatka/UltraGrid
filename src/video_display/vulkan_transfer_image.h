@@ -44,6 +44,7 @@ public:
 
         vk::DeviceSize row_pitch;
 
+        bool fence_set = false;       // true if waiting for is_available_fence is neccessary
         vk::Fence is_available_fence; // is_available_fence isn't signalled when gpu uses the image
 
         bool update_desciptor_set;
@@ -84,9 +85,10 @@ class image {
 public:
         image() = default;
         image(vulkan_display_detail::transfer_image& image) :
-                transfer_image{ &image } 
+                transfer_image{ &image }
         { 
                 assert(image.id != vulkan_display_detail::transfer_image::NO_ID);
+                transfer_image->preprocess_fun = nullptr;
         }
 
         uint32_t get_id() {

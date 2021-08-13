@@ -8,18 +8,15 @@
 
 template<typename T>
 class concurrent_queue {
-        std::condition_variable queue_non_empty{};
-        mutable std::mutex mutex{};
         std::deque<T> deque{};
+        mutable std::mutex mutex{};
 public:
+        std::condition_variable queue_non_empty{};
+
         concurrent_queue() = default;
 
-        std::mutex& get_mutex() {
-                return mutex;
-        }
-
-        std::deque<T>& get_underlying_unsynchronized_deque() {
-                return deque;
+        std::pair<std::unique_lock<std::mutex>, std::deque<T>&> get_underlying_deque() {
+                return { std::unique_lock{mutex}, deque };
         }
 
         bool empty() const {
@@ -33,18 +30,28 @@ public:
         }
 
         void push(const T& value) {
-                emplace(value);
+                emplace_back(value);
         }
 
         void push(T&& value) {
-                emplace(std::move(value));
+                emplace_back(std::move(value));
         }
 
         template<typename... Args>
-        void emplace(Args&&... args) {
-                std::unique_lock lock{ mutex };
-                deque.emplace_back(std::forward<Args>(args)...);
-                lock.unlock();
+        void emplace_back(Args&&... args) {
+                {
+                        std::scoped_lock lock{ mutex };
+                        deque.emplace_back(std::forward<Args>(args)...);
+                }
+                queue_non_empty.notify_one();
+        }
+
+        template<typename... Args>
+        void emplace_front(Args&&... args) {
+                {
+                        std::scoped_lock lock{ mutex };
+                        deque.emplace_front(std::forward<Args>(args)...);
+                }
                 queue_non_empty.notify_one();
         }
 
