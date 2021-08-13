@@ -619,7 +619,7 @@ static bool parse_holepunch_conf(char *conf, struct Holepunch_config *punch_c){
                         cout << "Usage:\n" <<
                                 "\tuv " << BOLD("-Nholepunch:room=<room>:(server=<host> | coord_srv=<host:port>:stun_srv=<host:port>)[:client_name=<name>] \n") <<
                                 "\twhere\n"
-                                "\t\t" << BOLD("server") << " - used if both stun & coord server are on the same host on standard ports (3478, 12345)\n"
+                                "\t\t" << BOLD("server") << " - used if both stun & coord server are on the same host on standard ports (3478, 12558)\n"
                                 "\t\t" << BOLD("room") << " - name of room to join\n"
                                 "\t\t" << BOLD("client_name") << " - name to identify as to the coord server, if not specified hostname is used\n"
                                 "\n";
@@ -666,7 +666,7 @@ static bool parse_holepunch_conf(char *conf, struct Holepunch_config *punch_c){
                         punch_c->coord_srv_addr = token;
 
                         punch_c->stun_srv_port = 3478;
-                        punch_c->coord_srv_port = 12345;
+                        punch_c->coord_srv_port = 12558;
                 } else if(strncmp(token, "room=", strlen("room=")) == 0){
                         token += strlen("room=");
                         punch_c->room_name = token;
