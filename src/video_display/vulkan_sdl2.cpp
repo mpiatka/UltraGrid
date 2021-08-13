@@ -418,37 +418,23 @@ int display_sdl2_reconfigure(void* state, video_desc desc) {
  * Function loads graphic data from header file "splashscreen.h", where are
  * stored splashscreen data in RGB format.
  */
-void drawSplashscreen(state_vulkan_sdl2* s) {
-        video_desc desc{};
+void draw_splashscreen(state_vulkan_sdl2* s) {
+        vkd::image image;
+        s->vulkan->acquire_image(image, {splash_width, splash_height, vk::Format::eR8G8B8A8Srgb});
 
-        desc.width = 512;
-        desc.height = 512;
-        desc.color_spec = RGBA;
-        desc.interlacing = PROGRESSIVE;
-        desc.fps = 1;
-        desc.tile_count = 1;
+        const char* source = splash_data;
+        char* dest = reinterpret_cast<char*>(image.get_memory_ptr());
+        auto padding = image.get_row_pitch() - splash_width * 4;
 
-        display_sdl2_reconfigure(s, desc);
-
-        video_frame* frame = display_sdl2_getf(s);
-
-        const char* data = splash_data;
-        memset(frame->tiles[0].data, 0, frame->tiles[0].data_len);
-        for (unsigned int y = 0; y < splash_height; ++y) {
-                char* line = frame->tiles[0].data;
-                line += vc_get_linesize(frame->tiles[0].width,
-                        frame->color_spec) *
-                        (((frame->tiles[0].height - splash_height) / 2) + y);
-                line += vc_get_linesize(
-                        (frame->tiles[0].width - splash_width) / 2,
-                        frame->color_spec);
-                for (unsigned int x = 0; x < splash_width; ++x) {
-                        HEADER_PIXEL(data, line);
-                        line += 4;
+        for (unsigned row = 0; row < splash_height; row++) {
+                for (unsigned int col = 0; col < splash_width; col++) {
+                        HEADER_PIXEL(source, dest);
+                        dest += 4;
                 }
+                dest += padding;
         }
 
-        display_sdl2_putf(s, frame, PUTF_BLOCKING);
+        s->vulkan->queue_image(image);
         s->vulkan->display_queued_image();
 }
 
@@ -602,7 +588,7 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
                 frame = video_frame{};
         }
 
-        drawSplashscreen(s);
+        draw_splashscreen(s);
         return (void*)s;
 }
 
