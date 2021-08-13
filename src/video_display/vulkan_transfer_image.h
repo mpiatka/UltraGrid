@@ -6,7 +6,7 @@ namespace vulkan_display {
 
 struct image_description {
         vk::Extent2D size;
-        vk::Format format;
+        vk::Format format{};
 
         image_description() = default;
         image_description(vk::Extent2D size, vk::Format format) :
@@ -32,22 +32,22 @@ namespace vulkan_display_detail {
 class transfer_image {
         vk::DeviceMemory memory;
         vk::Image image;
-        vk::ImageLayout layout;
+        vk::ImageLayout layout{};
         vk::AccessFlags access;
 
 public:
         static constexpr uint32_t NO_ID = UINT32_MAX;
-        uint32_t id;
+        uint32_t id = NO_ID;
         vk::ImageView view;
-        std::byte* ptr;
+        std::byte* ptr = nullptr;
         vulkan_display::image_description description;
 
-        vk::DeviceSize row_pitch;
+        vk::DeviceSize row_pitch = 0;
 
         bool fence_set = false;       // true if waiting for is_available_fence is neccessary
         vk::Fence is_available_fence; // is_available_fence isn't signalled when gpu uses the image
 
-        bool update_desciptor_set;
+        bool update_desciptor_set = true;
         vk::Sampler sampler;
 
         using preprocess_function = std::function<void(vulkan_display::image& image)>;
@@ -84,7 +84,7 @@ class image {
         vulkan_display_detail::transfer_image* transfer_image = nullptr;
 public:
         image() = default;
-        image(vulkan_display_detail::transfer_image& image) :
+        explicit image(vulkan_display_detail::transfer_image& image) :
                 transfer_image{ &image }
         { 
                 assert(image.id != vulkan_display_detail::transfer_image::NO_ID);

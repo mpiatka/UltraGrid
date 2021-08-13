@@ -7,14 +7,11 @@
 
 #include <vulkan/vulkan.hpp>
 
+#include <memory>
 #include <string>
 
 
 namespace vulkan_display_detail {
-
-inline vk::Result to_vk_result(void) {
-        return vk::Result::eSuccess;
-}
 
 inline vk::Result to_vk_result(bool b) {
         return b ? vk::Result::eSuccess : vk::Result::eErrorUnknown;
@@ -63,7 +60,7 @@ extern std::string vulkan_display_error_message;
 
 struct  vulkan_display_exception : public std::runtime_error {
         vulkan_display_exception() = default;
-        vulkan_display_exception(const std::string& msg) :
+        explicit vulkan_display_exception(const std::string& msg) :
                 std::runtime_error{ msg } { }
 };
 
@@ -73,7 +70,7 @@ struct  vulkan_display_exception : public std::runtime_error {
 
 #define CHECK(expr, msg) { if (to_vk_result(expr) != vk::Result::eSuccess) throw vulkan_display_exception{msg}; }
 
-#define CHECKED_ASSIGN(variable, expr) { variable = expr; }
+#define CHECKED_ASSIGN(variable, expr) { (variable) = (expr); }
 
 #endif //NO_EXCEPTIONS -------------------------------------------------------
 
@@ -113,8 +110,8 @@ constexpr uint32_t SWAPCHAIN_IMAGE_OUT_OF_DATE = UINT32_MAX;
 struct vulkan_context {
         vk::Instance instance;
 
-        bool validation_enabled;
-        std::unique_ptr<vk::DispatchLoaderDynamic> dynamic_dispatch_loader;
+        bool validation_enabled = true;
+        std::unique_ptr<vk::DispatchLoaderDynamic> dynamic_dispatch_loader{};
         vk::DebugUtilsMessengerEXT messenger;
 
         vk::PhysicalDevice gpu;
@@ -136,10 +133,10 @@ struct vulkan_context {
                 vk::ImageView view;
                 vk::Framebuffer framebuffer;
         };
-        std::vector<swapchain_image> swapchain_images;
+        std::vector<swapchain_image> swapchain_images{};
 
         vk::Extent2D window_size{ 0, 0 };
-        bool vsync;
+        bool vsync = true;
 
 private:
 
@@ -173,12 +170,6 @@ public:
         using window_parameters = vulkan_display::window_parameters;
 
         vulkan_context() = default;
-        vulkan_context(const vulkan_context& other) = delete;
-        vulkan_context& operator=(const vulkan_context& other) = delete;
-        vulkan_context(vulkan_context&& other) = delete;
-        vulkan_context& operator=(vulkan_context&& other) = delete;
-
-        ~vulkan_context();
 
         RETURN_TYPE create_instance(std::vector<const char*>& required_extensions, bool enable_validation);
 
@@ -186,9 +177,11 @@ public:
 
         RETURN_TYPE init(VkSurfaceKHR surface, window_parameters, uint32_t gpu_index);
 
+        RETURN_TYPE destroy();
+
         RETURN_TYPE create_framebuffers(vk::RenderPass render_pass);
 
-        RETURN_TYPE acquire_next_swapchain_image(uint32_t& image_index, vk::Semaphore acquire_semaphore);
+        RETURN_TYPE acquire_next_swapchain_image(uint32_t& image_index, vk::Semaphore acquire_semaphore) const;
 
         vk::Framebuffer get_framebuffer(uint32_t framebuffer_id) {
                 return swapchain_images[framebuffer_id].framebuffer;

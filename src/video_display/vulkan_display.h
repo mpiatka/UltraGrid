@@ -31,9 +31,9 @@ class vulkan_display {
         window_changed_callback* window = nullptr;
         vulkan_display_detail::vulkan_context context;
         vk::Device device;
-        std::mutex device_mutex;
+        std::mutex device_mutex{};
 
-        vulkan_display_detail::render_area render_area;
+        vulkan_display_detail::render_area render_area{};
         vk::Viewport viewport;
         vk::Rect2D scissor;
 
@@ -46,13 +46,13 @@ class vulkan_display {
         vk::Sampler sampler{};
         vk::DescriptorSetLayout descriptor_set_layout;
         vk::DescriptorPool descriptor_pool;
-        std::vector<vk::DescriptorSet> descriptor_sets;
+        std::vector<vk::DescriptorSet> descriptor_sets{};
 
         vk::PipelineLayout pipeline_layout;
         vk::Pipeline pipeline;
 
         vk::CommandPool command_pool;
-        std::vector<vk::CommandBuffer> command_buffers;
+        std::vector<vk::CommandBuffer> command_buffers{};
 
 
         struct image_semaphores {
@@ -63,15 +63,16 @@ class vulkan_display {
 
 
         using transfer_image = vulkan_display_detail::transfer_image;
-        unsigned transfer_image_count;
+        unsigned transfer_image_count = 0;
         std::vector<transfer_image> transfer_images{};
         image_description current_image_description;
 
         concurrent_queue<transfer_image*> available_img_queue{};
         concurrent_queue<image> filled_img_queue{};
 
-        unsigned filled_img_max_count;
+        unsigned filled_img_max_count = 0;
         bool minimalised = false;
+        bool destroyed = false;
 private:
 
         RETURN_TYPE create_texture_sampler();
@@ -98,12 +99,17 @@ private:
 
 public:
         vulkan_display() = default;
+
         vulkan_display(const vulkan_display& other) = delete;
         vulkan_display& operator=(const vulkan_display& other) = delete;
         vulkan_display(vulkan_display&& other) = delete;
         vulkan_display& operator=(vulkan_display&& other) = delete;
 
-        ~vulkan_display();
+        ~vulkan_display() noexcept {
+                if (!destroyed) {
+                        destroy();
+                }
+        }
 
         /**
          * @param required_extensions   Vulkan instance extensions requested by aplication,
@@ -130,6 +136,8 @@ public:
         RETURN_TYPE init(VkSurfaceKHR surface, uint32_t transfer_image_count,
                 window_changed_callback* window, uint32_t gpu_index = NO_GPU_SELECTED);
 
+        RETURN_TYPE destroy();
+
         RETURN_TYPE acquire_image(image& image, image_description description);
 
         RETURN_TYPE queue_image(image img);
@@ -137,9 +145,10 @@ public:
         RETURN_TYPE copy_and_queue_image(std::byte* frame, image_description description);
 
         RETURN_TYPE discard_image(image image) {
-                auto ptr = image.get_transfer_image();
+                auto* ptr = image.get_transfer_image();
                 assert(ptr);
                 available_img_queue.push(ptr);
+                return RETURN_TYPE();
         }
 
         RETURN_TYPE display_queued_image();

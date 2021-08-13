@@ -10,13 +10,16 @@ template<typename T>
 class concurrent_queue {
         std::deque<T> deque{};
         mutable std::mutex mutex{};
-public:
         std::condition_variable queue_non_empty{};
-
+public:
         concurrent_queue() = default;
 
         std::pair<std::unique_lock<std::mutex>, std::deque<T>&> get_underlying_deque() {
                 return { std::unique_lock{mutex}, deque };
+        }
+
+        std::condition_variable& get_queue_non_empty_condition_var() {
+                return queue_non_empty;
         }
 
         bool empty() const {

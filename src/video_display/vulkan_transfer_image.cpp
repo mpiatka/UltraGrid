@@ -6,8 +6,9 @@ namespace {
 
 vk::DeviceSize add_padding(vk::DeviceSize size, vk::DeviceSize allignment) {
         vk::DeviceSize remainder = size % allignment;
-        if (remainder == 0)
+        if (remainder == 0) {
                 return size;
+        }
         return size + allignment - remainder;
 }
 
@@ -29,7 +30,7 @@ RETURN_TYPE get_memory_type(
         auto supported_properties = gpu.getMemoryProperties();
         for (uint32_t i = 0; i < supported_properties.memoryTypeCount; i++) {
                 // if i-th bit in memory_type_bits is set, than i-th memory type can be used
-                bool is_type_usable = (1 << i) & memory_type_bits;
+                bool is_type_usable = (1u << i) & memory_type_bits;
                 auto& mem_type = supported_properties.memoryTypes[i];
                 if (flags_present(mem_type.propertyFlags, requested_properties) && is_type_usable) {
                         if (flags_present(mem_type.propertyFlags, optional_properties)) {
@@ -55,6 +56,7 @@ RETURN_TYPE transfer_image::init(vk::Device device, uint32_t id) {
         this->id = id;
         vk::FenceCreateInfo fence_info{ vk::FenceCreateFlagBits::eSignaled };
         CHECKED_ASSIGN(is_available_fence, device.createFence(fence_info));
+        return RETURN_TYPE();
 }
 
 RETURN_TYPE transfer_image::create(vk::Device device, vk::PhysicalDevice gpu,
@@ -86,7 +88,7 @@ RETURN_TYPE transfer_image::create(vk::Device device, vk::PhysicalDevice gpu,
         vk::DeviceSize byte_size = add_padding(memory_requirements.size, memory_requirements.alignment);
 
         using mem_bits = vk::MemoryPropertyFlagBits;
-        uint32_t memory_type;
+        uint32_t memory_type = 0;
         PASS_RESULT(get_memory_type(memory_type, memory_requirements.memoryTypeBits,
                 mem_bits::eHostVisible | mem_bits::eHostCoherent, mem_bits::eHostCached, gpu));
 
@@ -95,7 +97,7 @@ RETURN_TYPE transfer_image::create(vk::Device device, vk::PhysicalDevice gpu,
 
         PASS_RESULT(device.bindImageMemory(image, memory, 0));
 
-        void* void_ptr;
+        void* void_ptr = nullptr;
         CHECKED_ASSIGN(void_ptr, device.mapMemory(memory, 0, memory_requirements.size));
         CHECK(void_ptr != nullptr, "Image memory cannot be mapped.");
         ptr = reinterpret_cast<std::byte*>(void_ptr);
@@ -106,6 +108,7 @@ RETURN_TYPE transfer_image::create(vk::Device device, vk::PhysicalDevice gpu,
 
         vk::ImageSubresource subresource{ vk::ImageAspectFlagBits::eColor, 0, 0 };
         row_pitch = device.getImageSubresourceLayout(image, subresource).rowPitch;
+        return RETURN_TYPE();
 }
 
 vk::ImageMemoryBarrier  transfer_image::create_memory_barrier(
@@ -151,8 +154,8 @@ RETURN_TYPE transfer_image::update_description_set(vk::Device device, vk::Descri
                         .setDstSet(descriptor_set);
 
                 device.updateDescriptorSets(descriptor_writes, nullptr);
-                return RETURN_TYPE();
         }
+        return RETURN_TYPE();
 }
 
 RETURN_TYPE transfer_image::destroy(vk::Device device, bool destroy_fence) {
@@ -171,6 +174,7 @@ RETURN_TYPE transfer_image::destroy(vk::Device device, bool destroy_fence) {
         if (destroy_fence) {
                 device.destroy(is_available_fence);
         }
+        return RETURN_TYPE();
 }
 
 } //vulkan_display_detail

@@ -24,7 +24,7 @@ RETURN_TYPE create_shader(vk::ShaderModule& shader,
         auto size = std::filesystem::file_size(file_path);
         assert(size % 4 == 0);
         std::vector<std::uint32_t> shader_code(size / 4);
-        file.read(reinterpret_cast<char*>(shader_code.data()), size);
+        file.read(reinterpret_cast<char*>(shader_code.data()), static_cast<std::streamsize>(size));
         CHECK(file.good(), "Error reading from file:"s + file_path.string());
 
         vk::ShaderModuleCreateInfo shader_info;
@@ -338,28 +338,32 @@ RETURN_TYPE vulkan_display::init(VkSurfaceKHR surface, uint32_t transfer_image_c
         return RETURN_TYPE();
 }
 
-vulkan_display::~vulkan_display() {
-        if (device) {
-                // static_cast to disable nodiscard warning
-                static_cast<void>(device.waitIdle());
-                device.destroy(descriptor_pool);
+RETURN_TYPE vulkan_display::destroy() {
+        if (!destroyed) {
+                destroyed = true;
+                if (device) {
+                        PASS_RESULT(device.waitIdle());
+                        device.destroy(descriptor_pool);
 
-                for (auto& image : transfer_images) {
-                        image.destroy(device);
+                        for (auto& image : transfer_images) {
+                                PASS_RESULT(image.destroy(device));
+                        }
+                        device.destroy(command_pool);
+                        device.destroy(render_pass);
+                        device.destroy(fragment_shader);
+                        device.destroy(vertex_shader);
+                        for (auto& image_semaphores : image_semaphores) {
+                                device.destroy(image_semaphores.image_acquired);
+                                device.destroy(image_semaphores.image_rendered);
+                        }
+                        device.destroy(pipeline);
+                        device.destroy(pipeline_layout);
+                        device.destroy(descriptor_set_layout);
+                        device.destroy(sampler);
                 }
-                device.destroy(command_pool);
-                device.destroy(render_pass);
-                device.destroy(fragment_shader);
-                device.destroy(vertex_shader);
-                for (auto& image_semaphores : image_semaphores) {
-                        device.destroy(image_semaphores.image_acquired);
-                        device.destroy(image_semaphores.image_rendered);
-                }
-                device.destroy(pipeline);
-                device.destroy(pipeline_layout);
-                device.destroy(descriptor_set_layout);
-                device.destroy(sampler);
+                context.destroy();
         }
+        return RETURN_TYPE();
 }
 
 RETURN_TYPE vulkan_display::record_graphics_commands(transfer_image& transfer_image, uint32_t swapchain_image_id) {
@@ -434,10 +438,12 @@ RETURN_TYPE vulkan_display::copy_and_queue_image(std::byte* frame, image_descrip
         acquire_image(image, description);
         memcpy(image.get_memory_ptr(), frame, image.get_size().height * image.get_row_pitch());
         queue_image(image);
+        return RETURN_TYPE();
 }
 
 RETURN_TYPE vulkan_display::queue_image(image image) {
         filled_img_queue.push(image);
+        return RETURN_TYPE();
 }
 
 RETURN_TYPE vulkan_display::display_queued_image() {
@@ -461,7 +467,7 @@ RETURN_TYPE vulkan_display::display_queued_image() {
 
         auto& semaphores = image_semaphores[transfer_image.id];
 
-        uint32_t swapchain_image_id;
+        uint32_t swapchain_image_id = 0;
         std::unique_lock lock(device_mutex);
         if (transfer_image.description != current_image_description) {
                 current_image_description = transfer_image.description;
