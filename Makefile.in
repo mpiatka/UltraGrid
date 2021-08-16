@@ -493,15 +493,21 @@ $(GUI_TARGET): $(wildcard $(srcdir)/gui/QT/*.cpp $(srcdir)/gui/QT/*.hpp) $(srcdi
 
 
 VULKAN_ENABLED=$(findstring vulkan, $(OBJS))
+VULKAN_SHADER_FILES=bin/shaders/vert.spv bin/shaders/frag.spv
 
-VULKAN_SHADER_PATH=$(srcdir)/src/video_display/vulkan_shaders
-VULKAN_SHADER_FILES=$(VULKAN_SHADER_PATH)/vert.spv $(VULKAN_SHADER_PATH)/frag.spv
-
-vulkan_shaders: $(VULKAN_SHADER_FILES)
 ifneq ( ,$(VULKAN_ENABLED))
-	$(MKDIR_P) bin/shaders/
-	cp --target-directory=bin/shaders/  $(VULKAN_SHADER_FILES)
+# if vulkan is enabled:
+vulkan_shaders: $(VULKAN_SHADER_FILES)
+else
+# else do nothing:
+vulkan_shaders:
+	@:
 endif
+
+
+bin/shaders/%.spv: $(srcdir)/src/video_display/vulkan_shaders/%.spv
+	$(MKDIR_P) $(dir $@)
+	cp $< $@
 
 
 # -------------------------------------------------------------------------------------------------
