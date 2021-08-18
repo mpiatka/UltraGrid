@@ -181,9 +181,8 @@ RETURN_TYPE choose_gpu_by_index(vk::PhysicalDevice& gpu, std::vector<vk::Physica
 }
 
 vk::CompositeAlphaFlagBitsKHR get_composite_alpha(vk::CompositeAlphaFlagsKHR capabilities) {
-        using underlying = std::underlying_type_t<vk::CompositeAlphaFlagBitsKHR>;
-        underlying result = 1;
-        while (!(result & static_cast<underlying>(capabilities))) {
+        uint32_t result = 1;
+        while (!(result & static_cast<uint32_t>(capabilities))) {
                 result <<= 1u;
         }
         return static_cast<vk::CompositeAlphaFlagBitsKHR>(result);
@@ -214,8 +213,10 @@ RETURN_TYPE vulkan_context::create_instance(std::vector<c_str>& required_extensi
         vk::InstanceCreateInfo instance_info{};
         instance_info
                 .setPApplicationInfo(&app_info)
-                .setPEnabledLayerNames(validation_layers)
-                .setPEnabledExtensionNames(required_extensions);
+                .setEnabledLayerCount(static_cast<uint32_t>(validation_layers.size()))
+                .setPpEnabledLayerNames(validation_layers.data())
+                .setEnabledExtensionCount(static_cast<uint32_t>(required_extensions.size()))
+                .setPpEnabledExtensionNames(required_extensions.data());
         CHECKED_ASSIGN(instance, vk::createInstance(instance_info));
 
         if (enable_validation) {
@@ -268,7 +269,7 @@ RETURN_TYPE vulkan_context::create_physical_device(uint32_t gpu_index) {
                 PASS_RESULT(is_gpu_suitable(suitable, true, gpu, surface));
         }
         auto properties = gpu.getProperties();
-        std::cout << "Vulkan uses GPU called: "s + properties.deviceName.data() << std::endl;
+        std::cout << "Vulkan uses GPU called: "s << properties.deviceName << std::endl;
         return RETURN_TYPE();
 }
 
@@ -287,7 +288,8 @@ RETURN_TYPE vulkan_context::create_logical_device() {
         device_info
                 .setQueueCreateInfoCount(1)
                 .setPQueueCreateInfos(&queue_info)
-                .setPEnabledExtensionNames(required_gpu_extensions);
+                .setEnabledExtensionCount(static_cast<uint32_t>(required_gpu_extensions.size()))
+                .setPpEnabledExtensionNames(required_gpu_extensions.data());
 
         CHECKED_ASSIGN(device, gpu.createDevice(device_info));
         return RETURN_TYPE();
@@ -417,7 +419,9 @@ RETURN_TYPE vulkan_context::create_framebuffers(vk::RenderPass render_pass) {
                 .setLayers(1);
 
         for(auto& swapchain_image : swapchain_images){
-                framebuffer_info.setAttachments(swapchain_image.view);
+                framebuffer_info
+                        .setAttachmentCount(1)
+                        .setPAttachments(&swapchain_image.view);
                 CHECKED_ASSIGN(swapchain_image.framebuffer, device.createFramebuffer(framebuffer_info));
         }
         return RETURN_TYPE();
@@ -465,6 +469,7 @@ RETURN_TYPE vulkan_context::destroy() {
                 }
                 instance.destroy();
         }
+        return RETURN_TYPE();
 }
 
 

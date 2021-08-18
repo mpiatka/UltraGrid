@@ -28,7 +28,9 @@ RETURN_TYPE create_shader(vk::ShaderModule& shader,
         CHECK(file.good(), "Error reading from file:"s + file_path.string());
 
         vk::ShaderModuleCreateInfo shader_info;
-        shader_info.setCode(shader_code);
+        shader_info
+                .setCodeSize(shader_code.size() * 4)
+                .setPCode(shader_code.data());
         CHECKED_ASSIGN(shader, device.createShaderModule(shader_info));
         return RETURN_TYPE();
 }
@@ -122,7 +124,9 @@ RETURN_TYPE vulkan_display::create_render_pass() {
                 .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
                 .setInitialLayout(vk::ImageLayout::eUndefined)
                 .setFinalLayout(vk::ImageLayout::ePresentSrcKHR);
-        render_pass_info.setAttachments(color_attachment);
+        render_pass_info
+                .setAttachmentCount(1)
+                .setPAttachments(&color_attachment);
 
         vk::AttachmentReference attachment_reference;
         attachment_reference
@@ -131,8 +135,11 @@ RETURN_TYPE vulkan_display::create_render_pass() {
         vk::SubpassDescription subpass;
         subpass
                 .setPipelineBindPoint(vk::PipelineBindPoint::eGraphics)
-                .setColorAttachments(attachment_reference);
-        render_pass_info.setSubpasses(subpass);
+                .setColorAttachmentCount(1)
+                .setPColorAttachments(&attachment_reference);
+        render_pass_info
+                .setSubpassCount(1)
+                .setPSubpasses(&subpass);
 
         vk::SubpassDependency subpass_dependency{};
         subpass_dependency
@@ -141,7 +148,9 @@ RETURN_TYPE vulkan_display::create_render_pass() {
                 .setSrcStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput)
                 .setDstStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput)
                 .setDstAccessMask(vk::AccessFlagBits::eColorAttachmentWrite);
-        render_pass_info.setDependencies(subpass_dependency);
+        render_pass_info
+                .setDependencyCount(1)
+                .setPDependencies(&subpass_dependency);
 
         CHECKED_ASSIGN(render_pass, device.createRenderPass(render_pass_info));
 
@@ -159,11 +168,12 @@ RETURN_TYPE vulkan_display::create_descriptor_set_layout() {
                 .setDescriptorCount(1)
                 .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
                 .setStageFlags(vk::ShaderStageFlagBits::eFragment)
-                .setImmutableSamplers(sampler);
+                .setPImmutableSamplers(&sampler);
 
         vk::DescriptorSetLayoutCreateInfo descriptor_set_layout_info{};
         descriptor_set_layout_info
-                .setBindings(descriptor_set_layout_bindings);
+                .setBindingCount(1)
+                .setPBindings(&descriptor_set_layout_bindings);
 
         CHECKED_ASSIGN(descriptor_set_layout,
                 device.createDescriptorSetLayout(descriptor_set_layout_info));
@@ -180,9 +190,11 @@ RETURN_TYPE vulkan_display::create_graphics_pipeline() {
                 .setOffset(0)
                 .setSize(sizeof(render_area))
                 .setStageFlags(vk::ShaderStageFlagBits::eFragment);
-        pipeline_layout_info.setPushConstantRanges(push_constants);
-
-        pipeline_layout_info.setSetLayouts(descriptor_set_layout);
+        pipeline_layout_info
+                .setPushConstantRangeCount(1)
+                .setPPushConstantRanges(&push_constants)
+                .setSetLayoutCount(1)
+                .setPSetLayouts(&descriptor_set_layout);
         CHECKED_ASSIGN(pipeline_layout, device.createPipelineLayout(pipeline_layout_info));
 
         vk::GraphicsPipelineCreateInfo pipeline_info{};
@@ -196,7 +208,9 @@ RETURN_TYPE vulkan_display::create_graphics_pipeline() {
                 .setModule(fragment_shader)
                 .setPName("main")
                 .setStage(vk::ShaderStageFlagBits::eFragment);
-        pipeline_info.setStages(shader_stages_infos);
+        pipeline_info
+                .setStageCount(static_cast<uint32_t>(shader_stages_infos.size()))
+                .setPStages(shader_stages_infos.data());
 
         vk::PipelineVertexInputStateCreateInfo vertex_input_state_info{};
         pipeline_info.setPVertexInputState(&vertex_input_state_info);
@@ -229,12 +243,16 @@ RETURN_TYPE vulkan_display::create_graphics_pipeline() {
                 .setBlendEnable(false)
                 .setColorWriteMask(color_flags::eR | color_flags::eG | color_flags::eB | color_flags::eA);
         vk::PipelineColorBlendStateCreateInfo color_blend_info{};
-        color_blend_info.setAttachments(color_blend_attachment);
+        color_blend_info
+                .setAttachmentCount(1)
+                .setPAttachments(&color_blend_attachment);
         pipeline_info.setPColorBlendState(&color_blend_info);
 
         std::array dynamic_states{ vk::DynamicState::eViewport, vk::DynamicState::eScissor };
         vk::PipelineDynamicStateCreateInfo dynamic_state_info{};
-        dynamic_state_info.setDynamicStates(dynamic_states);
+        dynamic_state_info
+                .setDynamicStateCount(static_cast<uint32_t>(dynamic_states.size()))
+                .setPDynamicStates(dynamic_states.data());
         pipeline_info.setPDynamicState(&dynamic_state_info);
 
         pipeline_info
@@ -290,7 +308,8 @@ RETURN_TYPE vulkan_display::allocate_description_sets() {
                 .setDescriptorCount(transfer_image_count);
         vk::DescriptorPoolCreateInfo pool_info{};
         pool_info
-                .setPoolSizes(descriptor_sizes)
+                .setPoolSizeCount(1)
+                .setPPoolSizes(&descriptor_sizes)
                 .setMaxSets(transfer_image_count);
         CHECKED_ASSIGN(descriptor_pool, device.createDescriptorPool(pool_info));
 
@@ -299,7 +318,8 @@ RETURN_TYPE vulkan_display::allocate_description_sets() {
         vk::DescriptorSetAllocateInfo allocate_info;
         allocate_info
                 .setDescriptorPool(descriptor_pool)
-                .setSetLayouts(layouts);
+                .setDescriptorSetCount(static_cast<uint32_t>(layouts.size()))
+                .setPSetLayouts(layouts.data());
 
         CHECKED_ASSIGN(descriptor_sets, device.allocateDescriptorSets(allocate_info));
 
@@ -368,7 +388,7 @@ RETURN_TYPE vulkan_display::destroy() {
 
 RETURN_TYPE vulkan_display::record_graphics_commands(transfer_image& transfer_image, uint32_t swapchain_image_id) {
         vk::CommandBuffer& cmd_buffer = command_buffers[transfer_image.id];
-        cmd_buffer.reset();
+        cmd_buffer.reset(vk::CommandBufferResetFlags{});
 
         vk::CommandBufferBeginInfo begin_info{};
         begin_info.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
@@ -383,7 +403,8 @@ RETURN_TYPE vulkan_display::record_graphics_commands(transfer_image& transfer_im
         render_pass_begin_info
                 .setRenderPass(render_pass)
                 .setRenderArea(vk::Rect2D{ {0,0}, context.window_size })
-                .setClearValues(clear_color)
+                .setClearValueCount(1)
+                .setPClearValues(&clear_color)
                 .setFramebuffer(context.get_framebuffer(swapchain_image_id));
         cmd_buffer.beginRenderPass(render_pass_begin_info, vk::SubpassContents::eInline);
 
@@ -498,18 +519,23 @@ RETURN_TYPE vulkan_display::display_queued_image() {
         std::vector<vk::PipelineStageFlags> wait_masks{ vk::PipelineStageFlagBits::eColorAttachmentOutput };
         vk::SubmitInfo submit_info{};
         submit_info
-                .setCommandBuffers(command_buffers[transfer_image.id])
-                .setWaitDstStageMask(wait_masks)
-                .setWaitSemaphores(semaphores.image_acquired)
-                .setSignalSemaphores(semaphores.image_rendered);
+                .setCommandBufferCount(1)
+                .setPCommandBuffers(&command_buffers[transfer_image.id])
+                .setPWaitDstStageMask(wait_masks.data())
+                .setWaitSemaphoreCount(1)
+                .setPWaitSemaphores(&semaphores.image_acquired)
+                .setSignalSemaphoreCount(1)
+                .setPSignalSemaphores(&semaphores.image_rendered);
 
         PASS_RESULT(context.queue.submit(submit_info, transfer_image.is_available_fence));
 
         vk::PresentInfoKHR present_info{};
         present_info
-                .setImageIndices(swapchain_image_id)
-                .setSwapchains(context.swapchain)
-                .setWaitSemaphores(semaphores.image_rendered);
+                .setPImageIndices(&swapchain_image_id)
+                .setSwapchainCount(1)
+                .setPSwapchains(&context.swapchain)
+                .setWaitSemaphoreCount(1)
+                .setPWaitSemaphores(&semaphores.image_rendered);
 
         auto present_result = context.queue.presentKHR(&present_info);
         if (present_result != vk::Result::eSuccess) {

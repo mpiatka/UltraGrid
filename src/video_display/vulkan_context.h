@@ -6,6 +6,9 @@
 #endif //NO_EXCEPTIONS
 
 #include <vulkan/vulkan.hpp>
+//remove leaking macros
+#undef min
+#undef max
 
 #include <memory>
 #include <string>
@@ -59,7 +62,6 @@ extern std::string vulkan_display_error_message;
 #include<exception>
 
 struct  vulkan_display_exception : public std::runtime_error {
-        vulkan_display_exception() = default;
         explicit vulkan_display_exception(const std::string& msg) :
                 std::runtime_error{ msg } { }
 };
@@ -150,7 +152,7 @@ private:
 
         RETURN_TYPE get_surface_format();
 
-        RETURN_TYPE create_swap_chain(vk::SwapchainKHR old_swap_chain = VK_NULL_HANDLE);
+        RETURN_TYPE create_swap_chain(vk::SwapchainKHR old_swap_chain = vk::SwapchainKHR{});
 
         RETURN_TYPE create_swapchain_views();
 
