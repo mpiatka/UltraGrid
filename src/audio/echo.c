@@ -45,6 +45,8 @@
 #include "debug.h"
 #include "echo.h"
 
+#include "tinywav.h"
+
 #include <speex/speex_echo.h>
 
 #include <stdlib.h>
@@ -60,6 +62,8 @@ struct echo_cancellation {
         char *near_end_residual;
         int near_end_residual_size;
         ring_buffer_t *far_end;
+
+		TinyWav tw;
 
         struct audio_frame frame;
 
@@ -86,17 +90,26 @@ static void reconfigure_echo (struct echo_cancellation *s, int sample_rate, int 
         s->far_end = ring_buffer_init(sample_rate * 2 / 2); // 0.5 sec
 
         speex_echo_ctl(s->echo_state, SPEEX_ECHO_SET_SAMPLING_RATE, &sample_rate); // should the 3rd parameter be int?
+
+		if(tinywav_isOpen(&s->tw)){
+			tinywav_close_write(&s->tw);
+		}
+
+		tinywav_open_write(&s->tw, 3, sample_rate, TW_INT16, TW_SPLIT, "uv_echo_input.wav");
+		printf("Sample rate %d\n", sample_rate);
 }
 
 struct echo_cancellation * echo_cancellation_init(void)
 {
-        struct echo_cancellation *s = (struct echo_cancellation *) malloc(sizeof(struct echo_cancellation));
+        struct echo_cancellation *s = (struct echo_cancellation *) calloc(1, sizeof(struct echo_cancellation));
 
         s->echo_state = speex_echo_state_init(SAMPLES_PER_FRAME, FILTER_LENGTH);
 
         s->frame.data = NULL;
         s->frame.sample_rate = s->frame.bps = 0;
         pthread_mutex_init(&s->lock, NULL);
+
+		s->tw.f = NULL;
 
         printf("Echo cancellation initialized.\n");
 
@@ -112,6 +125,10 @@ void echo_cancellation_destroy(struct echo_cancellation *s)
         free(s->near_end_residual);
 
         pthread_mutex_destroy(&s->lock);
+
+		if(tinywav_isOpen(&s->tw)){
+			tinywav_close_write(&s->tw);
+		}
 
         free(s);
 }
@@ -135,15 +152,15 @@ void echo_play(struct echo_cancellation *s, struct audio_frame *frame)
                 return;
         }
 
-        if(frame->bps != 2) {
-                char *tmp = malloc(frame->data_len / frame->bps * 2);
-                change_bps(tmp, 2, frame->data, frame->bps, frame->data_len/* bytes */);
-                ring_buffer_write(s->far_end, tmp, frame->data_len / frame->bps * 2);
-                free(tmp);
-        } else {
-                ring_buffer_write(s->far_end, frame->data, frame->data_len);
-        }
-
+		if(frame->bps != 2) {
+			char *tmp = malloc(frame->data_len / frame->bps * 2);
+			change_bps(tmp, 2, frame->data, frame->bps, frame->data_len/* bytes */);
+			ring_buffer_write(s->far_end, tmp, frame->data_len / frame->bps * 2);
+			free(tmp);
+		} else {
+			printf("Play request, saving %d\n", frame->data_len);
+			ring_buffer_write(s->far_end, frame->data, frame->data_len);
+		}
 
         pthread_mutex_unlock(&s->lock);
 }
@@ -182,9 +199,12 @@ struct audio_frame * echo_cancel(struct echo_cancellation *s, struct audio_frame
                 data = frame->data;
                 data_len = frame->data_len;
         }
+
+		printf("Cancel request %d\n", data_len);
         
         const int chunk_size = SAMPLES_PER_FRAME * 2 /* BPS */;
         const int rounded_data_len = (s->near_end_residual_size + data_len) / chunk_size * chunk_size;
+
 
         if(rounded_data_len) {
                 char *data_to_write = malloc(rounded_data_len);
@@ -208,20 +228,43 @@ struct audio_frame * echo_cancel(struct echo_cancellation *s, struct audio_frame
                 const spx_int16_t *near_ptr = (spx_int16_t *)(void *) data_to_write;
                 spx_int16_t *out_ptr = (spx_int16_t *)(void *) s->frame.data;
 
-                int read_len_far;
-                read_len_far = ring_buffer_read(s->far_end, far_end_tmp, chunk_size);
+                int read_len_far = 0;
+				printf("Ring buffer size: %d\n", ring_get_current_size(s->far_end));
+				if(ring_get_current_size(s->far_end) >= chunk_size)
+					read_len_far = ring_buffer_read(s->far_end, far_end_tmp, chunk_size);
                 while((read_len_far == chunk_size) && s->frame.data_len < rounded_data_len)  {
                         speex_echo_cancellation(s->echo_state, near_ptr,
                                         (spx_int16_t *)(void *) far_end_tmp,
                                         out_ptr);
 
-                        read_len_far = ring_buffer_read(s->far_end, far_end_tmp, chunk_size);
-                        near_ptr += chunk_size;
-                        out_ptr += chunk_size;
+						float left_channel[SAMPLES_PER_FRAME];
+						float right_channel[SAMPLES_PER_FRAME];
+						float result_channel[SAMPLES_PER_FRAME];
+
+						for(int i = 0; i < SAMPLES_PER_FRAME; i++){
+							left_channel[i] = near_ptr[i] / 32767.0f;
+							right_channel[i] = ((spx_int16_t *)far_end_tmp)[i] / 32767.0f;
+							result_channel[i] = out_ptr[i] / 32767.0f;
+						}
+
+						void *channels[] = {left_channel, right_channel, result_channel};
+
+						tinywav_write_f(&s->tw, channels, SAMPLES_PER_FRAME);
+
+						if(ring_get_current_size(s->far_end) >= chunk_size)
+							read_len_far = ring_buffer_read(s->far_end, far_end_tmp, chunk_size);
+						else
+							read_len_far = 0;
+                        near_ptr += SAMPLES_PER_FRAME;
+                        out_ptr += SAMPLES_PER_FRAME;
                         s->frame.data_len += chunk_size;
                 }
                
                 if(s->frame.data_len < rounded_data_len) {
+						printf("Not enough in far_ring\n");
+						ring_buffer_write(s->far_end, far_end_tmp, 300);
+						ring_buffer_write(s->far_end, far_end_tmp, 300);
+						ring_buffer_write(s->far_end, far_end_tmp, 300);
                         memcpy(out_ptr, near_ptr, rounded_data_len - s->frame.data_len);
                 }
 
