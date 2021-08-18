@@ -45,13 +45,11 @@
 #include "debug.h"
 #include "echo.h"
 
-#include "tinywav.h"
-
 #include <speex/speex_echo.h>
 
 #include <stdlib.h>
 #include <pthread.h>
-#include "utils/ring_buffer.h"
+#include "pa_ringbuffer.h"
 
 #define SAMPLES_PER_FRAME (48 * 10)
 #define FILTER_LENGTH (48 * 500)
@@ -59,11 +57,10 @@
 struct echo_cancellation {
         SpeexEchoState *echo_state;
 
-        char *near_end_residual;
-        int near_end_residual_size;
-        ring_buffer_t *far_end;
-
-		TinyWav tw;
+        PaUtilRingBuffer near_end_ringbuf;
+        char *near_end_ringbuf_data;
+        PaUtilRingBuffer far_end_ringbuf;
+        char *far_end_ringbuf_data;
 
         struct audio_frame frame;
 
@@ -83,20 +80,11 @@ static void reconfigure_echo (struct echo_cancellation *s, int sample_rate, int 
         free(s->frame.data);
         s->frame.data = NULL;
 
-        free(s->near_end_residual);
-        ring_buffer_destroy(s->far_end);
-        s->near_end_residual = NULL;
-        s->near_end_residual_size = 0;
-        s->far_end = ring_buffer_init(sample_rate * 2 / 2); // 0.5 sec
+
+        PaUtil_FlushRingBuffer(&s->far_end_ringbuf);
+        PaUtil_FlushRingBuffer(&s->near_end_ringbuf);
 
         speex_echo_ctl(s->echo_state, SPEEX_ECHO_SET_SAMPLING_RATE, &sample_rate); // should the 3rd parameter be int?
-
-		if(tinywav_isOpen(&s->tw)){
-			tinywav_close_write(&s->tw);
-		}
-
-		tinywav_open_write(&s->tw, 3, sample_rate, TW_INT16, TW_SPLIT, "uv_echo_input.wav");
-		printf("Sample rate %d\n", sample_rate);
 }
 
 struct echo_cancellation * echo_cancellation_init(void)
@@ -109,7 +97,13 @@ struct echo_cancellation * echo_cancellation_init(void)
         s->frame.sample_rate = s->frame.bps = 0;
         pthread_mutex_init(&s->lock, NULL);
 
-		s->tw.f = NULL;
+        const int ringbuf_sample_count = 2 << 15;
+        const int bps = 2; //TODO: assuming bps to be 2
+        s->far_end_ringbuf_data = malloc(ringbuf_sample_count * bps);
+        s->near_end_ringbuf_data = malloc(ringbuf_sample_count * bps);
+
+        PaUtil_InitializeRingBuffer(&s->far_end_ringbuf, bps, ringbuf_sample_count, s->far_end_ringbuf_data);
+        PaUtil_InitializeRingBuffer(&s->near_end_ringbuf, bps, ringbuf_sample_count, s->near_end_ringbuf_data);
 
         printf("Echo cancellation initialized.\n");
 
@@ -121,14 +115,10 @@ void echo_cancellation_destroy(struct echo_cancellation *s)
         if(s->echo_state) {
                 speex_echo_state_destroy(s->echo_state);  
         }
-        ring_buffer_destroy(s->far_end);
-        free(s->near_end_residual);
+        free(s->near_end_ringbuf_data);
+        free(s->far_end_ringbuf_data);
 
         pthread_mutex_destroy(&s->lock);
-
-		if(tinywav_isOpen(&s->tw)){
-			tinywav_close_write(&s->tw);
-		}
 
         free(s);
 }
@@ -136,11 +126,6 @@ void echo_cancellation_destroy(struct echo_cancellation *s)
 void echo_play(struct echo_cancellation *s, struct audio_frame *frame)
 {
         pthread_mutex_lock(&s->lock);
-
-        if(!s->far_end) { // near end hasn't initialized yet
-                pthread_mutex_unlock(&s->lock);
-                return;
-        }
 
         if(frame->ch_count != 1) {
                 static int prints = 0;
@@ -152,15 +137,24 @@ void echo_play(struct echo_cancellation *s, struct audio_frame *frame)
                 return;
         }
 
-		if(frame->bps != 2) {
-			char *tmp = malloc(frame->data_len / frame->bps * 2);
-			change_bps(tmp, 2, frame->data, frame->bps, frame->data_len/* bytes */);
-			ring_buffer_write(s->far_end, tmp, frame->data_len / frame->bps * 2);
-			free(tmp);
-		} else {
-			printf("Play request, saving %d\n", frame->data_len);
-			ring_buffer_write(s->far_end, frame->data, frame->data_len);
-		}
+        size_t samples = frame->data_len / frame->bps;
+        size_t written = 0;
+        if(frame->bps != 2) {
+                char *tmp = malloc(samples * 2);
+                change_bps(tmp, 2, frame->data, frame->bps, frame->data_len/* bytes */);
+
+                written = PaUtil_WriteRingBuffer(&s->far_end_ringbuf, tmp, samples);
+
+                free(tmp);
+        } else {
+                printf("Play request, saving %d\n", frame->data_len);
+
+                written = PaUtil_WriteRingBuffer(&s->far_end_ringbuf, frame->data, samples);
+        }
+
+        if(written != samples){
+                printf("Far end ringbuf overflow!\n");
+        }
 
         pthread_mutex_unlock(&s->lock);
 }
@@ -200,96 +194,44 @@ struct audio_frame * echo_cancel(struct echo_cancellation *s, struct audio_frame
                 data_len = frame->data_len;
         }
 
-		printf("Cancel request %d\n", data_len);
-        
-        const int chunk_size = SAMPLES_PER_FRAME * 2 /* BPS */;
-        const int rounded_data_len = (s->near_end_residual_size + data_len) / chunk_size * chunk_size;
-
-
-        if(rounded_data_len) {
-                char *data_to_write = malloc(rounded_data_len);
-                char *far_end_tmp = malloc(chunk_size);
-
-                memcpy(data_to_write, s->near_end_residual, s->near_end_residual_size);
-                memcpy(data_to_write + s->near_end_residual_size, 
-                                data,
-                                rounded_data_len - s->near_end_residual_size);
-
-                free(s->near_end_residual);
-                s->near_end_residual_size = data_len + s->near_end_residual_size - rounded_data_len;
-                s->near_end_residual = malloc(s->near_end_residual_size);
-                memcpy(s->near_end_residual, data + data_len - s->near_end_residual_size, s->near_end_residual_size);
-
-                free(s->frame.data);
-                s->frame.data = malloc(rounded_data_len);
-                s->frame.max_size = rounded_data_len;
-                s->frame.data_len = 0;
-
-                const spx_int16_t *near_ptr = (spx_int16_t *)(void *) data_to_write;
-                spx_int16_t *out_ptr = (spx_int16_t *)(void *) s->frame.data;
-
-                int read_len_far = 0;
-				printf("Ring buffer size: %d\n", ring_get_current_size(s->far_end));
-				if(ring_get_current_size(s->far_end) >= chunk_size)
-					read_len_far = ring_buffer_read(s->far_end, far_end_tmp, chunk_size);
-                while((read_len_far == chunk_size) && s->frame.data_len < rounded_data_len)  {
-                        speex_echo_cancellation(s->echo_state, near_ptr,
-                                        (spx_int16_t *)(void *) far_end_tmp,
-                                        out_ptr);
-
-						float left_channel[SAMPLES_PER_FRAME];
-						float right_channel[SAMPLES_PER_FRAME];
-						float result_channel[SAMPLES_PER_FRAME];
-
-						for(int i = 0; i < SAMPLES_PER_FRAME; i++){
-							left_channel[i] = near_ptr[i] / 32767.0f;
-							right_channel[i] = ((spx_int16_t *)far_end_tmp)[i] / 32767.0f;
-							result_channel[i] = out_ptr[i] / 32767.0f;
-						}
-
-						void *channels[] = {left_channel, right_channel, result_channel};
-
-						tinywav_write_f(&s->tw, channels, SAMPLES_PER_FRAME);
-
-						if(ring_get_current_size(s->far_end) >= chunk_size)
-							read_len_far = ring_buffer_read(s->far_end, far_end_tmp, chunk_size);
-						else
-							read_len_far = 0;
-                        near_ptr += SAMPLES_PER_FRAME;
-                        out_ptr += SAMPLES_PER_FRAME;
-                        s->frame.data_len += chunk_size;
-                }
-               
-                if(s->frame.data_len < rounded_data_len) {
-						printf("Not enough in far_ring\n");
-						ring_buffer_write(s->far_end, far_end_tmp, 300);
-						ring_buffer_write(s->far_end, far_end_tmp, 300);
-						ring_buffer_write(s->far_end, far_end_tmp, 300);
-                        memcpy(out_ptr, near_ptr, rounded_data_len - s->frame.data_len);
-                }
-
-                free(data_to_write);
-                free(far_end_tmp);
-
-                s->frame.data_len = rounded_data_len;
-
-                res = &s->frame;
-        } else {
-                if(!s->near_end_residual) {
-                        s->near_end_residual_size = frame->data_len;
-                        s->near_end_residual = malloc(frame->data_len);
-                        memcpy(s->near_end_residual, frame->data, frame->data_len);
-                } else {
-                        s->near_end_residual_size += frame->data_len;
-                        s->near_end_residual = realloc(s->near_end_residual, s->near_end_residual_size);
-                        memcpy(s->near_end_residual + (s->near_end_residual_size - frame->data_len),
-                                        frame->data, frame->data_len);
-                }
-
-                res = NULL;
-        }
+        size_t samples = data_len / 2;
+        size_t written = PaUtil_WriteRingBuffer(&s->near_end_ringbuf, data, samples);
 
         free(tmp);
+
+        if(written != samples){
+                printf("Near end ringbuf overflow\n");
+        }
+
+        size_t near_end_samples = PaUtil_GetRingBufferReadAvailable(&s->near_end_ringbuf);
+        size_t far_end_samples = PaUtil_GetRingBufferReadAvailable(&s->far_end_ringbuf);
+        size_t available_samples = (near_end_samples > far_end_samples) ? far_end_samples : near_end_samples;
+
+        //free(s->frame.data);
+
+        size_t frames_to_process = available_samples / SAMPLES_PER_FRAME;
+        if(!frames_to_process){
+                pthread_mutex_unlock(&s->lock);
+                return NULL;
+        }
+
+        s->frame.data = malloc(available_samples * 2);
+        s->frame.max_size = available_samples * 2;
+        s->frame.data_len = available_samples * 2;
+
+        res = &s->frame;
+
+        spx_int16_t *out_ptr = (spx_int16_t *)(void *) s->frame.data;
+        for(size_t i = 0; i < frames_to_process; i++){
+                spx_int16_t near_arr[SAMPLES_PER_FRAME];
+                spx_int16_t far_arr[SAMPLES_PER_FRAME];
+
+                PaUtil_ReadRingBuffer(&s->near_end_ringbuf, near_arr, SAMPLES_PER_FRAME);
+                PaUtil_ReadRingBuffer(&s->far_end_ringbuf, far_arr, SAMPLES_PER_FRAME);
+                available_samples -= SAMPLES_PER_FRAME;
+
+                speex_echo_cancellation(s->echo_state, near_arr, far_arr, out_ptr); 
+        }
 
         pthread_mutex_unlock(&s->lock);
 

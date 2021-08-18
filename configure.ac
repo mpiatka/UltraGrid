@@ -2524,7 +2524,7 @@ AC_ARG_ENABLE(speexdsp,
 PKG_CHECK_MODULES([LIBSPEEXDSP], [speexdsp], [found_speexdsp=yes], [found_speexdsp=no])
 
 if test "$found_speexdsp" = yes -a "$speexdsp_req" != no; then
-        OBJS="$OBJS src/audio/echo.o src/audio/tinywav.o"
+        OBJS="$OBJS src/audio/echo.o src/audio/pa_ringbuffer.o"
         LIBS="$LIBS $LIBSPEEXDSP_LIBS"
         COMMON_FLAGS="$COMMON_FLAGS${SPEEXDSP_COMMON_FLAGS:+${COMMON_FLAGS:+ }}$SPEEXDSP_COMMON_FLAGS"
         AC_DEFINE([HAVE_SPEEXDSP], [1], [Build with SpeexDSP support])
