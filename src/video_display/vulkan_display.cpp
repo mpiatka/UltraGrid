@@ -4,7 +4,6 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
-#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -15,6 +14,9 @@ using namespace vulkan_display_detail;
 
 namespace {
 
+/* TODO: enable when gcc 8 is no longer supported
+   because compilers under gcc 8 doesn't support std::filesystem
+  #include <filesystem>
 RETURN_TYPE create_shader(vk::ShaderModule& shader,
         const std::filesystem::path& file_path,
         const vk::Device& device)
@@ -34,6 +36,29 @@ RETURN_TYPE create_shader(vk::ShaderModule& shader,
         CHECKED_ASSIGN(shader, device.createShaderModule(shader_info));
         return RETURN_TYPE();
 }
+*/
+
+RETURN_TYPE create_shader(vk::ShaderModule& shader,
+        const std::string& file_path,
+        const vk::Device& device)
+{
+        std::ifstream file(file_path, std::ios::binary | std::ios::ate);
+        CHECK(file.is_open(), "Failed to open file:"s + file_path);
+        size_t size = static_cast<size_t>(file.tellg());
+        file.seekg(0);
+        assert(size % 4 == 0);
+        std::vector<std::uint32_t> shader_code(size / 4);
+        file.read(reinterpret_cast<char*>(shader_code.data()), static_cast<std::streamsize>(size));
+        CHECK(file.good(), "Error reading from file:"s + file_path);
+
+        vk::ShaderModuleCreateInfo shader_info;
+        shader_info
+                .setCodeSize(shader_code.size() * 4)
+                .setPCode(shader_code.data());
+        CHECKED_ASSIGN(shader, device.createShaderModule(shader_info));
+        return RETURN_TYPE();
+}
+
 
 RETURN_TYPE update_render_area_viewport_scissor(render_area& render_area, vk::Viewport& viewport, vk::Rect2D& scissor, 
         vk::Extent2D window_size, vk::Extent2D transfer_image_size) {
@@ -260,7 +285,7 @@ RETURN_TYPE vulkan_display::create_graphics_pipeline() {
                 .setRenderPass(render_pass);
 
         vk::Result result;
-        std::tie(result, pipeline) = device.createGraphicsPipeline(VK_NULL_HANDLE, pipeline_info);
+        std::tie(result, pipeline) = device.createGraphicsPipeline(nullptr, pipeline_info);
         CHECK(result, "Pipeline cannot be created.");
         return RETURN_TYPE();
 }
