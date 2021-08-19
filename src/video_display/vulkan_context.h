@@ -17,7 +17,7 @@
 namespace vulkan_display_detail {
 
 inline vk::Result to_vk_result(bool b) {
-        return b ? vk::Result::eSuccess : vk::Result::eErrorUnknown;
+        return b ? vk::Result::eSuccess : vk::Result{ VK_ERROR_UNKNOWN };
 }
 
 inline vk::Result to_vk_result(vk::Result res) {

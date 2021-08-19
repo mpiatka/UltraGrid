@@ -328,7 +328,7 @@ RETURN_TYPE vulkan_context::get_surface_format() {
 
         vk::SurfaceFormatKHR default_format{};
         default_format.format = vk::Format::eB8G8R8A8Srgb;
-        default_format.colorSpace = vk::ColorSpaceKHR::eVkColorspaceSrgbNonlinear;
+        default_format.colorSpace = vk::ColorSpaceKHR::eSrgbNonlinear;
 
         if (std::any_of(formats.begin(), formats.end(), [default_format](auto& format) {return format == default_format; })) {
                 swapchain_atributes.format = default_format;
