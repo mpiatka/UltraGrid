@@ -76,10 +76,6 @@ static void reconfigure_echo (struct echo_cancellation *s, int sample_rate, int 
         s->frame.bps = 2;
         s->frame.ch_count = 1;
         s->frame.sample_rate = sample_rate;
-        s->frame.max_size = s->frame.data_len = 0;
-        free(s->frame.data);
-        s->frame.data = NULL;
-
 
         PaUtil_FlushRingBuffer(&s->far_end_ringbuf);
         PaUtil_FlushRingBuffer(&s->near_end_ringbuf);
@@ -105,6 +101,9 @@ struct echo_cancellation * echo_cancellation_init(void)
         PaUtil_InitializeRingBuffer(&s->far_end_ringbuf, bps, ringbuf_sample_count, s->far_end_ringbuf_data);
         PaUtil_InitializeRingBuffer(&s->near_end_ringbuf, bps, ringbuf_sample_count, s->near_end_ringbuf_data);
 
+        s->frame.data = malloc(ringbuf_sample_count * bps);
+        s->frame.max_size = ringbuf_sample_count * bps;
+
         printf("Echo cancellation initialized.\n");
 
         return s;
@@ -117,6 +116,7 @@ void echo_cancellation_destroy(struct echo_cancellation *s)
         }
         free(s->near_end_ringbuf_data);
         free(s->far_end_ringbuf_data);
+        free(s->frame.data);
 
         pthread_mutex_destroy(&s->lock);
 
@@ -147,8 +147,6 @@ void echo_play(struct echo_cancellation *s, struct audio_frame *frame)
 
                 free(tmp);
         } else {
-                printf("Play request, saving %d\n", frame->data_len);
-
                 written = PaUtil_WriteRingBuffer(&s->far_end_ringbuf, frame->data, samples);
         }
 
@@ -207,16 +205,13 @@ struct audio_frame * echo_cancel(struct echo_cancellation *s, struct audio_frame
         size_t far_end_samples = PaUtil_GetRingBufferReadAvailable(&s->far_end_ringbuf);
         size_t available_samples = (near_end_samples > far_end_samples) ? far_end_samples : near_end_samples;
 
-        //free(s->frame.data);
-
         size_t frames_to_process = available_samples / SAMPLES_PER_FRAME;
         if(!frames_to_process){
                 pthread_mutex_unlock(&s->lock);
                 return NULL;
         }
 
-        s->frame.data = malloc(available_samples * 2);
-        s->frame.max_size = available_samples * 2;
+        assert(s->frame.max_len <= available_samples * 2);
         s->frame.data_len = available_samples * 2;
 
         res = &s->frame;
