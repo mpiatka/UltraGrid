@@ -1,9 +1,10 @@
 /**
  * @file   audio/echo.c
  * @author Martin Pulec     <pulec@cesnet.cz>
+ * @author Martin Piatka    <piatka@cesnet.cz>
  */
 /*
- * Copyright (c) 2012-2017 CESNET z.s.p.o.
+ * Copyright (c) 2012-2021 CESNET z.s.p.o.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -205,13 +206,17 @@ struct audio_frame * echo_cancel(struct echo_cancellation *s, struct audio_frame
         size_t far_end_samples = PaUtil_GetRingBufferReadAvailable(&s->far_end_ringbuf);
         size_t available_samples = (near_end_samples > far_end_samples) ? far_end_samples : near_end_samples;
 
+        if(available_samples < near_end_samples){
+                printf("Limited by far end (%lu near, %lu far)\n", near_end_samples, far_end_samples);
+        }
+
         size_t frames_to_process = available_samples / SAMPLES_PER_FRAME;
         if(!frames_to_process){
                 pthread_mutex_unlock(&s->lock);
                 return NULL;
         }
 
-        assert(s->frame.max_len <= available_samples * 2);
+        assert(s->frame.max_size >= available_samples * 2);
         s->frame.data_len = available_samples * 2;
 
         res = &s->frame;
