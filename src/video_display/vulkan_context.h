@@ -1,5 +1,5 @@
 #pragma once
-
+#undef VULKAN_HPP_NO_EXCEPTIONS
 
 #ifdef NO_EXCEPTIONS
 #define VULKAN_HPP_NO_EXCEPTIONS
@@ -98,6 +98,8 @@ constexpr uint32_t NO_GPU_SELECTED = UINT32_MAX;
 
 vk::ImageViewCreateInfo default_image_view_create_info(vk::Format format);
 
+class vulkan_instance;
+
 } // namespace vulkan_display ---------------------------------------------
 
 
@@ -109,11 +111,9 @@ using namespace std::literals;
 constexpr uint32_t NO_QUEUE_FAMILY_INDEX_FOUND = UINT32_MAX;
 constexpr uint32_t SWAPCHAIN_IMAGE_OUT_OF_DATE = UINT32_MAX;
 
-struct vulkan_context {
+class vulkan_context {
         vk::Instance instance;
-
-        bool validation_enabled = true;
-        std::unique_ptr<vk::DispatchLoaderDynamic> dynamic_dispatch_loader{};
+        std::unique_ptr<vk::DispatchLoaderDynamic> dynamic_dispatcher{};
         vk::DebugUtilsMessengerEXT messenger;
 
         vk::PhysicalDevice gpu;
@@ -139,11 +139,16 @@ struct vulkan_context {
 
         vk::Extent2D window_size{ 0, 0 };
         bool vsync = true;
-
+public:
+        //getters
+        vk::PhysicalDevice get_gpu() { return gpu; }
+        vk::Device get_device() { return device; }
+        uint32_t get_queue_familt_index() { return queue_family_index; }
+        vk::Queue get_queue() { return queue; }
+        vk::SwapchainKHR get_swapchain() { return swapchain; }
+        vk::Format get_swapchain_image_format() { return swapchain_atributes.format.format; };
+        vk::Extent2D get_window_size() { return window_size; }
 private:
-
-        RETURN_TYPE init_validation_layers_error_messenger();
-
         RETURN_TYPE create_physical_device(uint32_t gpu_index);
 
         RETURN_TYPE create_logical_device();
@@ -173,11 +178,8 @@ public:
 
         vulkan_context() = default;
 
-        RETURN_TYPE create_instance(std::vector<const char*>& required_extensions, bool enable_validation);
-
-        RETURN_TYPE get_available_gpus(std::vector<std::pair<std::string, bool>>& gpus);
-
-        RETURN_TYPE init(VkSurfaceKHR surface, window_parameters, uint32_t gpu_index);
+        RETURN_TYPE init(vulkan_display::vulkan_instance&& instance, VkSurfaceKHR surface, 
+                window_parameters, uint32_t gpu_index);
 
         RETURN_TYPE destroy();
 
@@ -196,4 +198,50 @@ public:
         RETURN_TYPE recreate_swapchain(window_parameters parameters, vk::RenderPass render_pass);
 };
 
-}//namespace vulkan_display_detail
+}//namespace vulkan_display_detail ----------------------------------------------------------------
+
+
+namespace vulkan_display {
+
+class vulkan_instance {
+        vk::Instance instance{};
+        std::unique_ptr<vk::DispatchLoaderDynamic> dynamic_dispatcher = nullptr;
+        vk::DebugUtilsMessengerEXT messenger{};
+
+        RETURN_TYPE init_validation_layers_error_messenger();
+
+        friend RETURN_TYPE vulkan_display_detail::vulkan_context::init(vulkan_instance&& instance, 
+                VkSurfaceKHR surface, window_parameters parameters, uint32_t gpu_index);
+public:
+        vulkan_instance() = default;
+        vulkan_instance(const vulkan_instance& other) = delete;
+        vulkan_instance& operator=(const vulkan_instance& other) = delete;
+        vulkan_instance(vulkan_instance&& other) = delete;
+        vulkan_instance& operator=(vulkan_instance&& other) = delete;
+        
+        ~vulkan_instance() {
+                destroy();
+        }
+
+        /**
+         * @param required_extensions   Vulkan instance extensions requested by aplication,
+         *                              usually needed for creating vulkan surface
+         * @param enable_validation     Enable vulkan validation layers, they should be disabled in release build.
+         */
+        RETURN_TYPE init(std::vector<const char*>& required_extensions, bool enable_validation);
+        
+        /**
+         * @brief returns all available grafhics cards
+         *  first parameter is gpu name,
+         *  second parameter is true only if the gpu is suitable for vulkan_display
+         */
+        RETURN_TYPE get_available_gpus(std::vector<std::pair<std::string, bool>>& gpus);
+
+        vk::Instance& get_instance() {
+                return instance;
+        }
+
+        RETURN_TYPE destroy();
+};
+
+}

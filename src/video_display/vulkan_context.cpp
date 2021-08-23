@@ -8,31 +8,6 @@ using namespace vulkan_display_detail;
 std::string vulkan_display_error_message{};
 #endif // NO_EXCEPTIONS
 
-
-namespace vulkan_display {
-
-vk::ImageViewCreateInfo default_image_view_create_info(vk::Format format) {
-        vk::ImageViewCreateInfo image_view_info{};
-        image_view_info
-                .setViewType(vk::ImageViewType::e2D)
-                .setFormat(format);
-        image_view_info.components
-                .setR(vk::ComponentSwizzle::eIdentity)
-                .setG(vk::ComponentSwizzle::eIdentity)
-                .setB(vk::ComponentSwizzle::eIdentity)
-                .setA(vk::ComponentSwizzle::eIdentity);
-        image_view_info.subresourceRange
-                .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                .setBaseMipLevel(0)
-                .setLevelCount(1)
-                .setBaseArrayLayer(0)
-                .setLayerCount(1);
-        return image_view_info;
-}
-
-} // namespace vulkan_display
-
-
 namespace {
 
 VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
@@ -188,14 +163,31 @@ vk::CompositeAlphaFlagBitsKHR get_composite_alpha(vk::CompositeAlphaFlagsKHR cap
         return static_cast<vk::CompositeAlphaFlagBitsKHR>(result);
 }
 
-} //namespace
+} //namespace ------------------------------------------------------------------------
 
 
-namespace vulkan_display_detail { //------------------------------------------------------------------------
+namespace vulkan_display {
 
-RETURN_TYPE vulkan_context::create_instance(std::vector<c_str>& required_extensions, bool enable_validation) {
-        this->validation_enabled = enable_validation;
+vk::ImageViewCreateInfo default_image_view_create_info(vk::Format format) {
+        vk::ImageViewCreateInfo image_view_info{};
+        image_view_info
+                .setViewType(vk::ImageViewType::e2D)
+                .setFormat(format);
+        image_view_info.components
+                .setR(vk::ComponentSwizzle::eIdentity)
+                .setG(vk::ComponentSwizzle::eIdentity)
+                .setB(vk::ComponentSwizzle::eIdentity)
+                .setA(vk::ComponentSwizzle::eIdentity);
+        image_view_info.subresourceRange
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1);
+        return image_view_info;
+}
 
+RETURN_TYPE vulkan_instance::init(std::vector<c_str>& required_extensions, bool enable_validation) {
         std::vector<c_str> validation_layers{};
         if (enable_validation) {
                 validation_layers.push_back("VK_LAYER_KHRONOS_validation");
@@ -220,14 +212,14 @@ RETURN_TYPE vulkan_context::create_instance(std::vector<c_str>& required_extensi
         CHECKED_ASSIGN(instance, vk::createInstance(instance_info));
 
         if (enable_validation) {
-                dynamic_dispatch_loader = std::make_unique<vk::DispatchLoaderDynamic>(instance, vkGetInstanceProcAddr);
+                dynamic_dispatcher = std::make_unique<vk::DispatchLoaderDynamic>(instance, vkGetInstanceProcAddr);
                 PASS_RESULT(init_validation_layers_error_messenger());
         }
 
         return RETURN_TYPE();
 }
 
-RETURN_TYPE vulkan_context::init_validation_layers_error_messenger() {
+RETURN_TYPE vulkan_instance::init_validation_layers_error_messenger() {
         vk::DebugUtilsMessengerCreateInfoEXT messenger_info{};
         using severity = vk::DebugUtilsMessageSeverityFlagBitsEXT;
         using type = vk::DebugUtilsMessageTypeFlagBitsEXT;
@@ -236,11 +228,11 @@ RETURN_TYPE vulkan_context::init_validation_layers_error_messenger() {
                 .setMessageType(type::eGeneral | type::ePerformance | type::eValidation)
                 .setPfnUserCallback(debugCallback)
                 .setPUserData(nullptr);
-        CHECKED_ASSIGN(messenger, instance.createDebugUtilsMessengerEXT(messenger_info, nullptr, *dynamic_dispatch_loader));
+        CHECKED_ASSIGN(messenger, instance.createDebugUtilsMessengerEXT(messenger_info, nullptr, *dynamic_dispatcher));
         return RETURN_TYPE();
 }
 
-RETURN_TYPE vulkan_context::get_available_gpus(std::vector<std::pair<std::string, bool>>& gpus) {
+RETURN_TYPE vulkan_instance::get_available_gpus(std::vector<std::pair<std::string, bool>>& gpus) {
         assert(instance);
 
         std::vector<vk::PhysicalDevice> physical_devices;
@@ -254,6 +246,24 @@ RETURN_TYPE vulkan_context::get_available_gpus(std::vector<std::pair<std::string
         std::sort(gpus.begin(), gpus.end());
         return RETURN_TYPE();
 }
+
+RETURN_TYPE vulkan_instance::destroy() {
+        if (instance) {
+                instance.destroy();
+                if (messenger) {
+                        instance.destroy(messenger, nullptr, *dynamic_dispatcher);
+                }
+                dynamic_dispatcher = nullptr;
+                instance = nullptr;
+        }
+        return RETURN_TYPE();
+}
+
+
+} // namespace vulkan_display ----------------------------------------------------------------------------
+
+
+namespace vulkan_display_detail { //------------------------------------------------------------------------
 
 RETURN_TYPE vulkan_context::create_physical_device(uint32_t gpu_index) {
         assert(instance);
@@ -396,7 +406,16 @@ RETURN_TYPE vulkan_context::create_swapchain_views() {
         return RETURN_TYPE();
 }
 
-RETURN_TYPE vulkan_context::init(VkSurfaceKHR surface, window_parameters parameters, uint32_t gpu_index) {
+RETURN_TYPE vulkan_context::init(vulkan_display::vulkan_instance&& instance, VkSurfaceKHR surface, 
+        window_parameters parameters, uint32_t gpu_index) 
+{
+        assert(!this->instance);
+        this->instance = instance.instance;
+        this->dynamic_dispatcher = std::move(instance.dynamic_dispatcher);
+        this->messenger = instance.messenger;
+        instance.instance = nullptr;
+        instance.messenger = nullptr;
+
         this->surface = surface;
         window_size = vk::Extent2D{ parameters.width, parameters.height };
         vsync = parameters.vsync;
@@ -464,11 +483,12 @@ RETURN_TYPE vulkan_context::destroy() {
         }
         if (instance) {
                 instance.destroy(surface);
-                if (validation_enabled) {
-                        instance.destroy(messenger, nullptr, *dynamic_dispatch_loader);
+                if (messenger) {
+                        instance.destroy(messenger, nullptr, *dynamic_dispatcher);
                 }
                 instance.destroy();
         }
+        dynamic_dispatcher = nullptr;
         return RETURN_TYPE();
 }
 

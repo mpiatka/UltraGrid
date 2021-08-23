@@ -111,29 +111,7 @@ public:
                 }
         }
 
-        /**
-         * @param required_extensions   Vulkan instance extensions requested by aplication,
-         *                              usually needed for creating vulkan surface
-         * @param enable_validation     Enable vulkan validation layers, they should be disabled in release build.
-         */
-        RETURN_TYPE create_instance(std::vector<const char*>& required_extensions, bool enable_validation) {
-                return context.create_instance(required_extensions, enable_validation);
-        }
-
-        const vk::Instance& get_instance() {
-                return context.instance;
-        }
-
-        /**
-         * @brief returns all available grafhics cards
-         *  first parameter is gpu name,
-         *  second parameter is true only if the gpu is suitable for vulkan_display
-         */
-        RETURN_TYPE get_available_gpus(std::vector<std::pair<std::string, bool>>& gpus) {
-                return context.get_available_gpus(gpus);
-        }
-
-        RETURN_TYPE init(VkSurfaceKHR surface, uint32_t transfer_image_count,
+        RETURN_TYPE init(vulkan_instance&& instance, VkSurfaceKHR surface, uint32_t transfer_image_count,
                 window_changed_callback* window, uint32_t gpu_index = NO_GPU_SELECTED);
 
         RETURN_TYPE destroy();

@@ -388,12 +388,12 @@ void sdl2_print_displays() {
 }
 
 void print_gpus() {
-        vkd::vulkan_display vulkan;
+        vkd::vulkan_instance instance;
         std::vector<const char*>required_extensions{};
         std::vector<std::pair<std::string, bool>> gpus{};
         try {
-                vulkan.create_instance(required_extensions, false);
-                vulkan.get_available_gpus(gpus);
+                instance.init(required_extensions, false);
+                instance.get_available_gpus(gpus);
         } catch (std::exception& e) { log_and_exit(e); }
         
         std::cout << "\n\tVulkan GPUs:\n";
@@ -638,10 +638,8 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
         SDL_Vulkan_GetInstanceExtensions(s->window, &extension_count, required_extensions.data());
         assert(extension_count > 0);
         try {
-                s->vulkan = std::make_unique<vkd::vulkan_display>();
-                s->vulkan->create_instance(required_extensions, s->validation);
-                const auto& instance = s->vulkan->get_instance();
-
+                vkd::vulkan_instance instance;
+                instance.init(required_extensions, s->validation);
 #ifdef __MINGW32__
                 //SDL2 for MINGW has problem creating surface
                 SDL_SysWMinfo wmInfo{};
@@ -651,7 +649,7 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
                 HINSTANCE hinst = wmInfo.info.win.hinstance;
                 vk::SurfaceKHR surface;
                 auto const createInfo = vk::Win32SurfaceCreateInfoKHR{}.setHinstance(hinst).setHwnd(hwnd);
-                if (instance.createWin32SurfaceKHR(&createInfo, nullptr, &surface) != vk::Result::eSuccess) {
+                if (instance.get_instance().createWin32SurfaceKHR(&createInfo, nullptr, &surface) != vk::Result::eSuccess) {
                         throw std::runtime_error("Surface cannot be created.");
                 }
 #else
@@ -662,8 +660,8 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
                         throw std::runtime_error("SDL cannot create surface.");
                 }
 #endif
-
-                s->vulkan->init(surface, MAX_FRAME_COUNT, &s->window_callback, s->gpu_idx);
+                s->vulkan = std::make_unique<vkd::vulkan_display>();
+                s->vulkan->init(std::move(instance), surface, MAX_FRAME_COUNT, &s->window_callback, s->gpu_idx);
                 LOG(LOG_LEVEL_NOTICE) << MOD_NAME "Vulkan display initialised." << std::endl;
         }
         catch (std::exception& e) { log_and_exit(e); }

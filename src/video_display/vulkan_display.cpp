@@ -141,7 +141,7 @@ RETURN_TYPE vulkan_display::create_render_pass() {
 
         vk::AttachmentDescription color_attachment;
         color_attachment
-                .setFormat(context.swapchain_atributes.format.format)
+                .setFormat(context.get_swapchain_image_format())
                 .setSamples(vk::SampleCountFlagBits::e1)
                 .setLoadOp(vk::AttachmentLoadOp::eClear)
                 .setStoreOp(vk::AttachmentStoreOp::eStore)
@@ -308,7 +308,7 @@ RETURN_TYPE vulkan_display::create_command_pool() {
         vk::CommandPoolCreateInfo pool_info{};
         using bits = vk::CommandPoolCreateFlagBits;
         pool_info
-                .setQueueFamilyIndex(context.queue_family_index)
+                .setQueueFamilyIndex(context.get_queue_familt_index())
                 .setFlags(bits::eTransient | bits::eResetCommandBuffer);
         CHECKED_ASSIGN(command_pool, device.createCommandPool(pool_info));
         return RETURN_TYPE();
@@ -351,7 +351,7 @@ RETURN_TYPE vulkan_display::allocate_description_sets() {
         return RETURN_TYPE();
 }
 
-RETURN_TYPE vulkan_display::init(VkSurfaceKHR surface, uint32_t transfer_image_count,
+RETURN_TYPE vulkan_display::init(vulkan_instance&& instance, VkSurfaceKHR surface, uint32_t transfer_image_count,
         window_changed_callback* window, uint32_t gpu_index) {
         // Order of following calls is important
         assert(surface);
@@ -359,8 +359,8 @@ RETURN_TYPE vulkan_display::init(VkSurfaceKHR surface, uint32_t transfer_image_c
         this->transfer_image_count = transfer_image_count;
         this->filled_img_max_count = (transfer_image_count + 1) / 2;
         auto window_parameters = window->get_window_parameters();
-        PASS_RESULT(context.init(surface, window_parameters, gpu_index));
-        device = context.device;
+        PASS_RESULT(context.init(std::move(instance), surface, window_parameters, gpu_index));
+        device = context.get_device();
         PASS_RESULT(create_shader(vertex_shader, "shaders/vert.spv", device));
         PASS_RESULT(create_shader(fragment_shader, "shaders/frag.spv", device));
         PASS_RESULT(create_render_pass());
@@ -412,7 +412,7 @@ RETURN_TYPE vulkan_display::destroy() {
 }
 
 RETURN_TYPE vulkan_display::record_graphics_commands(transfer_image& transfer_image, uint32_t swapchain_image_id) {
-        vk::CommandBuffer& cmd_buffer = command_buffers[transfer_image.id];
+        vk::CommandBuffer& cmd_buffer = command_buffers[transfer_image.get_id()];
         cmd_buffer.reset(vk::CommandBufferResetFlags{});
 
         vk::CommandBufferBeginInfo begin_info{};
@@ -427,7 +427,7 @@ RETURN_TYPE vulkan_display::record_graphics_commands(transfer_image& transfer_im
         vk::RenderPassBeginInfo render_pass_begin_info;
         render_pass_begin_info
                 .setRenderPass(render_pass)
-                .setRenderArea(vk::Rect2D{ {0,0}, context.window_size })
+                .setRenderArea(vk::Rect2D{ {0,0}, context.get_window_size() })
                 .setClearValueCount(1)
                 .setPClearValues(&clear_color)
                 .setFramebuffer(context.get_framebuffer(swapchain_image_id));
@@ -439,7 +439,7 @@ RETURN_TYPE vulkan_display::record_graphics_commands(transfer_image& transfer_im
         cmd_buffer.setViewport(0, viewport);
         cmd_buffer.pushConstants(pipeline_layout, vk::ShaderStageFlagBits::eFragment, 0, sizeof(render_area), &render_area);
         cmd_buffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                pipeline_layout, 0, descriptor_sets[transfer_image.id], nullptr);
+                pipeline_layout, 0, descriptor_sets[transfer_image.get_id()], nullptr);
         cmd_buffer.draw(6, 1, 0, 0);
 
         cmd_buffer.endRenderPass();
@@ -458,7 +458,7 @@ RETURN_TYPE vulkan_display::acquire_image(image& result, image_description descr
 
         transfer_image& transfer_image = acquire_transfer_image(available_img_queue, 
                 filled_img_queue, filled_img_max_count);
-        assert(transfer_image.id != transfer_image::NO_ID);
+        assert(transfer_image.get_id() != transfer_image::NO_ID);
         {
                 std::unique_lock device_lock(device_mutex, std::defer_lock);
                 if (transfer_image.fence_set) {
@@ -467,12 +467,12 @@ RETURN_TYPE vulkan_display::acquire_image(image& result, image_description descr
                                 "Waiting for fence failed.");
                 }
 
-                if (transfer_image.description != description) {
+                if (transfer_image.get_description() != description) {
                         if (!device_lock.owns_lock()) {
                                 device_lock.lock();
                         }
                         //todo another formats
-                        transfer_image.create(device, context.gpu, description);
+                        transfer_image.create(device, context.get_gpu(), description);
                 }
         }
         result = image{ transfer_image };
@@ -511,12 +511,12 @@ RETURN_TYPE vulkan_display::display_queued_image() {
 
         transfer_image& transfer_image = *image.get_transfer_image();
 
-        auto& semaphores = image_semaphores[transfer_image.id];
+        auto& semaphores = image_semaphores[transfer_image.get_id()];
 
         uint32_t swapchain_image_id = 0;
         std::unique_lock lock(device_mutex);
-        if (transfer_image.description != current_image_description) {
-                current_image_description = transfer_image.description;
+        if (transfer_image.get_description() != current_image_description) {
+                current_image_description = transfer_image.get_description();
                 auto parameters = context.get_window_parameters();
                 update_render_area_viewport_scissor(render_area, viewport, scissor,
                         { parameters.width, parameters.height }, current_image_description.size);
@@ -535,7 +535,7 @@ RETURN_TYPE vulkan_display::display_queued_image() {
                 window_parameters_changed(window_parameters);
                 PASS_RESULT(context.acquire_next_swapchain_image(swapchain_image_id, semaphores.image_acquired));
         }
-        transfer_image.update_description_set(device, descriptor_sets[transfer_image.id], sampler);
+        transfer_image.update_description_set(device, descriptor_sets[transfer_image.get_id()], sampler);
         lock.unlock();
 
         record_graphics_commands(transfer_image, swapchain_image_id);
@@ -545,24 +545,25 @@ RETURN_TYPE vulkan_display::display_queued_image() {
         vk::SubmitInfo submit_info{};
         submit_info
                 .setCommandBufferCount(1)
-                .setPCommandBuffers(&command_buffers[transfer_image.id])
+                .setPCommandBuffers(&command_buffers[transfer_image.get_id()])
                 .setPWaitDstStageMask(wait_masks.data())
                 .setWaitSemaphoreCount(1)
                 .setPWaitSemaphores(&semaphores.image_acquired)
                 .setSignalSemaphoreCount(1)
                 .setPSignalSemaphores(&semaphores.image_rendered);
 
-        PASS_RESULT(context.queue.submit(submit_info, transfer_image.is_available_fence));
+        PASS_RESULT(context.get_queue().submit(submit_info, transfer_image.is_available_fence));
 
+        auto swapchain = context.get_swapchain();
         vk::PresentInfoKHR present_info{};
         present_info
                 .setPImageIndices(&swapchain_image_id)
                 .setSwapchainCount(1)
-                .setPSwapchains(&context.swapchain)
+                .setPSwapchains(&swapchain)
                 .setWaitSemaphoreCount(1)
                 .setPWaitSemaphores(&semaphores.image_rendered);
 
-        auto present_result = context.queue.presentKHR(&present_info);
+        auto present_result = context.get_queue().presentKHR(&present_info);
         if (present_result != vk::Result::eSuccess) {
                 using res = vk::Result;
                 switch (present_result) {

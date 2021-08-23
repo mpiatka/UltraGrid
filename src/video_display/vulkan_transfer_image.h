@@ -35,8 +35,6 @@ class transfer_image {
         vk::ImageLayout layout{};
         vk::AccessFlags access;
 
-public:
-        static constexpr uint32_t NO_ID = UINT32_MAX;
         uint32_t id = NO_ID;
         vk::ImageView view;
         std::byte* ptr = nullptr;
@@ -44,14 +42,22 @@ public:
 
         vk::DeviceSize row_pitch = 0;
 
-        bool fence_set = false;       // true if waiting for is_available_fence is neccessary
-        vk::Fence is_available_fence; // is_available_fence isn't signalled when gpu uses the image
-
         bool update_desciptor_set = true;
         vk::Sampler sampler;
 
         using preprocess_function = std::function<void(vulkan_display::image& image)>;
         preprocess_function preprocess_fun{ nullptr };
+        
+public:
+        friend class vulkan_display::image;
+
+        static constexpr uint32_t NO_ID = UINT32_MAX;
+
+        bool fence_set = false;       // true if waiting for is_available_fence is neccessary
+        vk::Fence is_available_fence; // is_available_fence isn't signalled when gpu uses the image
+
+        const vulkan_display::image_description& get_description() { return description; }
+        uint32_t get_id() { return id; }
 
         RETURN_TYPE init(vk::Device device, uint32_t id);
 
