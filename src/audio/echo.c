@@ -250,8 +250,9 @@ struct audio_frame * echo_cancel(struct echo_cancellation *s, struct audio_frame
                 return NULL;
         }
 
-        assert(s->frame.max_size >= available_samples * 2);
-        s->frame.data_len = available_samples * 2;
+        size_t out_size = frames_to_process * SAMPLES_PER_FRAME * 2;
+        assert(s->frame.max_size >= out_size);
+        s->frame.data_len = out_size;
 
         res = &s->frame;
 
@@ -265,6 +266,7 @@ struct audio_frame * echo_cancel(struct echo_cancellation *s, struct audio_frame
                 available_samples -= SAMPLES_PER_FRAME;
 
                 speex_echo_cancellation(s->echo_state, near_arr, far_arr, out_ptr); 
+                out_ptr += SAMPLES_PER_FRAME;
 
                 float left_channel[SAMPLES_PER_FRAME];
                 float right_channel[SAMPLES_PER_FRAME];
