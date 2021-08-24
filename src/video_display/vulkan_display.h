@@ -112,7 +112,7 @@ public:
         }
 
         RETURN_TYPE init(vulkan_instance&& instance, VkSurfaceKHR surface, uint32_t transfer_image_count,
-                window_changed_callback* window, uint32_t gpu_index = NO_GPU_SELECTED);
+                window_changed_callback& window, uint32_t gpu_index = NO_GPU_SELECTED);
 
         RETURN_TYPE destroy();
 

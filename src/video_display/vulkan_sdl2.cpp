@@ -98,6 +98,7 @@
 #include <queue>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility> // pair
 
@@ -164,8 +165,8 @@ struct state_vulkan_sdl2 {
         
         SDL_Window* window{ nullptr };
         std::unique_ptr<vkd::vulkan_display> vulkan = nullptr;
-        window_callback window_callback{ nullptr };
-
+        std::unique_ptr<window_callback> window_callback{ nullptr };
+        
         std::array<video_frame, MAX_FRAME_COUNT> video_frames{};
         std::array<vkd::image, MAX_FRAME_COUNT> images{};
 
@@ -193,6 +194,9 @@ struct state_vulkan_sdl2 {
                 module_done(&mod);
         }
 };
+
+// make sure that state_vulkan_sdl2 is C compatible
+static_assert(std::is_standard_layout_v<state_vulkan_sdl2>);
 
 //todo C++20 : change to to_array
 constexpr std::array<std::pair<char, std::string_view>, 3> display_sdl2_keybindings{{
@@ -630,7 +634,7 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
                 log_msg(LOG_LEVEL_ERROR, MOD_NAME "Unable to create window : %s\n", SDL_GetError());
                 return nullptr;
         }
-        s->window_callback = ::window_callback{ s->window };
+        s->window_callback = std::make_unique<::window_callback>(s->window);
 
         uint32_t extension_count = 0;
         SDL_Vulkan_GetInstanceExtensions(s->window, &extension_count, nullptr);
@@ -661,7 +665,7 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
                 }
 #endif
                 s->vulkan = std::make_unique<vkd::vulkan_display>();
-                s->vulkan->init(std::move(instance), surface, MAX_FRAME_COUNT, &s->window_callback, s->gpu_idx);
+                s->vulkan->init(std::move(instance), surface, MAX_FRAME_COUNT, *s->window_callback, s->gpu_idx);
                 LOG(LOG_LEVEL_NOTICE) << MOD_NAME "Vulkan display initialised." << std::endl;
         }
         catch (std::exception& e) { log_and_exit(e); }
@@ -671,7 +675,7 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
         }
 
         draw_splashscreen(*s);
-        return reinterpret_cast<void*>(s.release());
+        return static_cast<void*>(s.release());
 }
 
 void display_sdl2_done(void* state) {
@@ -773,14 +777,14 @@ int display_sdl2_get_property(void* state, int property, void* val, size_t* len)
                 if (sizeof(int) > *len) {
                         return FALSE;
                 }
-                int* value = reinterpret_cast<int*>(val);
                 *len = sizeof(int);
 
                 vkd::image image;
                 const auto& desc = s->current_desc;
                 assert(s->current_desc.width != 0);
                 s->vulkan->acquire_image(image, { desc.width, desc.height });
-                *value = static_cast<int>(image.get_row_pitch());
+                auto value = static_cast<int>(image.get_row_pitch());
+                memcpy(val, &value, sizeof(value));
                 s->vulkan->discard_image(image);
                 break;
         }

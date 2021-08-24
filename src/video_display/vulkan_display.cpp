@@ -352,13 +352,13 @@ RETURN_TYPE vulkan_display::allocate_description_sets() {
 }
 
 RETURN_TYPE vulkan_display::init(vulkan_instance&& instance, VkSurfaceKHR surface, uint32_t transfer_image_count,
-        window_changed_callback* window, uint32_t gpu_index) {
+        window_changed_callback& window, uint32_t gpu_index) {
         // Order of following calls is important
         assert(surface);
-        this->window = window;
+        this->window = &window;
         this->transfer_image_count = transfer_image_count;
         this->filled_img_max_count = (transfer_image_count + 1) / 2;
-        auto window_parameters = window->get_window_parameters();
+        auto window_parameters = window.get_window_parameters();
         PASS_RESULT(context.init(std::move(instance), surface, window_parameters, gpu_index));
         device = context.get_device();
         PASS_RESULT(create_shader(vertex_shader, "shaders/vert.spv", device));
