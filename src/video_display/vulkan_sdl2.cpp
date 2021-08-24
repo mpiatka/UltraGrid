@@ -146,7 +146,7 @@ struct state_vulkan_sdl2 {
 
         Uint32                  sdl_user_new_message_event;
 
-        chrono::steady_clock::time_point tv{ chrono::steady_clock::now() };
+        chrono::steady_clock::time_point time{};
         uint64_t                frames{ 0 };
 
         bool                    deinterlace{ false };
@@ -357,6 +357,7 @@ void display_sdl2_run(void* state) {
         auto* s = static_cast<state_vulkan_sdl2*>(state);
         assert(s->mod.priv_magic == MAGIC_VULKAN_SDL2);
         
+        s->time = chrono::steady_clock::now();
         while (!s->should_exit) {
                 process_events(*s);
                 
@@ -365,13 +366,13 @@ void display_sdl2_run(void* state) {
                 } catch (std::exception& e) { log_and_exit(e); }
                 
                 s->frames++;
-                auto tv = chrono::steady_clock::now();
-                double seconds = chrono::duration_cast<chrono::duration<double>>(tv - s->tv).count();
+                auto now = chrono::steady_clock::now();
+                double seconds = chrono::duration<double>{ now - s->time }.count();
                 if (seconds > 5) {
-                        double fps = static_cast<double>(s->frames) / seconds;
+                        double fps = s->frames / seconds;
                         log_msg(LOG_LEVEL_INFO, MOD_NAME "%llu frames in %g seconds = %g FPS\n",
                                 s->frames, seconds, fps);
-                        s->tv = tv;
+                        s->time = now;
                         s->frames = 0;
                 }
         }
@@ -652,7 +653,7 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
                 HWND hwnd = wmInfo.info.win.window;
                 HINSTANCE hinst = wmInfo.info.win.hinstance;
                 vk::SurfaceKHR surface;
-                auto const createInfo = vk::Win32SurfaceCreateInfoKHR{}.setHinstance(hinst).setHwnd(hwnd);
+                const auto& createInfo = vk::Win32SurfaceCreateInfoKHR{}.setHinstance(hinst).setHwnd(hwnd);
                 if (instance.get_instance().createWin32SurfaceKHR(&createInfo, nullptr, &surface) != vk::Result::eSuccess) {
                         throw std::runtime_error("Surface cannot be created.");
                 }
