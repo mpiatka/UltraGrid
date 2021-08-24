@@ -50,7 +50,7 @@
 
 #include <stdlib.h>
 #include <pthread.h>
-#include "pa_ringbuffer.h"
+#include "utils/ring_buffer.h"
 
 #include "tinywav.h"
 
@@ -60,10 +60,8 @@
 struct echo_cancellation {
         SpeexEchoState *echo_state;
 
-        PaUtilRingBuffer near_end_ringbuf;
-        char *near_end_ringbuf_data;
-        PaUtilRingBuffer far_end_ringbuf;
-        char *far_end_ringbuf_data;
+        ring_buffer_t *near_end_ringbuf;
+        ring_buffer_t *far_end_ringbuf;
 
         struct audio_frame frame;
 
@@ -84,8 +82,8 @@ static void reconfigure_echo (struct echo_cancellation *s, int sample_rate, int 
         s->frame.ch_count = 1;
         s->frame.sample_rate = sample_rate;
 
-        PaUtil_FlushRingBuffer(&s->far_end_ringbuf);
-        PaUtil_FlushRingBuffer(&s->near_end_ringbuf);
+        ring_buffer_flush(s->far_end_ringbuf);
+        ring_buffer_flush(s->near_end_ringbuf);
 
         speex_echo_ctl(s->echo_state, SPEEX_ECHO_SET_SAMPLING_RATE, &sample_rate); // should the 3rd parameter be int?
 
@@ -109,11 +107,9 @@ struct echo_cancellation * echo_cancellation_init(void)
 
         const int ringbuf_sample_count = 2 << 15;
         const int bps = 2; //TODO: assuming bps to be 2
-        s->far_end_ringbuf_data = malloc(ringbuf_sample_count * bps);
-        s->near_end_ringbuf_data = malloc(ringbuf_sample_count * bps);
 
-        PaUtil_InitializeRingBuffer(&s->far_end_ringbuf, bps, ringbuf_sample_count, s->far_end_ringbuf_data);
-        PaUtil_InitializeRingBuffer(&s->near_end_ringbuf, bps, ringbuf_sample_count, s->near_end_ringbuf_data);
+        s->far_end_ringbuf = ring_buffer_init(ringbuf_sample_count * bps);
+        s->near_end_ringbuf = ring_buffer_init(ringbuf_sample_count * bps);
 
         s->frame.data = malloc(ringbuf_sample_count * bps);
         s->frame.max_size = ringbuf_sample_count * bps;
@@ -133,8 +129,8 @@ void echo_cancellation_destroy(struct echo_cancellation *s)
         if(s->echo_state) {
                 speex_echo_state_destroy(s->echo_state);  
         }
-        free(s->near_end_ringbuf_data);
-        free(s->far_end_ringbuf_data);
+        ring_buffer_destroy(s->near_end_ringbuf);
+        ring_buffer_destroy(s->far_end_ringbuf);
         free(s->frame.data);
 
         pthread_mutex_destroy(&s->lock);
@@ -161,31 +157,34 @@ void echo_play(struct echo_cancellation *s, struct audio_frame *frame)
         }
 
         size_t samples = frame->data_len / frame->bps;
-        size_t written = 0;
+        size_t ringbuf_free_samples = ring_get_available_write_size(s->far_end_ringbuf) / 2;
+
+        if(samples > ringbuf_free_samples){
+                samples = ringbuf_free_samples;
+                log_msg(LOG_LEVEL_WARNING, "Far end ringbuf overflow!\n");
+        }
+
+
         if(frame->bps != 2) {
                 char *tmp = malloc(samples * 2);
                 change_bps(tmp, 2, frame->data, frame->bps, frame->data_len/* bytes */);
 
-                written = PaUtil_WriteRingBuffer(&s->far_end_ringbuf, tmp, samples);
+                ring_buffer_write(s->far_end_ringbuf, tmp, samples * 2);
 
                 free(tmp);
         } else {
-                written = PaUtil_WriteRingBuffer(&s->far_end_ringbuf, frame->data, samples);
-        }
-
-        if(written != samples){
-                printf("Far end ringbuf overflow!\n");
+                ring_buffer_write(s->far_end_ringbuf, frame->data, samples * 2);
         }
 
         if(s->drop_near){
                 printf("Dropping near end buffer\n");
-                PaUtil_FlushRingBuffer(&s->near_end_ringbuf);
+                ring_buffer_flush(s->near_end_ringbuf);
                 s->drop_near = false;
         }
 
         if(s->overfill){
                 int to_fill = s->overfill > samples ? samples : s->overfill;
-                PaUtil_WriteRingBuffer(&s->far_end_ringbuf, frame->data, to_fill);
+                ring_buffer_write(s->far_end_ringbuf, frame->data, to_fill * 2);
                 s->overfill -= to_fill;
         }
 
@@ -228,16 +227,20 @@ struct audio_frame * echo_cancel(struct echo_cancellation *s, struct audio_frame
         }
 
         size_t samples = data_len / 2;
-        size_t written = PaUtil_WriteRingBuffer(&s->near_end_ringbuf, data, samples);
+        size_t ringbuf_free_samples = ring_get_available_write_size(s->near_end_ringbuf) / 2;
+        
+        if(samples > ringbuf_free_samples){
+                samples = ringbuf_free_samples;
+                log_msg(LOG_LEVEL_WARNING, "Near end ringbuf overflow\n");
+        }
+
+        ring_buffer_write(s->near_end_ringbuf, data, samples * 2);
 
         free(tmp);
 
-        if(written != samples){
-                printf("Near end ringbuf overflow\n");
-        }
 
-        size_t near_end_samples = PaUtil_GetRingBufferReadAvailable(&s->near_end_ringbuf);
-        size_t far_end_samples = PaUtil_GetRingBufferReadAvailable(&s->far_end_ringbuf);
+        size_t near_end_samples = ring_get_current_size(s->near_end_ringbuf) / 2;
+        size_t far_end_samples = ring_get_current_size(s->far_end_ringbuf) / 2;
         size_t available_samples = (near_end_samples > far_end_samples) ? far_end_samples : near_end_samples;
 
         if(true || available_samples < near_end_samples){
@@ -261,12 +264,11 @@ struct audio_frame * echo_cancel(struct echo_cancellation *s, struct audio_frame
                 spx_int16_t near_arr[SAMPLES_PER_FRAME];
                 spx_int16_t far_arr[SAMPLES_PER_FRAME];
 
-                PaUtil_ReadRingBuffer(&s->near_end_ringbuf, near_arr, SAMPLES_PER_FRAME);
-                PaUtil_ReadRingBuffer(&s->far_end_ringbuf, far_arr, SAMPLES_PER_FRAME);
+                ring_buffer_read(s->near_end_ringbuf, near_arr, SAMPLES_PER_FRAME * 2);
+                ring_buffer_read(s->far_end_ringbuf, far_arr, SAMPLES_PER_FRAME * 2);
                 available_samples -= SAMPLES_PER_FRAME;
 
                 speex_echo_cancellation(s->echo_state, near_arr, far_arr, out_ptr); 
-                out_ptr += SAMPLES_PER_FRAME;
 
                 float left_channel[SAMPLES_PER_FRAME];
                 float right_channel[SAMPLES_PER_FRAME];
@@ -281,6 +283,8 @@ struct audio_frame * echo_cancel(struct echo_cancellation *s, struct audio_frame
                 void *channels[] = {left_channel, right_channel, result_channel};
 
                 tinywav_write_f(&s->tw, channels, SAMPLES_PER_FRAME);
+
+                out_ptr += SAMPLES_PER_FRAME;
         }
 
         pthread_mutex_unlock(&s->lock);
