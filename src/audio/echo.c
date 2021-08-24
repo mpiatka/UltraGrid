@@ -52,6 +52,8 @@
 #include <pthread.h>
 #include "pa_ringbuffer.h"
 
+#include "tinywav.h"
+
 #define SAMPLES_PER_FRAME (48 * 10)
 #define FILTER_LENGTH (48 * 500)
 
@@ -64,6 +66,10 @@ struct echo_cancellation {
         char *far_end_ringbuf_data;
 
         struct audio_frame frame;
+
+        TinyWav tw;
+        bool drop_near;
+        int overfill;
 
         pthread_mutex_t lock;
 };
@@ -82,6 +88,13 @@ static void reconfigure_echo (struct echo_cancellation *s, int sample_rate, int 
         PaUtil_FlushRingBuffer(&s->near_end_ringbuf);
 
         speex_echo_ctl(s->echo_state, SPEEX_ECHO_SET_SAMPLING_RATE, &sample_rate); // should the 3rd parameter be int?
+
+        if(tinywav_isOpen(&s->tw)){
+                tinywav_close_write(&s->tw);
+        }
+
+        tinywav_open_write(&s->tw, 3, sample_rate, TW_INT16, TW_SPLIT, "uv_echo_input.wav");
+
 }
 
 struct echo_cancellation * echo_cancellation_init(void)
@@ -107,6 +120,11 @@ struct echo_cancellation * echo_cancellation_init(void)
 
         printf("Echo cancellation initialized.\n");
 
+        s->tw.f = NULL;
+
+        s->drop_near = true;
+        s->overfill = 3000;
+
         return s;
 }
 
@@ -120,6 +138,10 @@ void echo_cancellation_destroy(struct echo_cancellation *s)
         free(s->frame.data);
 
         pthread_mutex_destroy(&s->lock);
+
+        if(tinywav_isOpen(&s->tw)){
+                tinywav_close_write(&s->tw);
+        }
 
         free(s);
 }
@@ -153,6 +175,18 @@ void echo_play(struct echo_cancellation *s, struct audio_frame *frame)
 
         if(written != samples){
                 printf("Far end ringbuf overflow!\n");
+        }
+
+        if(s->drop_near){
+                printf("Dropping near end buffer\n");
+                PaUtil_FlushRingBuffer(&s->near_end_ringbuf);
+                s->drop_near = false;
+        }
+
+        if(s->overfill){
+                int to_fill = s->overfill > samples ? samples : s->overfill;
+                PaUtil_WriteRingBuffer(&s->far_end_ringbuf, frame->data, to_fill);
+                s->overfill -= to_fill;
         }
 
         pthread_mutex_unlock(&s->lock);
@@ -206,7 +240,7 @@ struct audio_frame * echo_cancel(struct echo_cancellation *s, struct audio_frame
         size_t far_end_samples = PaUtil_GetRingBufferReadAvailable(&s->far_end_ringbuf);
         size_t available_samples = (near_end_samples > far_end_samples) ? far_end_samples : near_end_samples;
 
-        if(available_samples < near_end_samples){
+        if(true || available_samples < near_end_samples){
                 printf("Limited by far end (%lu near, %lu far)\n", near_end_samples, far_end_samples);
         }
 
@@ -231,6 +265,20 @@ struct audio_frame * echo_cancel(struct echo_cancellation *s, struct audio_frame
                 available_samples -= SAMPLES_PER_FRAME;
 
                 speex_echo_cancellation(s->echo_state, near_arr, far_arr, out_ptr); 
+
+                float left_channel[SAMPLES_PER_FRAME];
+                float right_channel[SAMPLES_PER_FRAME];
+                float result_channel[SAMPLES_PER_FRAME];
+
+                for(int i = 0; i < SAMPLES_PER_FRAME; i++){
+                        left_channel[i] = near_arr[i] / 32767.0f;
+                        right_channel[i] = far_arr[i] / 32767.0f;
+                        result_channel[i] = out_ptr[i] / 32767.0f;
+                }
+
+                void *channels[] = {left_channel, right_channel, result_channel};
+
+                tinywav_write_f(&s->tw, channels, SAMPLES_PER_FRAME);
         }
 
         pthread_mutex_unlock(&s->lock);
