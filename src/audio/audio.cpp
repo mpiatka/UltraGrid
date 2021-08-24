@@ -730,11 +730,6 @@ static void *audio_receiver_thread(void *arg)
 
                 if (decoded) {
                         bool failed = false;
-                        if(s->echo_state) {
-#ifdef HAVE_SPEEXDSP
-                                echo_play(s->echo_state, &current_pbuf->buffer);
-#endif
-                        }
 
                         struct audio_desc curr_desc;
                         curr_desc = audio_desc_from_audio_frame(&current_pbuf->buffer);
@@ -763,6 +758,13 @@ static void *audio_receiver_thread(void *arg)
                                 continue;
                         }
                         audio_update_recv_buf(s, current_pbuf->frame_size);
+
+                        if(s->echo_state) {
+#ifdef HAVE_SPEEXDSP
+                                echo_play(s->echo_state, &current_pbuf->buffer);
+#endif
+                        }
+
                         if (!playback_supports_multiple_streams) {
                                 audio_playback_put_frame(s->audio_playback_device, &current_pbuf->buffer);
                         } else {
@@ -984,10 +986,6 @@ static void *audio_sender_thread(void *arg)
 
                 buffer = audio_capture_read(s->audio_capture_device);
                 if(buffer) {
-                        if (s->muted_sender) {
-                                memset(buffer->data, 0, buffer->data_len);
-                        }
-                        export_audio(s->exporter, buffer);
                         if(s->echo_state) {
 #ifdef HAVE_SPEEXDSP
                                 buffer = echo_cancel(s->echo_state, buffer);
@@ -995,6 +993,10 @@ static void *audio_sender_thread(void *arg)
                                         continue;
 #endif
                         }
+                        if (s->muted_sender) {
+                                memset(buffer->data, 0, buffer->data_len);
+                        }
+                        export_audio(s->exporter, buffer);
                         if (s->paused) {
                                 continue;
                         }
