@@ -142,26 +142,26 @@ public:
 };
 
 struct state_vulkan_sdl2 {
-        module                  mod{};
+        module mod{};
 
-        Uint32                  sdl_user_new_message_event;
+        Uint32 sdl_user_new_message_event;
 
         chrono::steady_clock::time_point time{};
-        uint64_t                frames{ 0 };
+        uint64_t frames{ 0 };
 
-        bool                    deinterlace{ false };
-        bool                    fullscreen{ false };
-        bool                    keep_aspect{ false };
-        bool                    vsync{ true };
-        bool                    validation{ false };
+        bool deinterlace{ false };
+        bool fullscreen{ false };
+        bool keep_aspect{ false };
+        bool vsync{ true };
+        bool validation{ false };
 
-        int                     display_idx{ 0 };
-        int                     x{ SDL_WINDOWPOS_UNDEFINED };
-        int                     y{ SDL_WINDOWPOS_UNDEFINED };
-        int                     width{ 0 };
-        int                     height{ 0 };
-        uint32_t                window_flags{ 0 }; ///< user requested flags
-        uint32_t                gpu_idx{ vkd::NO_GPU_SELECTED };
+        int display_idx{ 0 };
+        int x{ SDL_WINDOWPOS_UNDEFINED };
+        int y{ SDL_WINDOWPOS_UNDEFINED };
+        int width{ 0 };
+        int height{ 0 };
+        uint32_t window_flags{ 0 }; ///< user requested flags
+        uint32_t gpu_idx{ vkd::NO_GPU_SELECTED };
         
         SDL_Window* window{ nullptr };
         std::unique_ptr<vkd::vulkan_display> vulkan = nullptr;
@@ -170,9 +170,8 @@ struct state_vulkan_sdl2 {
         std::array<video_frame, MAX_FRAME_COUNT> video_frames{};
         std::array<vkd::image, MAX_FRAME_COUNT> images{};
 
-        std::atomic<bool>       should_exit = false;
-        video_desc              current_desc{};
-        video_desc              current_display_desc{};
+        std::atomic<bool> should_exit = false;
+        video_desc current_desc{};
 
         explicit state_vulkan_sdl2(module* parent) {
                 module_init_default(&mod);
@@ -741,8 +740,6 @@ int display_sdl2_putf(void* state, video_frame* frame, int nonblock) {
                 return 0;
         }
         assert(image.get_id() == id);
-        s->current_desc = video_desc_from_frame(frame);
-        
 
         if (s->deinterlace) {
                 image.set_process_function([](vkd::image& image) {
