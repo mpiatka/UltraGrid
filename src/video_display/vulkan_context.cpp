@@ -155,7 +155,7 @@ RETURN_TYPE choose_gpu_by_index(vk::PhysicalDevice& gpu, std::vector<vk::Physica
         return RETURN_TYPE();
 }
 
-vk::CompositeAlphaFlagBitsKHR get_composite_alpha(vk::CompositeAlphaFlagsKHR capabilities) {
+constexpr vk::CompositeAlphaFlagBitsKHR get_composite_alpha(vk::CompositeAlphaFlagsKHR capabilities) {
         uint32_t result = 1;
         while (!(result & static_cast<uint32_t>(capabilities))) {
                 result <<= 1u;
@@ -167,25 +167,6 @@ vk::CompositeAlphaFlagBitsKHR get_composite_alpha(vk::CompositeAlphaFlagsKHR cap
 
 
 namespace vulkan_display {
-
-vk::ImageViewCreateInfo default_image_view_create_info(vk::Format format) {
-        vk::ImageViewCreateInfo image_view_info{};
-        image_view_info
-                .setViewType(vk::ImageViewType::e2D)
-                .setFormat(format);
-        image_view_info.components
-                .setR(vk::ComponentSwizzle::eIdentity)
-                .setG(vk::ComponentSwizzle::eIdentity)
-                .setB(vk::ComponentSwizzle::eIdentity)
-                .setA(vk::ComponentSwizzle::eIdentity);
-        image_view_info.subresourceRange
-                .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                .setBaseMipLevel(0)
-                .setLevelCount(1)
-                .setBaseArrayLayer(0)
-                .setLayerCount(1);
-        return image_view_info;
-}
 
 RETURN_TYPE vulkan_instance::init(std::vector<c_str>& required_extensions, bool enable_validation) {
         std::vector<c_str> validation_layers{};

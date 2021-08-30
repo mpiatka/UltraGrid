@@ -8,14 +8,16 @@ struct image_description {
         vk::Extent2D size;
         vk::Format format{};
 
-        image_description() = default;
-        image_description(vk::Extent2D size, vk::Format format) :
+        constexpr image_description() = default;
+        constexpr image_description(vk::Extent2D size, vk::Format format) :
                 size{ size }, format{ format } { }
-        image_description(uint32_t width, uint32_t height, vk::Format format = vk::Format::eR8G8B8A8Srgb) :
+        constexpr image_description(uint32_t width, uint32_t height, vk::Format format = vk::Format::eR8G8B8A8Srgb) :
                 image_description{ vk::Extent2D{width, height}, format } { }
 
         bool operator==(const image_description& other) const {
-                return size == other.size && format == other.format;
+                return size.width == other.size.width 
+                        && size.height == other.size.height 
+                        && format == other.format;
         }
 
         bool operator!=(const image_description& other) const {
@@ -42,8 +44,6 @@ class transfer_image {
 
         vk::DeviceSize row_pitch = 0;
 
-        vk::Sampler sampler;
-
         using preprocess_function = std::function<void(vulkan_display::image& image)>;
         preprocess_function preprocess_fun{ nullptr };
         
@@ -68,8 +68,8 @@ public:
                 uint32_t src_queue_family_index = VK_QUEUE_FAMILY_IGNORED,
                 uint32_t dst_queue_family_index = VK_QUEUE_FAMILY_IGNORED);
 
-        /// update_description_sets should be called everytime before recording the command buffer
-        RETURN_TYPE update_description_set(vk::Device device, vk::DescriptorSet descriptor_set, vk::Sampler sampler);
+        RETURN_TYPE prepare_for_rendering(vk::Device device, vk::DescriptorSet descriptor_set, 
+                vk::Sampler sampler, vk::SamplerYcbcrConversion conversion);
 
         RETURN_TYPE destroy(vk::Device device, bool destroy_fence = true);
 

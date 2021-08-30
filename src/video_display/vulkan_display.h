@@ -43,7 +43,9 @@ class vulkan_display {
         vk::RenderPass render_pass;
         vk::ClearValue clear_color;
 
+        vk::SamplerYcbcrConversion yCbCr_conversion;
         vk::Sampler sampler{};
+
         vk::DescriptorSetLayout descriptor_set_layout;
         vk::DescriptorPool descriptor_pool;
         std::vector<vk::DescriptorSet> descriptor_sets{};
@@ -75,7 +77,7 @@ class vulkan_display {
         bool destroyed = false;
 private:
 
-        RETURN_TYPE create_texture_sampler();
+        RETURN_TYPE create_texture_sampler(vk::Format format);
 
         RETURN_TYPE create_render_pass();
 

@@ -204,7 +204,7 @@ constexpr std::array<std::pair<char, std::string_view>, 3> display_sdl2_keybindi
         {'q', "quit"}
 }};
 
-void update_description(const video_desc& video_desc, video_frame& frame) {
+constexpr void update_description(const video_desc& video_desc, video_frame& frame) {
         frame.color_spec = video_desc.color_spec;
         frame.fps = video_desc.fps;
         frame.interlacing = video_desc.interlacing;
@@ -215,7 +215,7 @@ void update_description(const video_desc& video_desc, video_frame& frame) {
         }
 }
 
-int64_t translate_sdl_key_to_ug(SDL_Keysym sym) {
+constexpr int64_t translate_sdl_key_to_ug(SDL_Keysym sym) {
         sym.mod &= ~(KMOD_NUM | KMOD_CAPS); // remove num+caps lock modifiers
 
         // ctrl alone -> do not interpret
@@ -256,7 +256,7 @@ int64_t translate_sdl_key_to_ug(SDL_Keysym sym) {
         return -1;
 }
 
-bool display_sdl2_process_key(state_vulkan_sdl2& s, int64_t key) {
+constexpr bool display_sdl2_process_key(state_vulkan_sdl2& s, int64_t key) {
         switch (key) {
         case 'd':
                 s.deinterlace = !s.deinterlace;
@@ -480,7 +480,7 @@ void draw_splashscreen(state_vulkan_sdl2& s) {
 }
 
 // todo C++20: replace with member function
-bool starts_with(std::string_view str, std::string_view match){
+constexpr bool starts_with(std::string_view str, std::string_view match){
         return str.rfind(match, /*check only 0-th pos*/ 0) == 0;
 };
 
@@ -701,6 +701,11 @@ void display_sdl2_done(void* state) {
         delete s;
 }
 
+constexpr std::array <codec_t, 1> codecs = { YUYV };
+constexpr vkd::image_description to_vkd_image_desc(video_desc ultragrid_desc) {
+        return { ultragrid_desc.width, ultragrid_desc.height, vk::Format::eG8B8G8R8422Unorm };
+}
+
 video_frame* display_sdl2_getf(void* state) {
         auto* s = static_cast<state_vulkan_sdl2*>(state);
         assert(s->mod.priv_magic == MAGIC_VULKAN_SDL2);
@@ -708,7 +713,7 @@ video_frame* display_sdl2_getf(void* state) {
         const auto& desc = s->current_desc;
         vulkan_display::image image;
         try {
-                s->vulkan->acquire_image(image, { desc.width, desc.height });
+                s->vulkan->acquire_image(image, to_vkd_image_desc(desc));
         } catch (std::exception& e) { log_and_exit(e); }
         s->images[image.get_id()] = image;
         
@@ -755,8 +760,6 @@ int display_sdl2_putf(void* state, video_frame* frame, int nonblock) {
         return 0;
 }
 
-constexpr std::array <codec_t, 1> codecs = { RGBA };
-
 int display_sdl2_get_property(void* state, int property, void* val, size_t* len) {
         auto* s = static_cast<state_vulkan_sdl2*>(state);
         assert(s->mod.priv_magic == MAGIC_VULKAN_SDL2);
@@ -780,7 +783,7 @@ int display_sdl2_get_property(void* state, int property, void* val, size_t* len)
                 vkd::image image;
                 const auto& desc = s->current_desc;
                 assert(s->current_desc.width != 0);
-                s->vulkan->acquire_image(image, { desc.width, desc.height });
+                s->vulkan->acquire_image(image, to_vkd_image_desc(desc));
                 auto value = static_cast<int>(image.get_row_pitch());
                 memcpy(val, &value, sizeof(value));
                 s->vulkan->discard_image(image);

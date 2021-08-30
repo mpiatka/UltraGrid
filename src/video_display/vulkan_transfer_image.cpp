@@ -4,7 +4,7 @@ using namespace vulkan_display_detail;
 
 namespace {
 
-vk::DeviceSize add_padding(vk::DeviceSize size, vk::DeviceSize allignment) {
+constexpr vk::DeviceSize add_padding(vk::DeviceSize size, vk::DeviceSize allignment) {
         vk::DeviceSize remainder = size % allignment;
         if (remainder == 0) {
                 return size;
@@ -17,7 +17,7 @@ vk::DeviceSize add_padding(vk::DeviceSize size, vk::DeviceSize allignment) {
  * Check if the required flags are present among the provided flags
  */
 template<typename T>
-bool flags_present(T provided_flags, T required_flags) {
+constexpr bool flags_present(T provided_flags, T required_flags) {
         return (provided_flags & required_flags) == required_flags;
 }
 
@@ -130,15 +130,19 @@ vk::ImageMemoryBarrier  transfer_image::create_memory_barrier(
         return memory_barrier;
 }
 
-RETURN_TYPE transfer_image::update_description_set(vk::Device device, vk::DescriptorSet descriptor_set, vk::Sampler sampler) {
-        if (!view || sampler != this->sampler) {
-                if (!view) {
-                        vk::ImageViewCreateInfo view_info = vulkan_display::default_image_view_create_info(description.format);
-                        view_info.setImage(image);
-                        CHECKED_ASSIGN(view, device.createImageView(view_info));
-                }
+RETURN_TYPE transfer_image::prepare_for_rendering(vk::Device device, 
+        vk::DescriptorSet descriptor_set, vk::Sampler sampler, vk::SamplerYcbcrConversion conversion) 
+{
+        if (!view) {
+                device.destroy(view);
+                vk::ImageViewCreateInfo view_info = 
+                        vulkan_display::default_image_view_create_info(description.format);
+                view_info.setImage(image);
 
-                this->sampler = sampler;
+                vk::SamplerYcbcrConversionInfo yCbCr_info{ conversion };
+                view_info.setPNext(conversion ? (&yCbCr_info) : nullptr);
+                CHECKED_ASSIGN(view, device.createImageView(view_info));
+
                 vk::DescriptorImageInfo description_image_info;
                 description_image_info
                         .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)

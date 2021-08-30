@@ -16,11 +16,11 @@
 
 namespace vulkan_display_detail {
 
-inline vk::Result to_vk_result(bool b) {
+constexpr inline vk::Result to_vk_result(bool b) {
         return b ? vk::Result::eSuccess : vk::Result::eErrorFeatureNotPresent;
 }
 
-inline vk::Result to_vk_result(vk::Result res) {
+constexpr inline vk::Result to_vk_result(vk::Result res) {
         return res;
 }
 
@@ -84,19 +84,25 @@ struct window_parameters {
         uint32_t height;
         bool vsync;
 
-        bool operator==(const window_parameters& other) const {
+        constexpr bool operator==(const window_parameters& other) const {
                 return width == other.width &&
                         height == other.height &&
                         vsync == other.vsync;
         }
-        bool operator!=(const window_parameters& other) const {
+        constexpr bool operator!=(const window_parameters& other) const {
                 return !(*this == other);
         }
 };
 
 constexpr uint32_t NO_GPU_SELECTED = UINT32_MAX;
 
-vk::ImageViewCreateInfo default_image_view_create_info(vk::Format format);
+constexpr vk::ImageViewCreateInfo default_image_view_create_info(vk::Format format) {
+        vk::ImageViewCreateInfo image_view_info{ {}, {}, vk::ImageViewType::e2D, format };
+        image_view_info.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+        image_view_info.subresourceRange.levelCount = 1;
+        image_view_info.subresourceRange.layerCount = 1;
+        return image_view_info;
+}
 
 class vulkan_instance;
 
