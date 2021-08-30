@@ -64,11 +64,11 @@ RETURN_TYPE transfer_image::create(vk::Device device, vk::PhysicalDevice gpu,
 {
         assert(id != NO_ID);
         destroy(device, false);
-
+        
+        this->view = nullptr;
         this->description = description;
         this->layout = vk::ImageLayout::ePreinitialized;
         this->access = vk::AccessFlagBits::eHostWrite | vk::AccessFlagBits::eHostRead;
-        this->update_desciptor_set = true;
 
         vk::ImageCreateInfo image_info;
         image_info
@@ -102,10 +102,6 @@ RETURN_TYPE transfer_image::create(vk::Device device, vk::PhysicalDevice gpu,
         CHECK(void_ptr != nullptr, "Image memory cannot be mapped.");
         ptr = reinterpret_cast<std::byte*>(void_ptr);
 
-        vk::ImageViewCreateInfo view_info = vulkan_display::default_image_view_create_info(description.format);
-        view_info.setImage(image);
-        CHECKED_ASSIGN(view, device.createImageView(view_info));
-
         vk::ImageSubresource subresource{ vk::ImageAspectFlagBits::eColor, 0, 0 };
         row_pitch = device.getImageSubresourceLayout(image, subresource).rowPitch;
         return RETURN_TYPE();
@@ -135,8 +131,13 @@ vk::ImageMemoryBarrier  transfer_image::create_memory_barrier(
 }
 
 RETURN_TYPE transfer_image::update_description_set(vk::Device device, vk::DescriptorSet descriptor_set, vk::Sampler sampler) {
-        if (update_desciptor_set || sampler != this->sampler) {
-                update_desciptor_set = false;
+        if (!view || sampler != this->sampler) {
+                if (!view) {
+                        vk::ImageViewCreateInfo view_info = vulkan_display::default_image_view_create_info(description.format);
+                        view_info.setImage(image);
+                        CHECKED_ASSIGN(view, device.createImageView(view_info));
+                }
+
                 this->sampler = sampler;
                 vk::DescriptorImageInfo description_image_info;
                 description_image_info

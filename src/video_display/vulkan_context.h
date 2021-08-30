@@ -115,9 +115,11 @@ class vulkan_context {
         vk::Instance instance;
         std::unique_ptr<vk::DispatchLoaderDynamic> dynamic_dispatcher{};
         vk::DebugUtilsMessengerEXT messenger;
+        uint32_t vulkan_version{};
 
         vk::PhysicalDevice gpu;
         vk::Device device;
+        bool yCbCr_supported = false;
 
         uint32_t queue_family_index = NO_QUEUE_FAMILY_INDEX_FOUND;
         vk::Queue queue;
@@ -143,6 +145,7 @@ public:
         //getters
         vk::PhysicalDevice get_gpu() { return gpu; }
         vk::Device get_device() { return device; }
+        bool is_yCbCr_supported() { return yCbCr_supported; }
         uint32_t get_queue_familt_index() { return queue_family_index; }
         vk::Queue get_queue() { return queue; }
         vk::SwapchainKHR get_swapchain() { return swapchain; }
@@ -207,6 +210,7 @@ class vulkan_instance {
         vk::Instance instance{};
         std::unique_ptr<vk::DispatchLoaderDynamic> dynamic_dispatcher = nullptr;
         vk::DebugUtilsMessengerEXT messenger{};
+        uint32_t vulkan_version = VK_API_VERSION_1_1;
 
         RETURN_TYPE init_validation_layers_error_messenger();
 

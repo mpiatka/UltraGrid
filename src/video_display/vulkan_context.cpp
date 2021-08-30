@@ -200,7 +200,8 @@ RETURN_TYPE vulkan_instance::init(std::vector<c_str>& required_extensions, bool 
         PASS_RESULT(check_instance_extensions(required_extensions));
 
         vk::ApplicationInfo app_info{};
-        app_info.setApiVersion(VK_API_VERSION_1_0);
+        app_info.setApiVersion(VK_API_VERSION_1_1);
+        vulkan_version = VK_API_VERSION_1_1;
 
         vk::InstanceCreateInfo instance_info{};
         instance_info
@@ -209,7 +210,13 @@ RETURN_TYPE vulkan_instance::init(std::vector<c_str>& required_extensions, bool 
                 .setPpEnabledLayerNames(validation_layers.data())
                 .setEnabledExtensionCount(static_cast<uint32_t>(required_extensions.size()))
                 .setPpEnabledExtensionNames(required_extensions.data());
-        CHECKED_ASSIGN(instance, vk::createInstance(instance_info));
+        auto result = vk::createInstance(&instance_info, nullptr, &instance);
+        if (result == vk::Result::eErrorIncompatibleDriver) {
+                app_info.apiVersion = VK_API_VERSION_1_0;
+                vulkan_version = VK_API_VERSION_1_0;
+                result = vk::createInstance(&instance_info, nullptr, &instance);
+        }
+        CHECK(result, "Vulkan instance cannot be created: "s + vk::to_string(result));
 
         if (enable_validation) {
                 dynamic_dispatcher = std::make_unique<vk::DispatchLoaderDynamic>(instance, vkGetInstanceProcAddr);
@@ -279,7 +286,14 @@ RETURN_TYPE vulkan_context::create_physical_device(uint32_t gpu_index) {
                 PASS_RESULT(is_gpu_suitable(suitable, true, gpu, surface));
         }
         auto properties = gpu.getProperties();
-        std::cout << "Vulkan uses GPU called: "s << properties.deviceName << std::endl;
+        if (properties.apiVersion == VK_API_VERSION_1_0) {
+                vulkan_version = VK_API_VERSION_1_0;
+        }
+        std::cout << "Vulkan uses GPU called: " << properties.deviceName << std::endl;
+        std::cout << "Used Vulkan API: " 
+                << VK_VERSION_MAJOR(vulkan_version) << '.'
+                << VK_VERSION_MINOR(vulkan_version) << std::endl;
+
         return RETURN_TYPE();
 }
 
@@ -296,13 +310,27 @@ RETURN_TYPE vulkan_context::create_logical_device() {
 
         vk::DeviceCreateInfo device_info{};
         device_info
+                .setPNext(nullptr)
                 .setQueueCreateInfoCount(1)
                 .setPQueueCreateInfos(&queue_info)
                 .setEnabledExtensionCount(static_cast<uint32_t>(required_gpu_extensions.size()))
                 .setPpEnabledExtensionNames(required_gpu_extensions.data());
 
+        vk::PhysicalDeviceFeatures2 features2{};
+        vk::PhysicalDeviceSamplerYcbcrConversionFeatures yCbCr_feature{};
+        if (vulkan_version == VK_API_VERSION_1_1) {
+                features2.setPNext(&yCbCr_feature);
+                gpu.getFeatures2(&features2);
+                if (yCbCr_feature.samplerYcbcrConversion) {
+                        yCbCr_supported = true;
+                        device_info.setPNext(&features2);
+                        std::cout << "yCbCr feature supported." << std::endl;
+                }
+        }
+
         CHECKED_ASSIGN(device, gpu.createDevice(device_info));
         return RETURN_TYPE();
+
 }
 
 RETURN_TYPE vulkan_context::get_present_mode() {
@@ -413,6 +441,7 @@ RETURN_TYPE vulkan_context::init(vulkan_display::vulkan_instance&& instance, VkS
         this->instance = instance.instance;
         this->dynamic_dispatcher = std::move(instance.dynamic_dispatcher);
         this->messenger = instance.messenger;
+        this->vulkan_version = instance.vulkan_version;
         instance.instance = nullptr;
         instance.messenger = nullptr;
 

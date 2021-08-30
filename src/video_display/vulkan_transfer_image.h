@@ -42,7 +42,6 @@ class transfer_image {
 
         vk::DeviceSize row_pitch = 0;
 
-        bool update_desciptor_set = true;
         vk::Sampler sampler;
 
         using preprocess_function = std::function<void(vulkan_display::image& image)>;
