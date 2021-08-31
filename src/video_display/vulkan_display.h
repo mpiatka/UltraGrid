@@ -133,9 +133,9 @@ public:
 
         RETURN_TYPE display_queued_image();
 
-        bool is_yCbCr_supported() {
-                return context.is_yCbCr_supported();
-        }
+        uint32_t get_vulkan_version() { return context.get_vulkan_version(); }
+        
+        bool is_yCbCr_supported() { return context.is_yCbCr_supported(); }
 
         /**
          * @brief Hint to vulkan display that some window parameters spicified in struct Window_parameters changed

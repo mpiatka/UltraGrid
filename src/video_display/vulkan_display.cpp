@@ -490,7 +490,11 @@ RETURN_TYPE vulkan_display::acquire_image(image& result, image_description descr
         assert(description.format != vk::Format::eUndefined);
         if (!context.is_yCbCr_supported()) {
                 if (is_yCbCr_format(description.format)) {
-                        throw vulkan_display_exception{ "YCbCr formats are not supported." };
+                        std::string error_msg{ "YCbCr formats are not supported."sv };
+                        if (get_vulkan_version() == VK_API_VERSION_1_0) {
+                                error_msg.append("\nVulkan 1.1 or higher is needed for YCbCr support."sv);
+                        }
+                        throw vulkan_display_exception{error_msg};
                 }
         }
         transfer_image& transfer_image = acquire_transfer_image(available_img_queue, 

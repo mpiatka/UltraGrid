@@ -149,6 +149,7 @@ class vulkan_context {
         bool vsync = true;
 public:
         //getters
+        uint32_t get_vulkan_version() { return vulkan_version; }
         vk::PhysicalDevice get_gpu() { return gpu; }
         vk::Device get_device() { return device; }
         bool is_yCbCr_supported() { return yCbCr_supported; }
