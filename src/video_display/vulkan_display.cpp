@@ -129,7 +129,9 @@ namespace vulkan_display {
 
 RETURN_TYPE vulkan_display::create_texture_sampler(vk::Format format) {
         device.destroy(sampler);
-        device.destroy(yCbCr_conversion);
+        if (yCbCr_conversion) {
+                device.destroy(yCbCr_conversion);
+        }
         yCbCr_conversion = nullptr;
         if (is_yCbCr_format(format)) {
                 vk::SamplerYcbcrConversionCreateInfo conversion_info;
@@ -155,11 +157,8 @@ RETURN_TYPE vulkan_display::create_texture_sampler(vk::Format format) {
                 .setMagFilter(vk::Filter::eLinear)
                 .setMinFilter(vk::Filter::eLinear)
                 .setAnisotropyEnable(false)
-                .setUnnormalizedCoordinates(false);
-        
-        if (yCbCr_conversion) {
-                sampler_info.setPNext(&yCbCr_info);
-        }
+                .setUnnormalizedCoordinates(false)
+                .setPNext(yCbCr_conversion ? &yCbCr_info : nullptr);
         CHECKED_ASSIGN(sampler, device.createSampler(sampler_info));
         return RETURN_TYPE();
 }
@@ -434,7 +433,9 @@ RETURN_TYPE vulkan_display::destroy() {
                         device.destroy(pipeline_layout);
                         device.destroy(descriptor_set_layout);
                         device.destroy(sampler);
-                        device.destroy(yCbCr_conversion);
+                        if (yCbCr_conversion) {
+                                device.destroy(yCbCr_conversion);
+                        }
                 }
                 context.destroy();
         }
@@ -485,7 +486,13 @@ RETURN_TYPE vulkan_display::record_graphics_commands(transfer_image& transfer_im
 }
 
 RETURN_TYPE vulkan_display::acquire_image(image& result, image_description description) {
-
+        assert(description.size.width * description.size.height != 0);
+        assert(description.format != vk::Format::eUndefined);
+        if (!context.is_yCbCr_supported()) {
+                if (is_yCbCr_format(description.format)) {
+                        throw vulkan_display_exception{ "YCbCr formats are not supported." };
+                }
+        }
         transfer_image& transfer_image = acquire_transfer_image(available_img_queue, 
                 filled_img_queue, filled_img_max_count);
         assert(transfer_image.get_id() != transfer_image::NO_ID);
@@ -532,7 +539,11 @@ RETURN_TYPE vulkan_display::display_queued_image() {
                 return RETURN_TYPE();
         }
 
-        auto image = filled_img_queue.pop();
+        auto maybe_image = filled_img_queue.try_pop();
+        if (!maybe_image.has_value()) {
+                return RETURN_TYPE();
+        }
+        auto& image = *maybe_image;
         if (!image.get_transfer_image()) {
                 return RETURN_TYPE();
         }

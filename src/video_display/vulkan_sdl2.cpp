@@ -87,6 +87,7 @@
 #include <SDL2/SDL_syswm.h>
 #endif
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cassert>
@@ -275,8 +276,8 @@ constexpr bool display_sdl2_process_key(state_vulkan_sdl2& s, int64_t key) {
         }
 }
 
-void log_and_exit(std::exception& e) {
-        LOG(LOG_LEVEL_ERROR) << e.what() << std::endl;
+void log_and_exit_uv(std::exception& e) {
+        LOG(LOG_LEVEL_ERROR) << MOD_NAME << e.what() << std::endl;
         exit_uv(EXIT_FAILURE);
 }
 
@@ -362,7 +363,8 @@ void display_sdl2_run(void* state) {
                 
                 try {
                         s->vulkan->display_queued_image();
-                } catch (std::exception& e) { log_and_exit(e); }
+                } 
+                catch (std::exception& e) { log_and_exit_uv(e); break; }
                 
                 s->frames++;
                 auto now = chrono::steady_clock::now();
@@ -375,6 +377,8 @@ void display_sdl2_run(void* state) {
                         s->frames = 0;
                 }
         }
+        SDL_HideWindow(s->window);
+
 }
 
 void sdl2_print_displays() {
@@ -398,7 +402,8 @@ void print_gpus() {
         try {
                 instance.init(required_extensions, false);
                 instance.get_available_gpus(gpus);
-        } catch (std::exception& e) { log_and_exit(e); }
+        } 
+        catch (std::exception& e) { log_and_exit_uv(e); return; }
         
         std::cout << "\n\tVulkan GPUs:\n";
         uint32_t counter = 0;
@@ -449,7 +454,7 @@ int display_sdl2_reconfigure(void* state, video_desc desc) {
 
         assert(desc.tile_count == 1);
         s->current_desc = desc;
-        return 1;
+        return TRUE;
 }
 
 /**
@@ -461,7 +466,8 @@ void draw_splashscreen(state_vulkan_sdl2& s) {
         vkd::image image;
         try {
                 s.vulkan->acquire_image(image, {splash_width, splash_height, vk::Format::eR8G8B8A8Srgb});
-        } catch (std::exception& e) { log_and_exit(e); }
+        } 
+        catch (std::exception& e) { log_and_exit_uv(e); return; }
         const char* source = splash_data;
         char* dest = reinterpret_cast<char*>(image.get_memory_ptr());
         auto padding = image.get_row_pitch() - splash_width * 4;
@@ -476,7 +482,8 @@ void draw_splashscreen(state_vulkan_sdl2& s) {
         try {
                 s.vulkan->queue_image(image);
                 s.vulkan->display_queued_image();
-        } catch (std::exception& e) { log_and_exit(e); }
+        } 
+        catch (std::exception& e) { log_and_exit_uv(e); }
 }
 
 // todo C++20: replace with member function
@@ -668,7 +675,7 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
                 s->vulkan->init(std::move(instance), surface, MAX_FRAME_COUNT, *s->window_callback, s->gpu_idx);
                 LOG(LOG_LEVEL_NOTICE) << MOD_NAME "Vulkan display initialised." << std::endl;
         }
-        catch (std::exception& e) { log_and_exit(e); }
+        catch (std::exception& e) { log_and_exit_uv(e); return nullptr; }
 
         for (auto& frame : s->video_frames) {
                 frame = video_frame{};
@@ -687,7 +694,7 @@ void display_sdl2_done(void* state) {
         try {
                 s->vulkan->destroy();
         }
-        catch (std::exception& e) { log_and_exit(e); }
+        catch (std::exception& e) { log_and_exit_uv(e); }
         s->vulkan = nullptr;
 
         if (s->window) {
@@ -701,9 +708,19 @@ void display_sdl2_done(void* state) {
         delete s;
 }
 
-constexpr std::array <codec_t, 1> codecs = { YUYV };
-constexpr vkd::image_description to_vkd_image_desc(video_desc ultragrid_desc) {
-        return { ultragrid_desc.width, ultragrid_desc.height, vk::Format::eG8B8G8R8422Unorm };
+constexpr std::array<std::pair<codec_t,vk::Format>, 3> codec_to_vulkan_format_mapping = {{
+        {RGBA, vk::Format::eR8G8B8A8Srgb},
+        {UYVY, vk::Format::eB8G8R8G8422Unorm},
+        {YUYV, vk::Format::eG8B8G8R8422Unorm}
+}};
+
+vkd::image_description to_vkd_image_desc(video_desc ultragrid_desc) {
+        auto& mapping = codec_to_vulkan_format_mapping;
+        codec_t searched_codec = ultragrid_desc.color_spec;
+        auto iter = std::find_if(mapping.begin(), mapping.end(),
+                [searched_codec](auto pair) { return pair.first == searched_codec; });
+        vk::Format image_format = (iter == mapping.end()) ? vk::Format::eUndefined : iter->second;
+        return { ultragrid_desc.width, ultragrid_desc.height, image_format };
 }
 
 video_frame* display_sdl2_getf(void* state) {
@@ -714,7 +731,8 @@ video_frame* display_sdl2_getf(void* state) {
         vulkan_display::image image;
         try {
                 s->vulkan->acquire_image(image, to_vkd_image_desc(desc));
-        } catch (std::exception& e) { log_and_exit(e); }
+        } 
+        catch (std::exception& e) { log_and_exit_uv(e); return nullptr; }
         s->images[image.get_id()] = image;
         
         video_frame& frame = s->video_frames[image.get_id()];
@@ -735,7 +753,8 @@ int display_sdl2_putf(void* state, video_frame* frame, int nonblock) {
                 assert(image.get_id() == id);
                 try {
                         s->vulkan->discard_image(s->images[id]);
-                } catch (std::exception& e) { log_and_exit(e); }
+                } 
+                catch (std::exception& e) { log_and_exit_uv(e); return 1; }
                 return 0;
         }
 
@@ -756,7 +775,8 @@ int display_sdl2_putf(void* state, video_frame* frame, int nonblock) {
         
         try {
                 s->vulkan->queue_image(s->images[id]);
-        } catch (std::exception& e) { log_and_exit(e); }
+        } 
+        catch (std::exception& e) { log_and_exit_uv(e); return 1; }
         return 0;
 }
 
@@ -766,6 +786,10 @@ int display_sdl2_get_property(void* state, int property, void* val, size_t* len)
 
         switch (property) {
         case DISPLAY_PROPERTY_CODECS: {
+                auto& mapping = codec_to_vulkan_format_mapping;
+                std::array<codec_t, mapping.size()> codecs{};
+                std::transform(mapping.begin(), mapping.end(), codecs.begin(),
+                        [](auto pair) {return pair.first; });
                 size_t codecs_len = codecs.size() * sizeof(codec_t);
                 if (codecs_len > *len) {
                         return FALSE;
@@ -783,10 +807,13 @@ int display_sdl2_get_property(void* state, int property, void* val, size_t* len)
                 vkd::image image;
                 const auto& desc = s->current_desc;
                 assert(s->current_desc.width != 0);
-                s->vulkan->acquire_image(image, to_vkd_image_desc(desc));
-                auto value = static_cast<int>(image.get_row_pitch());
-                memcpy(val, &value, sizeof(value));
-                s->vulkan->discard_image(image);
+                try {
+                        s->vulkan->acquire_image(image, to_vkd_image_desc(desc));
+                        auto value = static_cast<int>(image.get_row_pitch());
+                        memcpy(val, &value, sizeof(value));
+                        s->vulkan->discard_image(image);
+                } 
+                catch (std::exception& e) { log_and_exit_uv(e); return FALSE; }
                 break;
         }
         default:

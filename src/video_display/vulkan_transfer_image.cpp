@@ -140,7 +140,7 @@ RETURN_TYPE transfer_image::prepare_for_rendering(vk::Device device,
                 view_info.setImage(image);
 
                 vk::SamplerYcbcrConversionInfo yCbCr_info{ conversion };
-                view_info.setPNext(conversion ? (&yCbCr_info) : nullptr);
+                view_info.setPNext(conversion ? &yCbCr_info : nullptr);
                 CHECKED_ASSIGN(view, device.createImageView(view_info));
 
                 vk::DescriptorImageInfo description_image_info;

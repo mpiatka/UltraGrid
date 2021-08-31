@@ -267,7 +267,7 @@ RETURN_TYPE vulkan_context::create_physical_device(uint32_t gpu_index) {
                 PASS_RESULT(is_gpu_suitable(suitable, true, gpu, surface));
         }
         auto properties = gpu.getProperties();
-        if (properties.apiVersion == VK_API_VERSION_1_0) {
+        if (properties.apiVersion < VK_API_VERSION_1_1) {
                 vulkan_version = VK_API_VERSION_1_0;
         }
         std::cout << "Vulkan uses GPU called: " << properties.deviceName << std::endl;
