@@ -505,3 +505,4 @@ RETURN_TYPE vulkan_context::destroy() {
 
 
 } //vulkan_display_detail
+

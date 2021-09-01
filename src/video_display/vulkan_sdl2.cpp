@@ -91,7 +91,6 @@
 #include <array>
 #include <atomic>
 #include <cassert>
-#include <charconv>
 #include <condition_variable>
 #include <cstdint>
 #include <limits>
@@ -103,6 +102,41 @@
 #include <unordered_map>
 #include <utility> // pair
 
+
+#if __has_include(<charconv>)
+#include <charconv>
+static auto from_chars(const char* first, const char* last, int& value, int base = 10) {
+        return std::from_chars(first, last, value, base);
+}
+
+#else
+#include <system_error> //errc
+namespace {
+struct from_chars_result
+{
+        const char* ptr;
+        std::errc ec;
+};
+
+from_chars_result from_chars(const char* first, const char* last, int& value, int base = 10) {
+        size_t count = 0;
+        std::string str(first, last - first);
+        from_chars_result result{};
+        try {
+                value = std::stoi(str, &count, base);
+        }
+        catch (std::invalid_argument&) {
+                result.ec = std::errc::invalid_argument;
+        }
+        catch (std::out_of_range&) {
+                result.ec = std::errc::result_out_of_range;
+        }
+        result.ptr = first + count;
+        return result;
+}
+
+} //namespace
+#endif
 
 using rang::fg;
 using rang::style;
@@ -166,7 +200,7 @@ struct state_vulkan_sdl2 {
         
         SDL_Window* window{ nullptr };
         std::unique_ptr<vkd::vulkan_display> vulkan = nullptr;
-        std::unique_ptr<window_callback> window_callback{ nullptr };
+        std::unique_ptr<::window_callback> window_callback{ nullptr };
         
         std::array<video_frame, MAX_FRAME_COUNT> video_frames{};
         std::array<vkd::image, MAX_FRAME_COUNT> images{};
@@ -373,7 +407,7 @@ void display_sdl2_run(void* state) {
                 if (seconds > 5) {
                         double fps = s->frames / seconds;
                         log_msg(LOG_LEVEL_INFO, MOD_NAME "%llu frames in %g seconds = %g FPS\n",
-                                s->frames, seconds, fps);
+                                static_cast<long long unsigned>(s->frames), seconds, fps);
                         s->time = now;
                         s->frames = 0;
                 }
@@ -522,7 +556,7 @@ store_arguments_rv store_command_line_arguments(state_vulkan_sdl2& s, std::strin
                         }
                         const char* last = str.data() + str.size();
                         int result = 0;
-                        auto [ptr, err] = std::from_chars(str.data(), last, result, base);
+                        auto [ptr, err] = from_chars(str.data(), last, result, base);
                         constexpr auto no_error = std::errc{};
                         if (err != no_error || ptr != last) {
                                 throw std::runtime_error{ std::string(token) };
@@ -668,7 +702,7 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
                 }
 #else
                 VkSurfaceKHR surface = nullptr;
-                if (!SDL_Vulkan_CreateSurface(s->window, instance, &surface)) {
+                if (!SDL_Vulkan_CreateSurface(s->window, instance.get_instance(), &surface)) {
                         std::cout << SDL_GetError() << std::endl;
                         assert(false);
                         throw std::runtime_error("SDL cannot create surface.");

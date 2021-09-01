@@ -7,7 +7,10 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <tuple>
+#include <utility>
 #include <vector>
+
 
 
 using namespace vulkan_display_detail;
@@ -313,10 +316,9 @@ RETURN_TYPE vulkan_display::create_graphics_pipeline() {
                 .setLayout(pipeline_layout)
                 .setRenderPass(render_pass);
 
-        vk::Result result;
-        std::tie(result, pipeline) = device.createGraphicsPipeline(nullptr, pipeline_info);
-        CHECK(result, "Pipeline cannot be created.");
-        return RETURN_TYPE();
+        auto result = device.createGraphicsPipelines(nullptr, 1, &pipeline_info, nullptr, &pipeline);
+        CHECK(result, "Pipeline cannot be created.");       
+	return RETURN_TYPE();
 }
 
 RETURN_TYPE vulkan_display::create_image_semaphores()

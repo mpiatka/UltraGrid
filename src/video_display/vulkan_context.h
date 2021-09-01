@@ -5,6 +5,10 @@
 #endif //NO_EXCEPTIONS
 
 #include <vulkan/vulkan.hpp>
+static_assert(VK_HEADER_VERSION > 100); // minimum Vulkan SDK version is 1.1.101
+//Newer versions can be downloaded from the official website:
+//https://vulkan.lunarg.com/sdk/home
+
 //remove leaking macros
 #undef min
 #undef max
