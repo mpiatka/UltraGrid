@@ -293,7 +293,7 @@ static void * audio_cap_testcard_init(const char *cfg)
                 s->total_samples = metadata.data_size  * 8ULL /  metadata.ch_count / metadata.bits_per_sample;
                 LOG(LOG_LEVEL_VERBOSE) << MOD_NAME << s->total_samples << " samples read from file " << wav_file << "\n";
 
-                const int headroom = (s->chunk_size - 1) * metadata.ch_count * s->audio.bps;
+                const int headroom = (s->chunk_size - 1) * s->audio.ch_count * s->audio.bps;
                 const int samples_data_size = s->total_samples * s->audio.ch_count * s->audio.bps;
 
                 const int audio_samples_size = samples_data_size + headroom;
@@ -308,7 +308,7 @@ static void * audio_cap_testcard_init(const char *cfg)
                     read_to = tmp;
                 }
                 unsigned int samples = wav_read(read_to, s->total_samples, wav, &metadata);
-                int bytes = samples * s->audio.bps * s->audio.ch_count;
+                int bytes = samples * (metadata.bits_per_sample / 8) * metadata.ch_count;
                 if (samples != s->total_samples) {
                         LOG(LOG_LEVEL_WARNING) << MOD_NAME << "Warning: premature end of WAV file (" << bytes << " read, " << metadata.data_size << " expected)!\n";
                         s->total_samples = samples;
