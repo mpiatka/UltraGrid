@@ -212,7 +212,12 @@ int32_t downshift_with_dither(int32_t val, int shift){
         const int mask = (1 << shift) - 1;
         int triangle_dither = (rand_gen() & mask) - (rand_gen() & mask);
 
-        //val is big, dithering could cause over/underflow
+        /* Prevent over/underflow when val is big.
+         *
+         * abs(val) could cause problems if val is INT32_MIN, but integer
+         * 32-bit pcm is rare and should not contain the value INT32_MIN
+         * anyway because of symmetry, as specified by AES17 and IEC 61606-3
+         */
         if(INT32_MAX - abs(val) < mask)
                 return val >> shift;
 
