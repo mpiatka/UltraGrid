@@ -207,10 +207,15 @@ void audio_frame_write_desc(struct audio_frame *f, struct audio_desc desc)
 }
 
 int32_t downshift_with_dither(int32_t val, int shift){
-        static std::minstd_rand rand_gen;
+        static thread_local std::uint_fast32_t last_rand = 1;
 
         const int mask = (1 << shift) - 1;
-        int triangle_dither = (rand_gen() & mask) - (rand_gen() & mask);
+
+        //Pseudorandom number generation, same parameters as std::minstd_rand
+        last_rand = (last_rand * 48271) % 2147483647;
+        int triangle_dither = last_rand & mask;
+        last_rand = (last_rand * 48271) % 2147483647;
+        triangle_dither -= last_rand & mask; //triangle probability distribution
 
         /* Prevent over/underflow when val is big.
          *
