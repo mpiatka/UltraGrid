@@ -54,11 +54,12 @@
 #include <algorithm>
 #include <chrono>
 #include "utils/ring_buffer.h"
+#include "host.h"
 
 #include "tinywav.h"
 
-#define SAMPLES_PER_FRAME (1 << 9) //about 10ms at 48kHz, power of two for easy FFT
-#define FILTER_LENGTH (48 * 500)
+#define SAMPLES_PER_FRAME (1 << 9) //512, about 10ms at 48kHz, power of two for easy FFT
+#define DEFAULT_FILTER_LENGTH (48 * 500)
 
 #define MOD_NAME "[Echo cancel] "
 
@@ -90,8 +91,8 @@ struct echo_cancellation {
         struct audio_frame frame;
 
         TinyWav tw;
+        int requested_delay;
         int prefill;
-        bool before_first_near_sample;
         time_point next_expected_near;
 
         std::mutex lock;
@@ -120,11 +121,36 @@ static void reconfigure_echo (struct echo_cancellation *s, int sample_rate, int 
 
 }
 
+#define TEXTIFY(a) TEXTIFY2(a)
+#define TEXTIFY2(a) #a
+
+ADD_TO_PARAM("echo-cancel-filter-length", "* echo-cancel-filter-length=<samples>\n"
+                "  Echo cancellation filter length in samples, should be the third of the room's impulse response length. (default "
+                TEXTIFY(DEFAULT_FILTER_LENGTH) ").\n");
+
+ADD_TO_PARAM("echo-cancel-delay", "* echo-cancel-delay=<samples>\n"
+                "  Echo cancellation additional delay added to far end in samples, should be slightly less than output device latency.\n");
+
 struct echo_cancellation * echo_cancellation_init(void)
 {
         struct echo_cancellation *s = new echo_cancellation();
 
-        s->echo_state.reset(speex_echo_state_init(SAMPLES_PER_FRAME, FILTER_LENGTH));
+        int filter_length = DEFAULT_FILTER_LENGTH;
+        if(const char *param = get_commandline_param("echo-cancel-filter-length"); param != nullptr){
+                char *end;
+                int len = strtol(param, &end, 10);
+                if(end != param)
+                        filter_length = len;
+        }
+
+        if(const char *param = get_commandline_param("echo-cancel-delay"); param != nullptr){
+                char *end;
+                int len = strtol(param, &end, 10);
+                if(end != param)
+                        s->requested_delay = len;
+        }
+
+        s->echo_state.reset(speex_echo_state_init(SAMPLES_PER_FRAME, filter_length));
 
         s->frame.data = NULL;
         s->frame.sample_rate = s->frame.bps = 0;
@@ -140,12 +166,11 @@ struct echo_cancellation * echo_cancellation_init(void)
         s->frame.max_size = ringbuf_sample_count * sizeof(s->frame_data[0]);
         static_assert(sizeof(s->frame_data[0]) == bps);
 
-        log_msg(LOG_LEVEL_NOTICE, MOD_NAME "Echo cancellation initialized.\n");
+        log_msg(LOG_LEVEL_NOTICE, MOD_NAME "Echo cancellation initialized with filter length %d samples.\n", filter_length);
 
         s->tw.f = NULL;
 
         s->prefill = 0;
-        s->before_first_near_sample = true;
 
         return s;
 }
@@ -245,6 +270,12 @@ struct audio_frame * echo_cancel(struct echo_cancellation *s, struct audio_frame
         }
 
         if(s->next_expected_near < steady_clock::now()){
+                /* It is possible that the capture thread starts late or
+                 * freezes, which could create an unwanted delay between far
+                 * and near ends.  To partialy protect against this, drop the
+                 * contents of far end buffer, when the last frame arrived more
+                 * than 1s ago.
+                 */
                 auto diff = steady_clock::now() - s->next_expected_near;
                 long long delay = std::chrono::duration_cast<std::chrono::microseconds>(diff).count();
                 log_msg(LOG_LEVEL_WARNING, MOD_NAME "Near samples late by %lldus\n", delay);
@@ -255,25 +286,6 @@ struct audio_frame * echo_cancel(struct echo_cancellation *s, struct audio_frame
                 ring_advance_read_idx(s->far_end_ringbuf.get(), current);
         }
         s->next_expected_near = steady_clock::now() + std::chrono::seconds(1);
-
-#if 0
-        if(s->before_first_near_sample){
-                /* It is possible that the capture thread starts late, which
-                 * could create an unwanted delay between far and near ends.
-                 * To partialy protect against this, drop the contents of far
-                 * end buffer, when the very first near end samples arrive.
-                 *
-                 * This does not however protect against random capture thread
-                 * freezes or dropouts.
-                 */
-                int current = ring_get_current_size(s->far_end_ringbuf.get());
-                //drop only whole frames
-                current = (current / SAMPLES_PER_FRAME) * SAMPLES_PER_FRAME;
-                ring_advance_read_idx(s->far_end_ringbuf.get(), current);
-
-                s->before_first_near_sample = false;
-        }
-#endif
 
         if(frame->bps != 2){
                 //Need to change bps, put whole incoming frame into ringbuf
@@ -302,7 +314,7 @@ struct audio_frame * echo_cancel(struct echo_cancellation *s, struct audio_frame
 
                 //The delay between far end and near end will always be at least
                 //recorded frame length
-                s->prefill = in_frame_samples;
+                s->prefill = in_frame_samples + s->requested_delay;
         }
 
         size_t frames_to_process = near_end_samples / SAMPLES_PER_FRAME;
