@@ -118,6 +118,8 @@ public:
 
         RETURN_TYPE destroy();
 
+        RETURN_TYPE is_image_description_supported(bool& supported, image_description description);
+
         RETURN_TYPE acquire_image(image& image, image_description description);
 
         RETURN_TYPE queue_image(image img);

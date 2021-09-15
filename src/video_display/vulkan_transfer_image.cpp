@@ -1,7 +1,7 @@
 #include "vulkan_transfer_image.h"
 
 using namespace vulkan_display_detail;
-
+namespace vkd = vulkan_display;
 namespace {
 
 constexpr vk::DeviceSize add_padding(vk::DeviceSize size, vk::DeviceSize allignment) {
@@ -48,9 +48,35 @@ RETURN_TYPE get_memory_type(
         return RETURN_TYPE();
 }
 
+constexpr vk::ImageType image_type = vk::ImageType::e2D;
+constexpr vk::ImageTiling image_tiling = vk::ImageTiling::eLinear;
+constexpr vk::ImageUsageFlags image_usage_flags = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst;
+constexpr vk::ImageCreateFlags image_create_flags = {};
 } //namespace -------------------------------------------------------------
 
 namespace vulkan_display_detail{
+
+RETURN_TYPE transfer_image::is_image_description_supported(bool& supported, vk::PhysicalDevice gpu, 
+        vkd::image_description description)
+{
+        vk::ImageFormatProperties properties;
+        auto result = gpu.getImageFormatProperties(
+                description.format,
+                image_type,
+                image_tiling,
+                image_usage_flags,
+                image_create_flags,
+                &properties);
+        if (result == vk::Result::eErrorFormatNotSupported) {
+                supported = false;
+                return RETURN_TYPE();
+        }
+        CHECK(result, "Error queriing image properties:")
+        supported = true
+                && description.size.height <= properties.maxExtent.height
+                && description.size.width <= properties.maxExtent.width;
+        return RETURN_TYPE();
+}
 
 RETURN_TYPE transfer_image::init(vk::Device device, uint32_t id) {
         this->id = id;
@@ -60,7 +86,7 @@ RETURN_TYPE transfer_image::init(vk::Device device, uint32_t id) {
 }
 
 RETURN_TYPE transfer_image::create(vk::Device device, vk::PhysicalDevice gpu,
-        vulkan_display::image_description description)
+        vkd::image_description description)
 {
         assert(id != NO_ID);
         destroy(device, false);
@@ -72,14 +98,15 @@ RETURN_TYPE transfer_image::create(vk::Device device, vk::PhysicalDevice gpu,
 
         vk::ImageCreateInfo image_info;
         image_info
-                .setImageType(vk::ImageType::e2D)
+                .setFlags(image_create_flags)
+                .setImageType(image_type)
                 .setExtent(vk::Extent3D{ description.size, 1 })
                 .setMipLevels(1)
                 .setArrayLayers(1)
                 .setFormat(description.format)
-                .setTiling(vk::ImageTiling::eLinear)
+                .setTiling(image_tiling)
                 .setInitialLayout(vk::ImageLayout::ePreinitialized)
-                .setUsage(vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst)
+                .setUsage(image_usage_flags)
                 .setSharingMode(vk::SharingMode::eExclusive)
                 .setSamples(vk::SampleCountFlagBits::e1);
         CHECKED_ASSIGN(image, device.createImage(image_info));
@@ -136,7 +163,7 @@ RETURN_TYPE transfer_image::prepare_for_rendering(vk::Device device,
         if (!view) {
                 device.destroy(view);
                 vk::ImageViewCreateInfo view_info = 
-                        vulkan_display::default_image_view_create_info(description.format);
+                        vkd::default_image_view_create_info(description.format);
                 view_info.setImage(image);
 
                 vk::SamplerYcbcrConversionInfo yCbCr_info{ conversion };

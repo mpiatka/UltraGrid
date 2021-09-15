@@ -11,7 +11,7 @@ struct image_description {
         constexpr image_description() = default;
         constexpr image_description(vk::Extent2D size, vk::Format format) :
                 size{ size }, format{ format } { }
-        constexpr image_description(uint32_t width, uint32_t height, vk::Format format = vk::Format::eR8G8B8A8Srgb) :
+        constexpr image_description(uint32_t width, uint32_t height, vk::Format format) :
                 image_description{ vk::Extent2D{width, height}, format } { }
 
         bool operator==(const image_description& other) const {
@@ -58,6 +58,9 @@ public:
         const vulkan_display::image_description& get_description() { return description; }
         uint32_t get_id() { return id; }
 
+        static RETURN_TYPE is_image_description_supported(bool& supported, vk::PhysicalDevice gpu,
+                vulkan_display::image_description description);
+        
         RETURN_TYPE init(vk::Device device, uint32_t id);
 
         RETURN_TYPE create(vk::Device device, vk::PhysicalDevice gpu, vulkan_display::image_description description);

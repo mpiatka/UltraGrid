@@ -708,10 +708,11 @@ void display_sdl2_done(void* state) {
         delete s;
 }
 
-constexpr std::array<std::pair<codec_t,vk::Format>, 3> codec_to_vulkan_format_mapping = {{
+constexpr std::array<std::pair<codec_t, vk::Format>, 4> codec_to_vulkan_format_mapping {{
         {RGBA, vk::Format::eR8G8B8A8Srgb},
         {UYVY, vk::Format::eB8G8R8G8422Unorm},
-        {YUYV, vk::Format::eG8B8G8R8422Unorm}
+        {YUYV, vk::Format::eG8B8G8R8422Unorm},
+        {Y216, vk::Format::eG16B16G16R16422Unorm}
 }};
 
 vkd::image_description to_vkd_image_desc(video_desc ultragrid_desc) {
@@ -787,9 +788,23 @@ int display_sdl2_get_property(void* state, int property, void* val, size_t* len)
         switch (property) {
         case DISPLAY_PROPERTY_CODECS: {
                 auto& mapping = codec_to_vulkan_format_mapping;
-                std::array<codec_t, mapping.size()> codecs{};
-                std::transform(mapping.begin(), mapping.end(), codecs.begin(),
-                        [](auto pair) {return pair.first; });
+                std::vector<codec_t> codecs{};
+                codecs.reserve(mapping.size());
+                for (auto& pair : mapping) {
+                        bool format_supported = false;
+                        try {
+                                s->vulkan->is_image_description_supported(format_supported,
+                                        {1920, 1080, pair.second });
+                        }
+                        catch (std::exception& e) { log_and_exit_uv(e); return FALSE; }
+                        if (format_supported) {
+                                codecs.push_back(pair.first);
+                        }
+                }
+                for (auto codec : codecs) {
+                        std::cout << get_codec_name(codec) << " ";
+                }
+                std::cout << std::endl;
                 size_t codecs_len = codecs.size() * sizeof(codec_t);
                 if (codecs_len > *len) {
                         return FALSE;

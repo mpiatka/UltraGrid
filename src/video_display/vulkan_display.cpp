@@ -91,7 +91,8 @@ RETURN_TYPE update_render_area_viewport_scissor(render_area& render_area, vk::Vi
         return RETURN_TYPE();
 }
 
-transfer_image& acquire_transfer_image(concurrent_queue<transfer_image*>& available_img_queue,
+[[nodiscard]] transfer_image& acquire_transfer_image(
+        concurrent_queue<transfer_image*>& available_img_queue,
         concurrent_queue<vulkan_display::image>& filled_img_queue, unsigned filled_img_max_count)
 {
         // first try available_img_queue
@@ -439,6 +440,16 @@ RETURN_TYPE vulkan_display::destroy() {
                 }
                 context.destroy();
         }
+        return RETURN_TYPE();
+}
+
+RETURN_TYPE vulkan_display::is_image_description_supported(bool& supported, image_description description) {
+        if (!is_yCbCr_supported() && is_yCbCr_format(description.format)) {
+                supported = false;
+                return RETURN_TYPE();
+        }
+        std::scoped_lock lock(device_mutex);
+        PASS_RESULT(transfer_image::is_image_description_supported(supported, context.get_gpu(), description));
         return RETURN_TYPE();
 }
 
