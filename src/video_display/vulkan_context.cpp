@@ -4,10 +4,6 @@
 
 using namespace vulkan_display_detail;
 
-#ifdef NO_EXCEPTIONS
-std::string vulkan_display_error_message{};
-#endif // NO_EXCEPTIONS
-
 namespace {
 
 VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
@@ -16,7 +12,7 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
         const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
         [[maybe_unused]] void* pUserData)
 {
-        std::cout << "validation layer: " << pCallbackData->pMessage << '\n' << std::endl;
+        log_msg("validation layer: "s + pCallbackData->pMessage);
         return VK_FALSE;
 }
 
@@ -155,7 +151,7 @@ RETURN_TYPE choose_gpu_by_index(vk::PhysicalDevice& gpu, std::vector<vk::Physica
         return RETURN_TYPE();
 }
 
-constexpr vk::CompositeAlphaFlagBitsKHR get_composite_alpha(vk::CompositeAlphaFlagsKHR capabilities) {
+vk::CompositeAlphaFlagBitsKHR get_composite_alpha(vk::CompositeAlphaFlagsKHR capabilities) {
         uint32_t result = 1;
         while (!(result & static_cast<uint32_t>(capabilities))) {
                 result <<= 1u;
@@ -168,7 +164,8 @@ constexpr vk::CompositeAlphaFlagBitsKHR get_composite_alpha(vk::CompositeAlphaFl
 
 namespace vulkan_display {
 
-RETURN_TYPE vulkan_instance::init(std::vector<c_str>& required_extensions, bool enable_validation) {
+RETURN_TYPE vulkan_instance::init(std::vector<c_str>& required_extensions, bool enable_validation, std::function<void(std::string_view sv)> logging_function) {
+        log_msg = std::move(logging_function);
         std::vector<c_str> validation_layers{};
         if (enable_validation) {
                 validation_layers.push_back("VK_LAYER_KHRONOS_validation");
@@ -270,11 +267,15 @@ RETURN_TYPE vulkan_context::create_physical_device(uint32_t gpu_index) {
         if (properties.apiVersion < VK_API_VERSION_1_1) {
                 vulkan_version = VK_API_VERSION_1_0;
         }
-        std::cout << "Vulkan uses GPU called: " << properties.deviceName << std::endl;
-        std::cout << "Used Vulkan API: " 
-                << VK_VERSION_MAJOR(vulkan_version) << '.'
-                << VK_VERSION_MINOR(vulkan_version) << std::endl;
-
+        std::string device_name = properties.deviceName;
+        log_msg("Vulkan uses GPU called: "s + device_name);
+        std::string msg; //todo C++20 use std::format
+        msg.reserve(20);
+        msg += ("Used Vulkan API: ");
+        msg += std::to_string(VK_VERSION_MAJOR(vulkan_version));
+        msg += ".";
+        msg += std::to_string(VK_VERSION_MINOR(vulkan_version));
+        log_msg(msg);
         return RETURN_TYPE();
 }
 
@@ -305,7 +306,7 @@ RETURN_TYPE vulkan_context::create_logical_device() {
                 if (yCbCr_feature.samplerYcbcrConversion) {
                         yCbCr_supported = true;
                         device_info.setPNext(&features2);
-                        std::cout << "yCbCr feature supported." << std::endl;
+                        log_msg("yCbCr feature supported.");
                 }
         }
 

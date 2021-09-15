@@ -1,5 +1,4 @@
 #pragma once
-#undef VULKAN_HPP_NO_EXCEPTIONS
 
 #ifdef NO_EXCEPTIONS
 #define VULKAN_HPP_NO_EXCEPTIONS
@@ -10,11 +9,15 @@
 #undef min
 #undef max
 
+#include <functional>
+#include <iostream>
 #include <memory>
 #include <string>
 
 
 namespace vulkan_display_detail {
+
+inline std::function<void(std::string_view)> log_msg;
 
 constexpr inline vk::Result to_vk_result(bool b) {
         return b ? vk::Result::eSuccess : vk::Result::eErrorFeatureNotPresent;
@@ -29,7 +32,7 @@ constexpr inline vk::Result to_vk_result(vk::Result res) {
 
 #ifdef NO_EXCEPTIONS //-------------------------------------------------------
 //EXCEPTIONS ARE DISABLED
-extern std::string vulkan_display_error_message;
+inline std::string vulkan_display_error_message;
 
 #define RETURN_TYPE vk::Result
 
@@ -96,7 +99,7 @@ struct window_parameters {
 
 constexpr uint32_t NO_GPU_SELECTED = UINT32_MAX;
 
-constexpr vk::ImageViewCreateInfo default_image_view_create_info(vk::Format format) {
+inline vk::ImageViewCreateInfo default_image_view_create_info(vk::Format format) {
         vk::ImageViewCreateInfo image_view_info{ {}, {}, vk::ImageViewType::e2D, format };
         image_view_info.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
         image_view_info.subresourceRange.levelCount = 1;
@@ -213,6 +216,10 @@ public:
 
 namespace vulkan_display {
 
+inline void cout_output(std::string_view msg) {
+        std::cout << msg << std::endl;
+}
+
 class vulkan_instance {
         vk::Instance instance{};
         std::unique_ptr<vk::DispatchLoaderDynamic> dynamic_dispatcher = nullptr;
@@ -239,7 +246,7 @@ public:
          *                              usually needed for creating vulkan surface
          * @param enable_validation     Enable vulkan validation layers, they should be disabled in release build.
          */
-        RETURN_TYPE init(std::vector<const char*>& required_extensions, bool enable_validation);
+        RETURN_TYPE init(std::vector<const char*>& required_extensions, bool enable_validation, std::function<void(std::string_view sv)> logging_function = cout_output);
         
         /**
          * @brief returns all available grafhics cards

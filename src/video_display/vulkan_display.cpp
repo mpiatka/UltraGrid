@@ -505,7 +505,7 @@ RETURN_TYPE vulkan_display::acquire_image(image& result, image_description descr
                         if (get_vulkan_version() == VK_API_VERSION_1_0) {
                                 error_msg.append("\nVulkan 1.1 or higher is needed for YCbCr support."sv);
                         }
-                        throw vulkan_display_exception{error_msg};
+                        CHECK(false, error_msg);
                 }
         }
         transfer_image& transfer_image = acquire_transfer_image(available_img_queue, 
@@ -574,8 +574,8 @@ RETURN_TYPE vulkan_display::display_queued_image() {
         if (transfer_image.get_description() != current_image_description) {
                 auto image_format = transfer_image.get_description().format;
                 if (image_format != current_image_description.format) {
-                        std::cout << "Recreating pipeline" << std::endl;
-                        context.get_queue().waitIdle();
+                        log_msg("Recreating pipeline");
+                        PASS_RESULT(context.get_queue().waitIdle());
                         
                         PASS_RESULT(create_texture_sampler(image_format));
                         PASS_RESULT(create_descriptor_set_layout());

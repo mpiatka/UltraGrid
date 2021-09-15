@@ -50,7 +50,7 @@ RETURN_TYPE get_memory_type(
 
 constexpr vk::ImageType image_type = vk::ImageType::e2D;
 constexpr vk::ImageTiling image_tiling = vk::ImageTiling::eLinear;
-constexpr vk::ImageUsageFlags image_usage_flags = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst;
+const vk::ImageUsageFlags image_usage_flags = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst;
 constexpr vk::ImageCreateFlags image_create_flags = {};
 } //namespace -------------------------------------------------------------
 

@@ -650,7 +650,9 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
         assert(extension_count > 0);
         try {
                 vkd::vulkan_instance instance;
-                instance.init(required_extensions, s->validation);
+                auto logging_function =
+                        [](std::string_view sv) { LOG(LOG_LEVEL_INFO) << MOD_NAME << sv << std::endl; };
+                instance.init(required_extensions, s->validation, logging_function);
 #ifdef __MINGW32__
                 //SDL2 for MINGW has problem creating surface
                 SDL_SysWMinfo wmInfo{};
@@ -801,10 +803,11 @@ int display_sdl2_get_property(void* state, int property, void* val, size_t* len)
                                 codecs.push_back(pair.first);
                         }
                 }
+                LOG(LOG_LEVEL_INFO) << MOD_NAME "Supported codecs are:";
                 for (auto codec : codecs) {
-                        std::cout << get_codec_name(codec) << " ";
+                        LOG(LOG_LEVEL_INFO) << get_codec_name(codec) << " ";
                 }
-                std::cout << std::endl;
+                LOG(LOG_LEVEL_INFO) << std::endl;
                 size_t codecs_len = codecs.size() * sizeof(codec_t);
                 if (codecs_len > *len) {
                         return FALSE;

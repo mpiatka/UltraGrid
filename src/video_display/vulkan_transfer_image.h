@@ -8,10 +8,10 @@ struct image_description {
         vk::Extent2D size;
         vk::Format format{};
 
-        constexpr image_description() = default;
-        constexpr image_description(vk::Extent2D size, vk::Format format) :
+        image_description() = default;
+        image_description(vk::Extent2D size, vk::Format format) :
                 size{ size }, format{ format } { }
-        constexpr image_description(uint32_t width, uint32_t height, vk::Format format) :
+        image_description(uint32_t width, uint32_t height, vk::Format format) :
                 image_description{ vk::Extent2D{width, height}, format } { }
 
         bool operator==(const image_description& other) const {
