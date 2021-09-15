@@ -544,7 +544,10 @@ RETURN_TYPE vulkan_display::queue_image(image image) {
         return RETURN_TYPE();
 }
 
-RETURN_TYPE vulkan_display::display_queued_image() {
+RETURN_TYPE vulkan_display::display_queued_image(bool* displayed) {
+        if (displayed) {
+                *displayed = false;
+        }
         auto window_parameters = window->get_window_parameters();
         if (window_parameters.width * window_parameters.height == 0) {
                 auto image = filled_img_queue.try_pop();
@@ -640,7 +643,9 @@ RETURN_TYPE vulkan_display::display_queued_image() {
                 default: CHECK(false, "Error presenting image:"s + vk::to_string(present_result));
                 }
         }
-
+        if (displayed) {
+                *displayed = true;
+        }
         available_img_queue.push(&transfer_image);
         return RETURN_TYPE();
 }

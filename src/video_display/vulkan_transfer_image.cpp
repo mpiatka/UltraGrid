@@ -72,8 +72,7 @@ RETURN_TYPE transfer_image::is_image_description_supported(bool& supported, vk::
                 return RETURN_TYPE();
         }
         CHECK(result, "Error queriing image properties:")
-        supported = true
-                && description.size.height <= properties.maxExtent.height
+        supported = description.size.height <= properties.maxExtent.height
                 && description.size.width <= properties.maxExtent.width;
         return RETURN_TYPE();
 }

@@ -133,7 +133,7 @@ public:
                 return RETURN_TYPE();
         }
 
-        RETURN_TYPE display_queued_image();
+        RETURN_TYPE display_queued_image(bool* displayed = nullptr);
 
         uint32_t get_vulkan_version() { return context.get_vulkan_version(); }
         

@@ -360,13 +360,14 @@ void display_sdl2_run(void* state) {
         s->time = chrono::steady_clock::now();
         while (!s->should_exit) {
                 process_events(*s);
-                
+                bool displayed = false;
                 try {
-                        s->vulkan->display_queued_image();
+                        s->vulkan->display_queued_image(&displayed);
                 } 
                 catch (std::exception& e) { log_and_exit_uv(e); break; }
-                
-                s->frames++;
+                if (displayed) {
+                        s->frames++;
+                }
                 auto now = chrono::steady_clock::now();
                 double seconds = chrono::duration<double>{ now - s->time }.count();
                 if (seconds > 5) {
