@@ -1272,6 +1272,35 @@ then
 fi
 
 # ------------------------------------------------------------------------------
+# Vulkan
+# ------------------------------------------------------------------------------
+vulkan=no
+
+AC_ARG_ENABLE(vulkan,
+[  --disable-vulkan            disable sdl2_vulkan display (default is auto]
+[                          Requires:  sdl2 vulkan],
+    [vulkan_req=$enableval],
+    [vulkan_req=$build_default]
+    )
+
+PKG_CHECK_MODULES([VULKAN], [vulkan], [found_vulkan=yes], [found_vulkan=no])
+
+if test $vulkan_req != no; then
+        if test $sdl = no -o $sdl_version != 2; then
+                AC_MSG_ERROR([SDL2 not found]);
+        fi
+fi
+echo $vulkan_req $sdl $sdl_version $found_vulkan
+if test $vulkan_req != no -a $sdl = yes -a $sdl_version = 2 -a $found_vulkan = yes
+then
+        VULKAN_OBJ="src/video_display/vulkan_sdl2.o src/video_display/vulkan_display.o src/video_display/vulkan_context.o"
+        AC_DEFINE([HAVE_VULKAN], [1],  [Build with vulkan support])
+        VULKAN_LIBS="$VULKAN_LIBS $SDL_LIB"
+        ADD_MODULE("display_vulkan_sdl2", "$VULKAN_OBJ", "$VULKAN_LIBS")
+        vulkan=yes
+fi
+
+# ------------------------------------------------------------------------------
 # GLM (OpenGL math library)
 # ------------------------------------------------------------------------------
 GLM_INC=
@@ -3393,6 +3422,7 @@ RESULT=`add_column "$RESULT" "Screen capture" $screen_cap $?`
 RESULT=`add_column "$RESULT" "SDL (ver. $sdl_version)" $sdl $?`
 RESULT=`add_column "$RESULT" "SW video mix" $swmix $?`
 RESULT=`add_column "$RESULT" "V4L2" $v4l2 $?`
+RESULT=`add_column "$RESULT" "VULKAN_SDL2" $vulkan $?`
 RESULT=`add_column "$RESULT" "XIMEA" $ximea $?`
 RESULT=`end_section "$RESULT"`
 
