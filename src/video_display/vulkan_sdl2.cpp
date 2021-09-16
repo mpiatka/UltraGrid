@@ -695,9 +695,12 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
                 SDL_GetWindowWMInfo(s->window, &wmInfo);
                 HWND hwnd = wmInfo.info.win.window;
                 HINSTANCE hinst = wmInfo.info.win.hinstance;
-                vk::SurfaceKHR surface;
-                const auto& createInfo = vk::Win32SurfaceCreateInfoKHR{}.setHinstance(hinst).setHwnd(hwnd);
-                if (instance.get_instance().createWin32SurfaceKHR(&createInfo, nullptr, &surface) != vk::Result::eSuccess) {
+                vk::Win32SurfaceCreateInfoKHR create_info{};
+                create_info
+                        .setHinstance(hinst)
+                        .setHwnd(hwnd);
+                vk::SurfaceKHR surface = nullptr;
+                if (instance.get_instance().createWin32SurfaceKHR(&create_info, nullptr, &surface) != vk::Result::eSuccess) {
                         throw std::runtime_error("Surface cannot be created.");
                 }
 #else
