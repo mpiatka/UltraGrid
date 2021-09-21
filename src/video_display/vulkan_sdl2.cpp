@@ -93,6 +93,7 @@
 #include <cassert>
 #include <condition_variable>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <mutex>
 #include <queue>
@@ -105,9 +106,7 @@
 
 #if __has_include(<charconv>)
 #include <charconv>
-static auto from_chars(const char* first, const char* last, int& value, int base = 10) {
-        return std::from_chars(first, last, value, base);
-}
+using std::from_chars;
 
 #else
 #include <system_error> //errc
@@ -342,18 +341,27 @@ void process_events(state_vulkan_sdl2& s) {
         while (SDL_PollEvent(&sdl_event)) {
                 if (sdl_event.type == s.sdl_user_new_message_event) {
                         process_user_messages(s);
-
-                } else if (sdl_event.type == SDL_KEYDOWN) {
-                        log_msg(LOG_LEVEL_VERBOSE, MOD_NAME "Pressed key %s (scancode: %d, sym: %d, mod: %d)!\n",
-                                SDL_GetKeyName(sdl_event.key.keysym.sym), sdl_event.key.keysym.scancode, sdl_event.key.keysym.sym, sdl_event.key.keysym.mod);
-                        int64_t sym = translate_sdl_key_to_ug(sdl_event.key.keysym);
+                } else if (sdl_event.type == SDL_KEYDOWN && sdl_event.key.repeat == 0) {
+                        auto& keysym = sdl_event.key.keysym;
+                        log_msg(LOG_LEVEL_VERBOSE, 
+                                MOD_NAME "Pressed key %s (scancode: %d, sym: %d, mod: %d)!\n",
+                                SDL_GetKeyName(keysym.sym), 
+                                keysym.scancode, 
+                                keysym.sym, 
+                                keysym.mod);
+                        int64_t sym = translate_sdl_key_to_ug(keysym);
                         if (sym > 0) {
-                                if (!display_sdl2_process_key(s, sym)) { // unknown key -> pass to control
+                                if (!display_sdl2_process_key(s, sym)) { 
+                                        // unknown key -> pass to control
                                         keycontrol_send_key(get_root_module(&s.mod), sym);
                                 }
                         } else if (sym == -1) {
-                                log_msg(LOG_LEVEL_WARNING, MOD_NAME "Cannot translate key %s (scancode: %d, sym: %d, mod: %d)!\n",
-                                        SDL_GetKeyName(sdl_event.key.keysym.sym), sdl_event.key.keysym.scancode, sdl_event.key.keysym.sym, sdl_event.key.keysym.mod);
+                                log_msg(LOG_LEVEL_WARNING, 
+                                        MOD_NAME "Cannot translate key %s (scancode: %d, sym: %d, mod: %d)!\n",
+                                        SDL_GetKeyName(keysym.sym), 
+                                        keysym.scancode, 
+                                        keysym.sym, 
+                                        keysym.mod);
                         }
 
                 } else if (sdl_event.type == SDL_WINDOWEVENT) {

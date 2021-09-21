@@ -460,6 +460,8 @@ RETURN_TYPE vulkan_context::create_framebuffers(vk::RenderPass render_pass) {
 RETURN_TYPE vulkan_context::recreate_swapchain(window_parameters parameters, vk::RenderPass render_pass) {
         window_size = vk::Extent2D{ parameters.width, parameters.height };
         vsync = parameters.vsync;
+        
+        log_msg("Recreating  swapchain");
 
         PASS_RESULT(device.waitIdle());
 
@@ -474,7 +476,8 @@ RETURN_TYPE vulkan_context::recreate_swapchain(window_parameters parameters, vk:
 }
 
 RETURN_TYPE vulkan_context::acquire_next_swapchain_image(uint32_t& image_index, vk::Semaphore acquire_semaphore) const {
-        auto acquired = device.acquireNextImageKHR(swapchain, UINT64_MAX, acquire_semaphore, nullptr, &image_index);
+        constexpr uint64_t timeout = 2'000'000'000; // 1s = 1 000 000 000 nanoseconds
+        auto acquired = device.acquireNextImageKHR(swapchain, timeout, acquire_semaphore, nullptr, &image_index);
         if (acquired == vk::Result::eSuboptimalKHR || acquired == vk::Result::eErrorOutOfDateKHR) {
                 image_index = SWAPCHAIN_IMAGE_OUT_OF_DATE;
                 return RETURN_TYPE();

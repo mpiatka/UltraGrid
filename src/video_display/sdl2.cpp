@@ -311,7 +311,7 @@ static void display_sdl2_run(void *arg)
 
                                 free_message((struct message*) msg, r);
                         }
-                } else if (sdl_event.type == SDL_KEYDOWN) {
+                } else if (sdl_event.type == SDL_KEYDOWN && sdl_event.key.repeat == 0) {
                         log_msg(LOG_LEVEL_VERBOSE, MOD_NAME "Pressed key %s (scancode: %d, sym: %d, mod: %d)!\n", SDL_GetKeyName(sdl_event.key.keysym.sym), sdl_event.key.keysym.scancode, sdl_event.key.keysym.sym, sdl_event.key.keysym.mod);
                         int64_t sym = translate_sdl_key_to_ug(sdl_event.key.keysym);
                         if (sym > 0) {
