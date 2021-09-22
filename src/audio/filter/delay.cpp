@@ -59,30 +59,34 @@ struct state_delay{
         int samples;
         int bps;
         int ch_count;
+        int sample_rate;
         std::unique_ptr<ring_buffer_t, Ring_buf_deleter> ring;
 };
 
 static int init(const char *cfg, void **state){
         state_delay *s = new state_delay();
-        s->samples = 512;
+        s->samples = 96000;
         s->bps = 0;
         s->ch_count = 0;
 
         *state = s;
 
         return 0;
-}
+};
 
-static bool configure_filter(void *state, int ch_count, int bps, int rate){
+static af_result_code configure(void *state,
+                        int in_bps, int in_ch_count, int in_sample_rate)
+{
         auto s = static_cast<state_delay *>(state);
 
-        s->bps = bps;
-        s->ch_count = ch_count;
+        s->bps = in_bps;
+        s->ch_count = in_ch_count;
+        s->sample_rate = in_sample_rate;
 
         int delay_size = s->bps * s->ch_count * s->samples;
         s->ring.reset(ring_buffer_init(delay_size * 2));
         ring_fill(s->ring.get(), 0, delay_size);
-        return true;
+        return AF_OK;
 }
 
 static void done(void *state){
@@ -91,11 +95,23 @@ static void done(void *state){
         delete s;
 }
 
-static struct audio_frame *filter(void *state, struct audio_frame *f){
+static void get_configured(void *state,
+                        int *bps, int *ch_count, int *sample_rate)
+{
+        auto s = static_cast<state_delay *>(state);
+
+        if(bps) *bps = s->bps;
+        if(ch_count) *ch_count = s->ch_count;
+        if(sample_rate) *sample_rate = s->sample_rate;
+}
+
+static af_result_code filter(void *state, struct audio_frame *f){
         auto s = static_cast<state_delay *>(state);
 
         if(f->bps != s->bps || f->ch_count != s->ch_count){
-                configure_filter(state, f->ch_count, f->bps, f->sample_rate);
+                if(configure(state, f->bps, f->ch_count, f->sample_rate) != AF_OK){
+                        return AF_MISCONFIGURED;
+                }
         }
 
         int frame_samples = f->data_len / (f->ch_count * f->bps);
@@ -116,12 +132,16 @@ static struct audio_frame *filter(void *state, struct audio_frame *f){
                 ring_buffer_read(s->ring.get(), f->data, delay_size);
         }
 
-        return f;
+        return AF_OK;
 }
 
 static const struct audio_filter_info audio_filter_delay = {
+        .name = "delay",
         .init = init,
         .done = done,
+        .configure = configure,
+        .get_configured_in = get_configured,
+        .get_configured_out = get_configured,
         .filter = filter,
 };
 

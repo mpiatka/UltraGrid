@@ -47,7 +47,16 @@ extern "C" {
 struct module;
 struct audio_frame;
 
-struct audio_filter_info {
+enum af_result_code{
+        AF_MISCONFIGURED = -2,
+        AF_FAILURE = -1,
+        AF_OK = 0,
+        AF_CONFIGURED_CLOSEST = 1,
+};
+
+struct audio_filter_info{
+        const char *name;
+
         /// @brief Initializes filter
         /// @param      cfg    configuration string from cmdline
         /// @param[out] state  output state
@@ -56,11 +65,21 @@ struct audio_filter_info {
         /// @retval     >0     no error but state was not returned, eg. showing help
         int (*init)(const char *cfg, void **state);
         void (*done)(void *state);
-        struct audio_frame *(*filter)(void *state, struct audio_frame *f);
+
+        af_result_code (*configure)(void *state,
+                        int bps, int ch_count, int sample_rate);
+
+        void (*get_configured_in)(void *state,
+                        int *bps, int *ch_count, int *sample_rate);
+
+        void (*get_configured_out)(void *state,
+                        int *bps, int *ch_count, int *sample_rate);
+
+        af_result_code (*filter)(void *state, struct audio_frame *f);
 };
 
 struct audio_filter{
-        const struct audio_filter_info *functions;
+        const struct audio_filter_info *info;
         void *state;
 };
 
@@ -68,7 +87,7 @@ int audio_filter_init(const char *name, const char *cfg, struct audio_filter *fi
 
 void audio_filter_destroy(struct audio_filter *state);
 
-struct audio_frame *audio_filter(struct audio_filter *state, struct audio_frame *frame);
+af_result_code audio_filter(struct audio_filter *state, struct audio_frame *frame);
 
 //void register_audio_filter(struct audio_filter_info *filter);
 

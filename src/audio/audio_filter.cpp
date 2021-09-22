@@ -58,7 +58,7 @@ int audio_filter_init(const char *name, const char *cfg, struct audio_filter *fi
         for(const auto& i : filters){
                 auto funcs = static_cast<const audio_filter_info *>(i.second);
                 if(strcasecmp(i.first.c_str(), name) == 0){
-                        filter->functions = funcs;
+                        filter->info = funcs;
 
                         int ret = funcs->init(cfg, &filter->state);
                         if(ret < 0) {
@@ -74,13 +74,16 @@ int audio_filter_init(const char *name, const char *cfg, struct audio_filter *fi
 }
 
 void audio_filter_destroy(struct audio_filter *state){
-        state->functions->done(state->state);
+        if(!state->state)
+                return;
 
-        state->functions = {};
+        state->info->done(state->state);
+
+        state->info = {};
         state->state = {};
 }
 
-struct audio_frame *audio_filter(struct audio_filter *state, struct audio_frame *frame){
-        return state->functions->filter(state->state, frame);
+af_result_code audio_filter(struct audio_filter *state, struct audio_frame *frame){
+        return state->info->filter(state->state, frame);
 }
 
