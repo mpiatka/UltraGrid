@@ -72,6 +72,8 @@
 #include "audio/playback/sdi.h"
 #include "audio/jack.h" 
 #include "audio/utils.h"
+#include "audio/audio_filter.h"
+#include "audio/filter_chain.hpp"
 #include "debug.h"
 #include "../export.h" // not audio/export.h
 #include "host.h"
@@ -987,6 +989,14 @@ static void *audio_sender_thread(void *arg)
         audio_frame2_resampler resampler_state;
 
         printf("Audio sending started.\n");
+
+        struct audio_filter afilter;
+        if(audio_filter_init("delay", "", &afilter) != 0){
+                printf("Failed to init audio filter\n");
+        }
+
+        Filter_chain filter_chain;
+        filter_chain.push_back(afilter);
         while (!should_exit) {
                 struct message *msg;
                 while((msg = check_message(&s->audio_sender_module))) {
@@ -1025,6 +1035,8 @@ static void *audio_sender_thread(void *arg)
                         if (s->paused) {
                                 continue;
                         }
+
+                        filter_chain.filter(buffer);
 
                         audio_frame2 bf_n(buffer);
 
