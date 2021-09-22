@@ -297,10 +297,14 @@ constexpr bool display_sdl2_process_key(state_vulkan_sdl2& s, int64_t key) {
                 log_msg(LOG_LEVEL_INFO, "Deinterlacing: %s\n",
                         s.deinterlace ? "ON" : "OFF");
                 return true;
-        case 'f':
+        case 'f': {
                 s.fullscreen = !s.fullscreen;
+                int mouse_x = 0, mouse_y = 0;
+                SDL_GetGlobalMouseState(&mouse_x, &mouse_y);
                 SDL_SetWindowFullscreen(s.window, s.fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+                SDL_WarpMouseGlobal(mouse_x, mouse_y);
                 return true;
+        }
         case 'q':
                 exit_uv(0);
                 return true;
