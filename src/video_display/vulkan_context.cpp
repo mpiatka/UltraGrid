@@ -465,7 +465,7 @@ RETURN_TYPE vulkan_context::recreate_swapchain(window_parameters parameters, vk:
 
         PASS_RESULT(device.waitIdle());
 
-        destroy_framebuffers();
+        PASS_RESULT(destroy_framebuffers());
         destroy_swapchain_views();
         vk::SwapchainKHR old_swap_chain = swapchain;
         create_swap_chain(old_swap_chain);
@@ -476,13 +476,19 @@ RETURN_TYPE vulkan_context::recreate_swapchain(window_parameters parameters, vk:
 }
 
 RETURN_TYPE vulkan_context::acquire_next_swapchain_image(uint32_t& image_index, vk::Semaphore acquire_semaphore) const {
-        constexpr uint64_t timeout = 2'000'000'000; // 1s = 1 000 000 000 nanoseconds
+        constexpr uint64_t timeout = 1'000'000'000; // 1s = 1 000 000 000 nanoseconds
         auto acquired = device.acquireNextImageKHR(swapchain, timeout, acquire_semaphore, nullptr, &image_index);
-        if (acquired == vk::Result::eSuboptimalKHR || acquired == vk::Result::eErrorOutOfDateKHR) {
+        switch (acquired) {
+        case vk::Result::eSuboptimalKHR: [[fallthrough]];
+        case vk::Result::eErrorOutOfDateKHR:
                 image_index = SWAPCHAIN_IMAGE_OUT_OF_DATE;
-                return RETURN_TYPE();
+                break;
+        case vk::Result::eTimeout:
+                image_index = SWAPCHAIN_IMAGE_TIMEOUT;
+                break;
+        default:
+                CHECK(acquired, "Next swapchain image cannot be acquired."s + vk::to_string(acquired));
         }
-        CHECK(acquired, "Next swapchain image cannot be acquired."s + vk::to_string(acquired));
         return RETURN_TYPE();
 }
 

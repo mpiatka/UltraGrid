@@ -554,7 +554,7 @@ RETURN_TYPE vulkan_display::display_queued_image(bool* displayed) {
         if (window_parameters.width * window_parameters.height == 0) {
                 auto image = filled_img_queue.try_pop();
                 if (image.has_value()) {
-                        discard_image(*image);
+                        PASS_RESULT(discard_image(*image));
                 }
                 return RETURN_TYPE();
         }
@@ -589,21 +589,31 @@ RETURN_TYPE vulkan_display::display_queued_image(bool* displayed) {
                 }
                 current_image_description = transfer_image.get_description();
                 auto parameters = context.get_window_parameters();
-                update_render_area_viewport_scissor(render_area, viewport, scissor,
-                        { parameters.width, parameters.height }, current_image_description.size);
+                PASS_RESULT(update_render_area_viewport_scissor(render_area, viewport, scissor,
+                        { parameters.width, parameters.height }, current_image_description.size));
         }
         PASS_RESULT(context.acquire_next_swapchain_image(swapchain_image_id, semaphores.image_acquired));
-        while (swapchain_image_id == SWAPCHAIN_IMAGE_OUT_OF_DATE) {
+        int swapchain_recreation_attempt = 0;
+        while (swapchain_image_id == SWAPCHAIN_IMAGE_OUT_OF_DATE || swapchain_image_id == SWAPCHAIN_IMAGE_TIMEOUT) 
+        {
+                swapchain_recreation_attempt++;
+                CHECK(swapchain_recreation_attempt <= 3, "Cannot acquire swapchain image");
+                
                 window_parameters = window->get_window_parameters();
                 if (window_parameters.width * window_parameters.height == 0) {
                         // window is minimalised
                         auto image = filled_img_queue.try_pop();
                         if (image.has_value()) {
-                                discard_image(*image);
+                                PASS_RESULT(discard_image(*image));
                         }
                         return RETURN_TYPE();
                 }
-                window_parameters_changed(window_parameters);
+                PASS_RESULT(context.recreate_swapchain(window_parameters, render_pass));
+                PASS_RESULT(update_render_area_viewport_scissor(
+                        render_area, viewport, scissor,
+                        { window_parameters.width, window_parameters.height },
+                        current_image_description.size));
+                
                 PASS_RESULT(context.acquire_next_swapchain_image(swapchain_image_id, semaphores.image_acquired));
         }
         transfer_image.prepare_for_rendering(device, 
@@ -654,9 +664,9 @@ RETURN_TYPE vulkan_display::display_queued_image(bool* displayed) {
 
 RETURN_TYPE vulkan_display::window_parameters_changed(window_parameters new_parameters) {
         if (new_parameters != context.get_window_parameters() && new_parameters.width * new_parameters.height != 0) {
-                context.recreate_swapchain(new_parameters, render_pass);
-                update_render_area_viewport_scissor(render_area, viewport, scissor,
-                        { new_parameters.width, new_parameters.height }, current_image_description.size);
+                PASS_RESULT(context.recreate_swapchain(new_parameters, render_pass));
+                PASS_RESULT(update_render_area_viewport_scissor(render_area, viewport, scissor,
+                        { new_parameters.width, new_parameters.height }, current_image_description.size));
         }
         return RETURN_TYPE();
 }

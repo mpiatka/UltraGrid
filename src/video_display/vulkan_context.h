@@ -123,6 +123,7 @@ using namespace std::literals;
 
 constexpr uint32_t NO_QUEUE_FAMILY_INDEX_FOUND = UINT32_MAX;
 constexpr uint32_t SWAPCHAIN_IMAGE_OUT_OF_DATE = UINT32_MAX;
+constexpr uint32_t SWAPCHAIN_IMAGE_TIMEOUT = UINT32_MAX - 1;
 
 class vulkan_context {
         vk::Instance instance;
