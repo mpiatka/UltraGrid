@@ -5,6 +5,7 @@
 #include "vulkan_transfer_image.h"
 
 #include <mutex>
+#include <filesystem>
 #include <utility>
 
 namespace vulkan_display_detail {
@@ -114,7 +115,8 @@ public:
         }
 
         RETURN_TYPE init(vulkan_instance&& instance, VkSurfaceKHR surface, uint32_t transfer_image_count,
-                window_changed_callback& window, uint32_t gpu_index = NO_GPU_SELECTED);
+                window_changed_callback& window, uint32_t gpu_index = NO_GPU_SELECTED,
+                std::filesystem::path path_to_shaders = "./shaders");
 
         RETURN_TYPE destroy();
 

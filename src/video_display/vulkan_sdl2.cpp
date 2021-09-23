@@ -91,6 +91,7 @@
 #include <array>
 #include <atomic>
 #include <cassert>
+#include <charconv>
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
@@ -104,42 +105,56 @@
 #include <utility> // pair
 
 
-#if __has_include(<charconv>)
-#include <charconv>
-using std::from_chars;
-
-#else
-#include <system_error> //errc
-namespace {
-struct from_chars_result
-{
-        const char* ptr;
-        std::errc ec;
-};
-
-from_chars_result from_chars(const char* first, const char* last, int& value, int base = 10) {
-        size_t count = 0;
-        std::string str(first, last - first);
-        from_chars_result result{};
-        try {
-                value = std::stoi(str, &count, base);
-        }
-        catch (std::invalid_argument&) {
-                result.ec = std::errc::invalid_argument;
-        }
-        catch (std::out_of_range&) {
-                result.ec = std::errc::result_out_of_range;
-        }
-        result.ptr = first + count;
-        return result;
+namespace { //EXECUTABLE PATH
+#if defined(_WIN32)
+std::string get_executable_path() {
+        char rawPathName[MAX_PATH];
+        GetModuleFileNameA(NULL, rawPathName, MAX_PATH);
+        return std::string(rawPathName);
 }
-
-} //namespace
 #endif
+
+
+#ifdef __linux__
+#include <limits.h>
+#include <unistd.h>
+
+#if defined(__sun)
+#define PROC_SELF_EXE "/proc/self/path/a.out"
+#else
+#define PROC_SELF_EXE "/proc/self/exe"
+#endif
+
+std::string get_executable_path() {
+        char rawPathName[PATH_MAX];
+        realpath(PROC_SELF_EXE, rawPathName);
+        return  std::string(rawPathName);
+}
+#endif
+
+
+#ifdef __APPLE__
+#include <libgen.h>
+#include <limits.h>
+#include <mach-o/dyld.h>
+#include <unistd.h>
+
+std::string get_executable_path() {
+        char rawPathName[PATH_MAX];
+        char realPathName[PATH_MAX];
+        uint32_t rawPathSize = (uint32_t)sizeof(rawPathName);
+
+        if (!_NSGetExecutablePath(rawPathName, &rawPathSize)) {
+                realpath(rawPathName, realPathName);
+        }
+        return  std::string(realPathName);
+}
+#endif
+} // namespace       
+// END OF EXECUTABLE PATH
 
 using rang::fg;
 using rang::style;
-
 
 namespace vkd = vulkan_display;
 namespace chrono = std::chrono;
@@ -586,7 +601,7 @@ bool parse_command_line_arguments(command_line_arguments& args, state_vulkan_sdl
                         }
                         const char* last = str.data() + str.size();
                         int result = 0;
-                        auto [ptr, err] = from_chars(str.data(), last, result, base);
+                        auto [ptr, err] = std::from_chars(str.data(), last, result, base);
                         constexpr auto no_error = std::errc{};
                         if (err != no_error || ptr != last) {
                                 throw std::runtime_error{ std::string(token) };
@@ -726,6 +741,11 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
         std::vector<const char*> required_extensions(extension_count);
         SDL_Vulkan_GetInstanceExtensions(s->window, &extension_count, required_extensions.data());
         assert(extension_count > 0);
+        
+        std::filesystem::path path_to_shaders = get_executable_path();
+        path_to_shaders.remove_filename();
+        path_to_shaders = path_to_shaders / "shaders";
+        LOG(LOG_LEVEL_INFO) << MOD_NAME "Path to shaders: " << path_to_shaders << '\n';
         try {
                 vkd::vulkan_instance instance;
                 auto logging_function =
@@ -754,7 +774,7 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
                 }
 #endif
                 s->vulkan = std::make_unique<vkd::vulkan_display>();
-                s->vulkan->init(std::move(instance), surface, MAX_FRAME_COUNT, *s->window_callback, args.gpu_idx);
+                s->vulkan->init(std::move(instance), surface, MAX_FRAME_COUNT, *s->window_callback, args.gpu_idx, path_to_shaders);
                 LOG(LOG_LEVEL_NOTICE) << MOD_NAME "Vulkan display initialised." << std::endl;
         }
         catch (std::exception& e) { log_and_exit_uv(e); return nullptr; }
