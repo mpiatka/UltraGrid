@@ -664,6 +664,11 @@ install: all
 	$(INSTALL) -d -m 755 $(DESTDIR)$(man1dir)
 	$(INSTALL) -m 644 $(srcdir)/data/uv.1 $(srcdir)/data/hd-rum-transcode.1 $(DESTDIR)$(man1dir)
 	if [ -n '@DLL_LIBS@' ]; then  $(INSTALL) -m 644 @DLL_LIBS@ $(DESTDIR)$(bindir); fi
+	if [ -n "@VULKAN@" ]; then\
+		$(MKDIR_P) $(DESTDIR)$(datadir)/ultragrid/vulkan_shaders;\
+		$(INSTALL) -m 644 $(srcdir)/share/ultragrid/vulkan_shaders/frag.spv $(DESTDIR)$(datadir)/ultragrid/vulkan_shaders/frag.spv;\
+		$(INSTALL) -m 644 $(srcdir)/share/ultragrid/vulkan_shaders/vert.spv $(DESTDIR)$(datadir)/ultragrid/vulkan_shaders/vert.spv;\
+	fi
 uninstall:
 	$(RM) $(DESTDIR)$(bindir)/uv
 	$(RM) $(DESTDIR)$(bindir)/hd-rum-transcode
@@ -676,6 +681,12 @@ uninstall:
 		$(RM) $(DESTDIR)$(datadir)/applications/uv-qt.desktop;\
 		$(RM) $(DESTDIR)$(datadir)/metainfo/cz.cesnet.ultragrid.appdata.xml;\
 		$(RM) $(DESTDIR)$(datadir)/pixmaps/ultragrid.png;\
+	fi
+	if [ -n "@VULKAN@" ]; then\
+		$(RM) $(DESTDIR)$(datadir)/ultragrid/vulkan_shaders/frag.spv;\
+		$(RM) $(DESTDIR)$(datadir)/ultragrid/vulkan_shaders/vert.spv;\
+		rmdir $(DESTDIR)$(datadir)/ultragrid/vulkan_shaders;\
+		rmdir $(DESTDIR)$(datadir)/ultragrid;\
 	fi
 
 # vim: set noexpandtab

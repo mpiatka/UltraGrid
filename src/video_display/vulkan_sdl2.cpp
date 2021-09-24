@@ -64,6 +64,7 @@
 #include "video_display.h"
 #include "video_display/splashscreen.h"
 #include "video.h"
+#include "utils/fs.h"
 //remove leaking macros
 #undef min
 #undef max
@@ -103,55 +104,6 @@
 #include <type_traits>
 #include <unordered_map>
 #include <utility> // pair
-
-
-namespace { //EXECUTABLE PATH
-#if defined(_WIN32)
-std::string get_executable_path() {
-        char rawPathName[MAX_PATH];
-        GetModuleFileNameA(NULL, rawPathName, MAX_PATH);
-        return std::string(rawPathName);
-}
-#endif
-
-
-#ifdef __linux__
-#include <limits.h>
-#include <unistd.h>
-
-#if defined(__sun)
-#define PROC_SELF_EXE "/proc/self/path/a.out"
-#else
-#define PROC_SELF_EXE "/proc/self/exe"
-#endif
-
-std::string get_executable_path() {
-        char rawPathName[PATH_MAX];
-        realpath(PROC_SELF_EXE, rawPathName);
-        return  std::string(rawPathName);
-}
-#endif
-
-
-#ifdef __APPLE__
-#include <libgen.h>
-#include <limits.h>
-#include <mach-o/dyld.h>
-#include <unistd.h>
-
-std::string get_executable_path() {
-        char rawPathName[PATH_MAX];
-        char realPathName[PATH_MAX];
-        uint32_t rawPathSize = (uint32_t)sizeof(rawPathName);
-
-        if (!_NSGetExecutablePath(rawPathName, &rawPathSize)) {
-                realpath(rawPathName, realPathName);
-        }
-        return  std::string(realPathName);
-}
-#endif
-} // namespace       
-// END OF EXECUTABLE PATH
 
 using rang::fg;
 using rang::style;
@@ -742,8 +694,9 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
         SDL_Vulkan_GetInstanceExtensions(s->window, &extension_count, required_extensions.data());
         assert(extension_count > 0);
         
-        std::filesystem::path path_to_shaders = get_executable_path();
-        path_to_shaders.remove_filename(); //remove uv.exe
+        std::string path = get_executable_path();
+        std::filesystem::path path_to_shaders = {path.empty() ? "." : std::move(path)};
+        path_to_shaders.remove_filename(); //remove uv or uv.exe
         path_to_shaders = path_to_shaders / "../share/ultragrid/vulkan_shaders";
         LOG(LOG_LEVEL_INFO) << MOD_NAME "Path to shaders: " << path_to_shaders << '\n';
         try {
