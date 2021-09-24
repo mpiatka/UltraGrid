@@ -743,8 +743,8 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
         assert(extension_count > 0);
         
         std::filesystem::path path_to_shaders = get_executable_path();
-        path_to_shaders.remove_filename();
-        path_to_shaders = path_to_shaders / "shaders";
+        path_to_shaders.remove_filename(); //remove uv.exe
+        path_to_shaders = path_to_shaders / "../share/ultragrid/vulkan_shaders";
         LOG(LOG_LEVEL_INFO) << MOD_NAME "Path to shaders: " << path_to_shaders << '\n';
         try {
                 vkd::vulkan_instance instance;

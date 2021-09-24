@@ -230,7 +230,7 @@ TEST_OBJS = $(COMMON_OBJS) \
 DEP_FILES_1 = $(OBJS) $(REFLECTOR_OBJS) $(TEST_OBJS) $(ULTRAGRID_OBJS)
 DEP_FILES = $(patsubst %.lib,%.P,$(DEP_FILES_1:.o=.P)) # replace .o and also .lib (Windows) with .P
 # -------------------------------------------------------------------------------------------------
-all: $(TARGET) $(GUI_TARGET) $(REFLECTOR_TARGET) @MODULES@ configure-messages vulkan_shaders
+all: $(TARGET) $(GUI_TARGET) $(REFLECTOR_TARGET) @MODULES@ configure-messages
 
 src/dir-stamp:
 	$(MKDIR_P) $(dir $@)
@@ -491,25 +491,6 @@ $(GUI_TARGET): $(wildcard $(srcdir)/gui/QT/*.cpp $(srcdir)/gui/QT/*.hpp) $(srcdi
 	if test -z "$(QMAKE)"; then echo "Reconfigure with '--enable-qt'"; exit 1; fi
 	cd gui/QT && $(QMAKE) "DESTDIR+=./" $(srcdir_abs)/gui/QT && make -j 4
 
-
-VULKAN_ENABLED=$(findstring vulkan, $(OBJS))
-VULKAN_SHADER_FILES=bin/shaders/vert.spv bin/shaders/frag.spv
-
-ifneq ( ,$(VULKAN_ENABLED))
-# if vulkan is enabled:
-vulkan_shaders: $(VULKAN_SHADER_FILES)
-else
-# else do nothing:
-vulkan_shaders:
-	@:
-endif
-
-
-bin/shaders/%.spv: $(srcdir)/src/video_display/vulkan_shaders/%.spv
-	$(MKDIR_P) $(dir $@)
-	cp $< $@
-
-
 # -------------------------------------------------------------------------------------------------
 $(TEST_TARGET): $(TEST_OBJS) @TEST_OBJS@
 	$(MKDIR_P) $(dir $@)
@@ -572,7 +553,6 @@ clean:
 	-rm -rf $(REFLECTOR_TARGET) $(REFLECTOR_OBJS)
 	-rm -rf @LIB_OBJS@ @MODULES@ @LIB_GENERATED_HEADERS@
 	-rm -rf $(DEP_FILES)
-	-rm -rf bin/shaders
 	if [ -f "gui/QT/Makefile" ]; then make -C gui/QT/ clean; fi
 
 distclean: clean
