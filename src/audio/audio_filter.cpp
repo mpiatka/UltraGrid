@@ -87,3 +87,21 @@ af_result_code audio_filter(struct audio_filter *state, struct audio_frame *fram
         return state->info->filter(state->state, frame);
 }
 
+af_result_code audio_filter_configure(struct audio_filter *state,
+                int bps, int ch_count, int sample_rate)
+{
+        return state->info->configure(state->state, bps, ch_count, sample_rate);
+}
+
+void  audio_filter_get_configured_out(struct audio_filter *state,
+                int *bps, int *ch_count, int *sample_rate)
+{
+        return state->info->get_configured_out(state->state, bps, ch_count, sample_rate);
+}
+
+void  audio_filter_get_configured_in(struct audio_filter *state,
+                int *bps, int *ch_count, int *sample_rate)
+{
+        return state->info->get_configured_in(state->state, bps, ch_count, sample_rate);
+}
+

@@ -87,6 +87,15 @@ int audio_filter_init(const char *name, const char *cfg, struct audio_filter *fi
 
 void audio_filter_destroy(struct audio_filter *state);
 
+af_result_code audio_filter_configure(struct audio_filter *state,
+                int bps, int ch_count, int sample_rate);
+
+void audio_filter_get_configured_out(struct audio_filter *state,
+                int *bps, int *ch_count, int *sample_rate);
+
+void audio_filter_get_configured_in(struct audio_filter *state,
+                int *bps, int *ch_count, int *sample_rate);
+
 af_result_code audio_filter(struct audio_filter *state, struct audio_frame *frame);
 
 //void register_audio_filter(struct audio_filter_info *filter);

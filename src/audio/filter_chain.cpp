@@ -35,6 +35,7 @@
  * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "audio/types.h"
 #include "filter_chain.hpp"
 
 Filter_chain::~Filter_chain(){
@@ -52,12 +53,38 @@ void Filter_chain::clear(){
 }
 
 af_result_code Filter_chain::filter(struct audio_frame *frame){
-        af_result_code res = AF_OK;
+        af_result_code res = reconfigure(frame->bps, frame->ch_count, frame->sample_rate);
+        if(res != AF_OK)
+                return AF_MISCONFIGURED;
 
         for(auto& i : filters){
                 res = audio_filter(&i, frame);
                 if(res != AF_OK)
                         return res;
+        }
+
+        return res;
+}
+
+af_result_code Filter_chain::reconfigure(int bps, int ch_count, int sample_rate){
+        if(this->bps == bps
+                        && this->ch_count == ch_count
+                        && this->sample_rate == sample_rate)
+        {
+                return AF_OK;
+        }
+
+        this->bps = bps;
+        this->ch_count = ch_count;
+        this->sample_rate = sample_rate;
+
+        af_result_code res = AF_OK;
+        for(auto& i : filters){
+                af_result_code r = audio_filter_configure(&i, bps, ch_count, sample_rate);
+                if(res != AF_OK)
+                        return res;
+
+                audio_filter_get_configured_out(&i, &bps, &ch_count, &sample_rate);
         }
 
         return res;
