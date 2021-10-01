@@ -303,7 +303,7 @@ struct state_audio * audio_cfg_init(struct module *parent,
                 std::string duplicate = opt->filter_cfg;
 
                 char *tmp = duplicate.data();
-                while((item = strtok_r(tmp, ",", &save_ptr))) {
+                while((item = strtok_r(tmp, "#", &save_ptr))) {
                         std::string filter_name = item;
                         std::string config;
 
