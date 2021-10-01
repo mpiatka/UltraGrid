@@ -49,14 +49,14 @@
 #include "debug.h"
 #include "audio/audio_filter.h"
 #include "audio/types.h"
+#include "audio/utils.h"
 #include "lib_common.h"
 
 
 struct state_remap{
-        int bps;
         int ch_count;
-        int sample_rate;
 
+        std::vector<char> data;
         struct audio_frame buffer;
 
         std::vector<std::vector<int>> in_to_out_ch_map;
@@ -68,13 +68,11 @@ static std::string_view tokenize(std::string_view& str, char delim){
                 return {};
 
         auto token_begin = str.begin();
-
         while(token_begin != str.end() && *token_begin == delim){
                 token_begin++;
         }
 
         auto token_end = token_begin;
-
         while(token_end != str.end() && *token_end != delim){
                 token_end++;
         }
@@ -84,14 +82,19 @@ static std::string_view tokenize(std::string_view& str, char delim){
         return std::string_view(token_begin, token_end - token_begin);
 }
 
+template<typename T>
+static bool parse_num(std::string_view str, T& num){
+        return std::from_chars(str.begin(), str.end(), num).ec == std::errc();
+}
+
 static int init(const char *cfg, void **state){
         state_remap *s = new state_remap();
         *state = s;
 
         std::string_view conf(cfg);
 
-        std::string_view tok = tokenize(conf, ',');
-        for(; !tok.empty(); tok = tokenize(conf, ',')){
+        while(!conf.empty()){
+                std::string_view tok = tokenize(conf, ',');
                 auto src_t = tokenize(tok, ':');
                 auto dst_t = tokenize(tok, ':');
                 if(src_t.empty() || dst_t.empty())
@@ -99,9 +102,7 @@ static int init(const char *cfg, void **state){
 
                 unsigned src_idx;
                 unsigned dst_idx;
-                if(std::from_chars(src_t.begin(), src_t.end(), src_idx).ec != std::errc()
-                                || std::from_chars(dst_t.begin(), dst_t.end(), dst_idx).ec != std::errc())
-                {
+                if(!parse_num(src_t, src_idx) || !parse_num(dst_t, dst_idx)){
                         return -1;
                 }
 
@@ -118,6 +119,8 @@ static int init(const char *cfg, void **state){
                 s->out_ch_contributors[dst_idx]++;
         }
 
+        s->buffer.ch_count = s->out_ch_contributors.size();
+
         return 0;
 };
 
@@ -126,9 +129,9 @@ static af_result_code configure(void *state,
 {
         auto s = static_cast<state_remap *>(state);
 
-        s->bps = in_bps;
+        s->buffer.bps = in_bps;
+        s->buffer.sample_rate = in_sample_rate;
         s->ch_count = in_ch_count;
-        s->sample_rate = in_sample_rate;
 
         return AF_OK;
 }
@@ -144,9 +147,9 @@ static void get_configured_in(void *state,
 {
         auto s = static_cast<state_remap *>(state);
 
-        if(bps) *bps = s->bps;
+        if(bps) *bps = s->buffer.bps;
         if(ch_count) *ch_count = s->ch_count;
-        if(sample_rate) *sample_rate = s->sample_rate;
+        if(sample_rate) *sample_rate = s->buffer.sample_rate;
 }
 
 static void get_configured_out(void *state,
@@ -154,13 +157,58 @@ static void get_configured_out(void *state,
 {
         auto s = static_cast<state_remap *>(state);
 
-        if(bps) *bps = s->bps;
-        if(ch_count) *ch_count = s->out_ch_contributors.size();
-        if(sample_rate) *sample_rate = s->sample_rate;
+        if(bps) *bps = s->buffer.bps;
+        if(ch_count) *ch_count = s->buffer.ch_count;
+        if(sample_rate) *sample_rate = s->buffer.sample_rate;
 }
 
-static af_result_code filter(void *state, struct audio_frame *f){
+static void mix_samples(state_remap *s, char *in, char *out){
+        int bps = s->buffer.bps;
+        double scale = 1.0;
+        for(size_t in_ch_idx = 0; in_ch_idx < s->in_to_out_ch_map.size(); in_ch_idx++){
+                int32_t in_value = format_from_in_bps(in + bps * in_ch_idx, bps);
+
+                const auto& dst_channels = s->in_to_out_ch_map[in_ch_idx];
+                for(int out_ch_idx : dst_channels){
+                        char *out_ptr = out + out_ch_idx * bps;
+                        int32_t out_value = format_from_in_bps(out_ptr, bps);
+
+                        int32_t new_value = (double)in_value * scale + out_value;
+
+                        format_to_out_bps(out_ptr, bps, new_value);
+                }
+        }
+}
+
+static af_result_code filter(void *state, struct audio_frame **frame){
         auto s = static_cast<state_remap *>(state);
+
+        auto f = *frame;
+        if(f->ch_count == 0)
+                return AF_OK;
+
+        size_t ch_size = f->data_len / f->ch_count;
+        size_t needed_size = s->buffer.ch_count * ch_size;
+
+        if(needed_size > s->data.size()){
+                s->data.resize(needed_size, 0);
+                s->buffer.data = s->data.data();
+                s->buffer.max_size = needed_size;
+        }
+        s->buffer.data_len = needed_size;
+
+        memset(s->buffer.data, 0, s->buffer.data_len);
+
+        const size_t samples = ch_size / f->bps;
+        for(size_t sample = 0; sample < samples; sample++){
+                char *in_sample = f->data + sample * f->bps * f->ch_count;
+                char *out_sample = s->buffer.data + sample * f->bps * s->buffer.ch_count;
+
+                mix_samples(s, in_sample, out_sample);
+        }
+
+        AUDIO_FRAME_DISPOSE(f);
+        *frame = &s->buffer;
 
         return AF_OK;
 }
