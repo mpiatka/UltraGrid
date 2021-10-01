@@ -64,24 +64,24 @@ struct state_remap{
 };
 
 static std::string_view tokenize(std::string_view& str, char delim){
-    if(str.empty())
-        return {};
+        if(str.empty())
+                return {};
 
-    auto token_begin = str.begin();
+        auto token_begin = str.begin();
 
-    while(token_begin != str.end() && *token_begin == delim){
-        token_begin++;
-    }
+        while(token_begin != str.end() && *token_begin == delim){
+                token_begin++;
+        }
 
-    auto token_end = token_begin;
+        auto token_end = token_begin;
 
-    while(token_end != str.end() && *token_end != delim){
-        token_end++;
-    }
+        while(token_end != str.end() && *token_end != delim){
+                token_end++;
+        }
 
-    str = std::string_view(token_end, str.end() - token_end);
+        str = std::string_view(token_end, str.end() - token_end);
 
-    return std::string_view(token_begin, token_end - token_begin);
+        return std::string_view(token_begin, token_end - token_begin);
 }
 
 static int init(const char *cfg, void **state){
@@ -92,37 +92,37 @@ static int init(const char *cfg, void **state){
 
         std::string_view tok = tokenize(conf, ',');
         for(; !tok.empty(); tok = tokenize(conf, ',')){
-            auto src_t = tokenize(tok, ':');
-            auto dst_t = tokenize(tok, ':');
-            if(src_t.empty() || dst_t.empty())
-                return -1;
+                auto src_t = tokenize(tok, ':');
+                auto dst_t = tokenize(tok, ':');
+                if(src_t.empty() || dst_t.empty())
+                        return -1;
 
-            unsigned src_idx;
-            unsigned dst_idx;
-            if(std::from_chars(src_t.begin(), src_t.end(), src_idx).ec != std::errc()
-                    || std::from_chars(dst_t.begin(), dst_t.end(), dst_idx).ec != std::errc())
-            {
-                return -1;
-            }
+                unsigned src_idx;
+                unsigned dst_idx;
+                if(std::from_chars(src_t.begin(), src_t.end(), src_idx).ec != std::errc()
+                                || std::from_chars(dst_t.begin(), dst_t.end(), dst_idx).ec != std::errc())
+                {
+                        return -1;
+                }
 
-            if(src_idx >= s->in_to_out_ch_map.size()){
-                s->in_to_out_ch_map.resize(src_idx + 1);
-            }
+                if(src_idx >= s->in_to_out_ch_map.size()){
+                        s->in_to_out_ch_map.resize(src_idx + 1);
+                }
 
-            s->in_to_out_ch_map[src_idx].push_back(dst_idx);
+                s->in_to_out_ch_map[src_idx].push_back(dst_idx);
 
-            if(dst_idx >= s->out_ch_contributors.size()){
-                s->out_ch_contributors.resize(dst_idx + 1);
-            }
+                if(dst_idx >= s->out_ch_contributors.size()){
+                        s->out_ch_contributors.resize(dst_idx + 1);
+                }
 
-            s->out_ch_contributors[dst_idx]++;
+                s->out_ch_contributors[dst_idx]++;
         }
 
         return 0;
 };
 
 static af_result_code configure(void *state,
-                        int in_bps, int in_ch_count, int in_sample_rate)
+                int in_bps, int in_ch_count, int in_sample_rate)
 {
         auto s = static_cast<state_remap *>(state);
 
@@ -140,7 +140,7 @@ static void done(void *state){
 }
 
 static void get_configured_in(void *state,
-                        int *bps, int *ch_count, int *sample_rate)
+                int *bps, int *ch_count, int *sample_rate)
 {
         auto s = static_cast<state_remap *>(state);
 
@@ -150,7 +150,7 @@ static void get_configured_in(void *state,
 }
 
 static void get_configured_out(void *state,
-                        int *bps, int *ch_count, int *sample_rate)
+                int *bps, int *ch_count, int *sample_rate)
 {
         auto s = static_cast<state_remap *>(state);
 
