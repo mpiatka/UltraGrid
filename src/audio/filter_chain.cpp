@@ -52,8 +52,9 @@ void Filter_chain::clear(){
         }
 }
 
-af_result_code Filter_chain::filter(struct audio_frame *frame){
-        af_result_code res = reconfigure(frame->bps, frame->ch_count, frame->sample_rate);
+af_result_code Filter_chain::filter(struct audio_frame **frame){
+        auto f = *frame;
+        af_result_code res = reconfigure(f->bps, f->ch_count, f->sample_rate);
         if(res != AF_OK)
                 return AF_MISCONFIGURED;
 

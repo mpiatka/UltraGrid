@@ -75,7 +75,7 @@ struct audio_filter_info{
         void (*get_configured_out)(void *state,
                         int *bps, int *ch_count, int *sample_rate);
 
-        af_result_code (*filter)(void *state, struct audio_frame *f);
+        af_result_code (*filter)(void *state, struct audio_frame **f);
 };
 
 struct audio_filter{
@@ -96,7 +96,7 @@ void audio_filter_get_configured_out(struct audio_filter *state,
 void audio_filter_get_configured_in(struct audio_filter *state,
                 int *bps, int *ch_count, int *sample_rate);
 
-af_result_code audio_filter(struct audio_filter *state, struct audio_frame *frame);
+af_result_code audio_filter(struct audio_filter *state, struct audio_frame **frame);
 
 //void register_audio_filter(struct audio_filter_info *filter);
 

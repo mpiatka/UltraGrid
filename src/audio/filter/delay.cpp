@@ -105,9 +105,10 @@ static void get_configured(void *state,
         if(sample_rate) *sample_rate = s->sample_rate;
 }
 
-static af_result_code filter(void *state, struct audio_frame *f){
+static af_result_code filter(void *state, struct audio_frame **frame){
         auto s = static_cast<state_delay *>(state);
 
+        auto f = *frame;
         if(f->bps != s->bps || f->ch_count != s->ch_count){
                 if(configure(state, f->bps, f->ch_count, f->sample_rate) != AF_OK){
                         return AF_MISCONFIGURED;

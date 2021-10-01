@@ -1059,7 +1059,7 @@ static void *audio_sender_thread(void *arg)
                                 continue;
                         }
 
-                        s->filter_chain.filter(buffer);
+                        s->filter_chain.filter(&buffer);
 
                         audio_frame2 bf_n(buffer);
 

@@ -56,7 +56,7 @@ public:
 
         af_result_code reconfigure(int bps, int ch_count, int sample_rate);
 
-        af_result_code filter(struct audio_frame *frame);
+        af_result_code filter(struct audio_frame **frame);
 private:
         std::vector<struct audio_filter> filters;
         int bps = 0;
