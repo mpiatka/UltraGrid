@@ -315,9 +315,10 @@ struct state_audio * audio_cfg_init(struct module *parent,
 
                         struct audio_filter afilter;
                         if(audio_filter_init(filter_name.c_str(), config.c_str(),
-                                                &afilter) != 0)
+                                                &afilter) != AF_OK)
                         {
                                 printf("Failed to init audio filter\n");
+                                goto error;
                         }
 
                         s->filter_chain.push_back(afilter);
