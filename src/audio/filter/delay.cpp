@@ -63,7 +63,7 @@ struct state_delay{
         std::unique_ptr<ring_buffer_t, Ring_buf_deleter> ring;
 };
 
-static int init(const char *cfg, void **state){
+static af_result_code init(const char *cfg, void **state){
         state_delay *s = new state_delay();
         s->samples = 96000;
         s->bps = 0;
@@ -71,7 +71,7 @@ static int init(const char *cfg, void **state){
 
         *state = s;
 
-        return 0;
+        return AF_OK;
 };
 
 static af_result_code configure(void *state,

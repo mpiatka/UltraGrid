@@ -50,7 +50,8 @@
 #include "module.h"
 #include "utils/color_out.h"
 
-int audio_filter_init(const char *name, const char *cfg, struct audio_filter *filter)
+af_result_code audio_filter_init(const char *name, const char *cfg,
+                struct audio_filter *filter)
 {
         const auto filters = get_libraries_for_class(LIBRARY_CLASS_AUDIO_FILTER,
                         AUDIO_FILTER_ABI_VERSION);
@@ -60,8 +61,8 @@ int audio_filter_init(const char *name, const char *cfg, struct audio_filter *fi
                 if(strcasecmp(i.first.c_str(), name) == 0){
                         filter->info = funcs;
 
-                        int ret = funcs->init(cfg, &filter->state);
-                        if(ret < 0) {
+                        af_result_code ret = funcs->init(cfg, &filter->state);
+                        if(ret == AF_FAILURE) {
                                 fprintf(stderr, "Unable to initialize filter: %s\n",
                                                 name);
                         }
@@ -70,7 +71,7 @@ int audio_filter_init(const char *name, const char *cfg, struct audio_filter *fi
         }
 
         fprintf(stderr, "Unable to find capture filter: %s\n", name);
-        return -1;
+        return AF_FAILURE;
 }
 
 void audio_filter_destroy(struct audio_filter *state){

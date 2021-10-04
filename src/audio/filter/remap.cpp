@@ -87,7 +87,7 @@ static bool parse_num(std::string_view str, T& num){
         return std::from_chars(str.begin(), str.end(), num).ec == std::errc();
 }
 
-static int init(const char *cfg, void **state){
+static af_result_code init(const char *cfg, void **state){
         state_remap *s = new state_remap();
         *state = s;
 
@@ -98,12 +98,12 @@ static int init(const char *cfg, void **state){
                 auto src_t = tokenize(tok, ':');
                 auto dst_t = tokenize(tok, ':');
                 if(src_t.empty() || dst_t.empty())
-                        return -1;
+                        return AF_FAILURE;
 
                 unsigned src_idx;
                 unsigned dst_idx;
                 if(!parse_num(src_t, src_idx) || !parse_num(dst_t, dst_idx)){
-                        return -1;
+                        return AF_FAILURE;
                 }
 
                 if(src_idx >= s->in_to_out_ch_map.size()){
@@ -121,7 +121,7 @@ static int init(const char *cfg, void **state){
 
         s->buffer.ch_count = s->out_ch_contributors.size();
 
-        return 0;
+        return AF_OK;
 };
 
 static af_result_code configure(void *state,

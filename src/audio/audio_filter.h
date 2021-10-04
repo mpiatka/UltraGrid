@@ -52,6 +52,7 @@ enum af_result_code{
         AF_FAILURE = -1,
         AF_OK = 0,
         AF_CONFIGURED_CLOSEST = 1,
+        AF_HELP_SHOWN = 2,
 };
 
 struct audio_filter_info{
@@ -63,7 +64,7 @@ struct audio_filter_info{
         /// @retval     0      if initialized successfully
         /// @retval     <0     if error
         /// @retval     >0     no error but state was not returned, eg. showing help
-        int (*init)(const char *cfg, void **state);
+        af_result_code (*init)(const char *cfg, void **state);
         void (*done)(void *state);
 
         af_result_code (*configure)(void *state,
@@ -83,7 +84,8 @@ struct audio_filter{
         void *state;
 };
 
-int audio_filter_init(const char *name, const char *cfg, struct audio_filter *filter);
+af_result_code audio_filter_init(const char *name, const char *cfg,
+                struct audio_filter *filter);
 
 void audio_filter_destroy(struct audio_filter *state);
 
