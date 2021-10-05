@@ -168,6 +168,9 @@ static void mix_samples(state_remap *s, char *in, char *out){
         int bps = s->buffer.bps;
         double scale = 1.0;
         for(size_t in_ch_idx = 0; in_ch_idx < s->in_to_out_ch_map.size(); in_ch_idx++){
+                if(in_ch_idx >= s->ch_count)
+                        break;
+
                 int32_t in_value = format_from_in_bps(in + bps * in_ch_idx, bps);
 
                 const auto& dst_channels = s->in_to_out_ch_map[in_ch_idx];
