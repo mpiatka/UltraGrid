@@ -1,6 +1,7 @@
 /**
- * @file   utils/misc.c
+ * @file   utils/misc.cpp
  * @author Martin Pulec     <pulec@cesnet.cz>
+ * @author Martin Piatka    <piatka@cesnet.cz>
  */
 /*
  * Copyright (c) 2014-2021 CESNET, z. s. p. o.
@@ -338,4 +339,22 @@ int get_cpu_core_count(void)
         }
         return MIN(numCPU, INT_MAX);
 #endif
+
+std::string_view tokenize(std::string_view& str, char delim){
+        if(str.empty())
+                return {};
+
+        auto token_begin = str.begin();
+        while(token_begin != str.end() && *token_begin == delim){
+                token_begin++;
+        }
+
+        auto token_end = token_begin;
+        while(token_end != str.end() && *token_end != delim){
+                token_end++;
+        }
+
+        str = std::string_view(token_end, str.end() - token_end);
+
+        return std::string_view(token_begin, token_end - token_begin);
 }
