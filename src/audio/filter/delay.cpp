@@ -42,12 +42,15 @@
 #endif /* HAVE_CONFIG_H */
 
 #include <memory>
+#include <string_view>
+#include <charconv>
 
 #include "debug.h"
 #include "audio/audio_filter.h"
 #include "audio/types.h"
 #include "lib_common.h"
 #include "utils/ring_buffer.h"
+#include "utils/misc.h"
 
 namespace{
         struct Ring_buf_deleter{
@@ -56,6 +59,7 @@ namespace{
 }
 
 struct state_delay{
+        int delay_ms;
         int samples;
         int bps;
         int ch_count;
@@ -63,9 +67,30 @@ struct state_delay{
         std::unique_ptr<ring_buffer_t, Ring_buf_deleter> ring;
 };
 
+static void usage(){
+        printf("Delays audio:\n\n");
+        printf("delay usage:\n");
+        printf("\tdelay:<delay in milliseconds>\n\n");
+}
+
 static af_result_code init(const char *cfg, void **state){
         state_delay *s = new state_delay();
-        s->samples = 96000;
+
+        std::string_view sv = cfg;
+
+        auto tok = tokenize(sv, ':');
+        if(tok.empty() || tok == "help"){
+                usage();
+                return AF_HELP_SHOWN;
+        } 
+
+        if(std::from_chars(tok.begin(), tok.end(), s->delay_ms).ec != std::errc()){
+                log_msg(LOG_LEVEL_ERROR, "Failed to parse delay time\n");
+                usage();
+                return AF_FAILURE;
+        }
+
+        s->samples = 0;
         s->bps = 0;
         s->ch_count = 0;
 
@@ -83,6 +108,7 @@ static af_result_code configure(void *state,
         s->ch_count = in_ch_count;
         s->sample_rate = in_sample_rate;
 
+        s->samples = (s->sample_rate / 1000) * s->delay_ms;
         int delay_size = s->bps * s->ch_count * s->samples;
         s->ring.reset(ring_buffer_init(delay_size * 2));
         ring_fill(s->ring.get(), 0, delay_size);
