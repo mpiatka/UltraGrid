@@ -45,13 +45,14 @@
 #include <vector>
 #include <string_view>
 #include <charconv>
+#include <stdio.h>
 
 #include "debug.h"
 #include "audio/audio_filter.h"
 #include "audio/types.h"
 #include "audio/utils.h"
 #include "lib_common.h"
-
+#include "utils/misc.h"
 
 struct state_remap{
         int ch_count;
@@ -63,23 +64,13 @@ struct state_remap{
         std::vector<int> out_ch_contributors;
 };
 
-static std::string_view tokenize(std::string_view& str, char delim){
-        if(str.empty())
-                return {};
-
-        auto token_begin = str.begin();
-        while(token_begin != str.end() && *token_begin == delim){
-                token_begin++;
-        }
-
-        auto token_end = token_begin;
-        while(token_end != str.end() && *token_end != delim){
-                token_end++;
-        }
-
-        str = std::string_view(token_end, str.end() - token_end);
-
-        return std::string_view(token_begin, token_end - token_begin);
+static void usage(){
+        printf("Remaps audio channels:\n\n");
+        printf("remap usage:\n");
+        printf("\tremap:<src_ch>:<dst_ch>[,<src_ch>:<dst_ch>]...\n\n");
+        printf("Example:\n");
+        printf("swap stereo: remap:0:1,1:0\n");
+        printf("mix to mono: remap:0:0,1:0\n");
 }
 
 template<typename T>
@@ -93,8 +84,19 @@ static af_result_code init(const char *cfg, void **state){
 
         std::string_view conf(cfg);
 
+        if(conf.empty()){
+                log_msg(LOG_LEVEL_ERROR, "No mapping configured!\n");
+                usage();
+                return AF_FAILURE;
+        }
+
         while(!conf.empty()){
                 std::string_view tok = tokenize(conf, ',');
+                if(tok == "help"){
+                        usage();
+                        return AF_HELP_SHOWN;
+                }
+
                 auto src_t = tokenize(tok, ':');
                 auto dst_t = tokenize(tok, ':');
                 if(src_t.empty() || dst_t.empty())
