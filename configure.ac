@@ -144,8 +144,10 @@ fi
 if test $system = MacOSX; then
         if test $os_version_major -lt 18; then # Darwin 18.0.0 is macOS 10.14
                 MIN_MACOS_VER=10.7
-        else
+        elif test $os_version_major -lt 19; then # Darwin 19.0.0 is macOS 10.15
                 MIN_MACOS_VER=10.14
+        else
+                MIN_MACOS_VER=10.15
         fi
         COMMON_OSX_FLAGS="-iframework data/redists -mmacosx-version-min=$MIN_MACOS_VER -stdlib=libc++"
 	CFLAGS="$CFLAGS $COMMON_OSX_FLAGS"
@@ -1290,7 +1292,9 @@ if test $vulkan_req != no; then
                 AC_MSG_ERROR([SDL2 not found]);
         fi
 fi
-echo $vulkan_req $sdl $sdl_version $found_vulkan
+
+#echo $vulkan_req $sdl $sdl_version $found_vulkan
+
 if test $vulkan_req != no -a $sdl = yes -a $sdl_version = 2 -a $found_vulkan = yes
 then        
 	VULKAN_OBJ="src/video_display/vulkan_sdl2.o src/video_display/vulkan_display.o src/video_display/vulkan_context.o src/video_display/vulkan_transfer_image.o"

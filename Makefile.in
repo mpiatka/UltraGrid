@@ -589,6 +589,7 @@ $(BUNDLE): $(TARGET) $(REFLECTOR_TARGET) hd-rum-multi/hd-rum
 	cp $(REFLECTOR_TARGET) $(BUNDLE)/Contents/MacOS/
 	cp -r data/MacOS-bundle-template/* $(BUNDLE)/
 	cp hd-rum-multi/hd-rum $(BUNDLE)/Contents/MacOS/
+	cp -r $(srcdir)/share/ $(BUNDLE)/Contents/share/
 	touch $@ # mark target as up to date
 
 # adds libraries to the bundle
