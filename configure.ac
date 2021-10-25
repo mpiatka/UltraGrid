@@ -1688,6 +1688,8 @@ if test $system = MacOSX; then
         lavc_hwacc_common=yes
 fi
 
+lavc_hwacc_common=yes
+
 if test $lavc_hwacc_common = yes
 then
         LAVC_HWACC_FLAGS="${LAVC_HWACC_FLAGS} -DHWACC_COMMON_IMPL"
