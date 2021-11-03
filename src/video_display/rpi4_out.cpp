@@ -53,6 +53,7 @@
 #include <condition_variable>
 #include <stdexcept>
 #include <type_traits>
+#include <chrono>
 
 #include <bcm_host.h>
 #include <interface/mmal/mmal.h>
@@ -111,6 +112,35 @@ public:
         Rpi4_video_out(int x, int y, int width, int height, bool fs, int layer);
 
         void display(AVFrame *f);
+        void move(){
+                const int max_x = 1920 - out_width;
+                const int max_y = 1080 - out_height;
+
+                out_pos_x += x_dir;
+                out_pos_y += y_dir;
+
+                if(out_pos_x >= max_x){
+                        out_pos_x = max_x;
+                        x_dir = -x_dir;
+                }
+
+                if(out_pos_x <= 0){
+                        out_pos_x = 0;
+                        x_dir = -x_dir;
+                }
+
+                if(out_pos_y >= max_y){
+                        out_pos_y = max_y;
+                        y_dir = -y_dir;
+                }
+
+                if(out_pos_y <= 0){
+                        out_pos_y = 0;
+                        y_dir = -y_dir;
+                }
+
+                set_output_params();
+        }
 private:
         void set_output_params();
         void stream_fmt_from_frame(MMAL_ES_FORMAT_T *fmt, const AVFrame *f, const AVRpiZcRefPtr zc_frame);
@@ -120,8 +150,12 @@ private:
         int out_pos_y;
         int out_width;
         int out_height;
+        int x_dir = 2;
+        int y_dir = 2;
         bool fullscreen;
         int layer;
+
+        MMAL_ES_FORMAT_T curr_stream_format = {};
 
         mmal_component_unique renderer_component;
         mmal_pool_unique pool;
@@ -220,7 +254,8 @@ void Rpi4_video_out::stream_fmt_from_frame(MMAL_ES_FORMAT_T *stream_fmt, const A
 }
 
 void Rpi4_video_out::set_output_format(MMAL_ES_FORMAT_T *fmt){
-        //TODO: only do this when format actually changes
+        if(mmal_format_compare(fmt, &curr_stream_format) == 0)
+                return;
 
         mmal_format_copy(renderer_component->input[0]->format, fmt);
 
@@ -274,12 +309,6 @@ void Rpi4_video_out::display(AVFrame *f){
                 }
         }
 
-
-
-        buf->cmd = 0; //stream data
-        buf->flags = 0;
-        //buf->offset = 0;
-
         mmal_buffer_header_reset(buf.get());
 
         buf->data = reinterpret_cast<uint8_t *>(av_rpi_zc_vc_handle(zc_frame.get()));
@@ -293,6 +322,7 @@ void Rpi4_video_out::display(AVFrame *f){
                 throw std::runtime_error("Failed to send buffer");
         }
 
+        //Frame was successfully submitted, we don't own the data anymore
         zc_frame.release();
         buf.release();
 }
@@ -420,7 +450,10 @@ static void display_rpi4_run(void *state)
 
         while(run){
                 std::unique_lock lk(s->frame_queue_mut);
-                s->new_frame_ready_cv.wait(lk, [s] {return s->frame_queue.size() > 0;});
+                using namespace std::chrono_literals;
+                s->new_frame_ready_cv.wait_for(lk, 33ms, [s] {return s->frame_queue.size() > 0;});
+
+                s->video_out.move();
 
                 if (s->frame_queue.size() == 0) {
                         continue;
