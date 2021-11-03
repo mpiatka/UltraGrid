@@ -52,44 +52,69 @@
 #include <mutex>
 #include <condition_variable>
 #include <stdexcept>
+#include <type_traits>
 
 #include <bcm_host.h>
 #include <interface/mmal/mmal.h>
 #include <interface/mmal/mmal_component.h>
 #include <interface/mmal/util/mmal_default_components.h>
+#include <interface/mmal/util/mmal_util_params.h>
 
-#define MAX_BUFFER_SIZE 3
+extern "C" {
+#include <libavcodec/rpi_zc.h>
+#include "libavutil/rpi_sand_fns.h"
+}
+
+#define MAX_BUFFER_SIZE 4
 
 namespace{
 
 struct frame_deleter{
-        void operator()(struct video_frame *f){
-                vf_free(f);
-        }
+        void operator()(struct video_frame *f){ vf_free(f); }
 };
 
+using unique_frame = std::unique_ptr<struct video_frame, frame_deleter>;
+
 struct mmal_component_deleter{
-        void operator()(MMAL_COMPONENT_T *c){
-                mmal_component_destroy(c);
-        }
+        void operator()(MMAL_COMPONENT_T *c){ mmal_component_destroy(c); }
 };
 
 using mmal_component_unique = std::unique_ptr<MMAL_COMPONENT_T, mmal_component_deleter>;
 
 struct mmal_pool_deleter{
-        void operator()(MMAL_POOL_T *p){
-                mmal_pool_destroy(p);
-        }
+        void operator()(MMAL_POOL_T *p){ mmal_pool_destroy(p); }
 };
 
 using mmal_pool_unique = std::unique_ptr<MMAL_POOL_T, mmal_pool_deleter>;
+
+struct av_zc_deleter{
+        void operator()(AVZcEnvPtr env) { av_rpi_zc_int_env_freep(&env); }
+};
+
+using av_zc_env_unique = std::unique_ptr<std::remove_pointer_t<AVZcEnvPtr>, av_zc_deleter>;
+
+struct av_zc_frame_deleter{
+        void operator()(AVRpiZcRefPtr f){ av_rpi_zc_unref(f); }
+};
+
+using av_zero_copy_frame_unique = std::unique_ptr<std::remove_pointer_t<AVRpiZcRefPtr>, av_zc_frame_deleter>;
+
+struct mmal_buf_header_deleter{
+        void operator()(MMAL_BUFFER_HEADER_T *buf){ mmal_buffer_header_release(buf); }
+};
+
+using mmal_buf_header_unique = std::unique_ptr<MMAL_BUFFER_HEADER_T, mmal_buf_header_deleter>;
 
 class Rpi4_video_out{
 public:
         Rpi4_video_out() = default;
         Rpi4_video_out(int x, int y, int width, int height, bool fs, int layer);
+
+        void display(AVFrame *f);
 private:
         void set_output_params();
+        void stream_fmt_from_frame(MMAL_ES_FORMAT_T *fmt, const AVFrame *f, const AVRpiZcRefPtr zc_frame);
+        void set_output_format(MMAL_ES_FORMAT_T *fmt);
 
         int out_pos_x;
         int out_pos_y;
@@ -100,6 +125,7 @@ private:
 
         mmal_component_unique renderer_component;
         mmal_pool_unique pool;
+        av_zc_env_unique zero_copy_env;
 };
 
 void Rpi4_video_out::set_output_params(){
@@ -115,6 +141,10 @@ void Rpi4_video_out::set_output_params(){
         region.alpha = 0xff;
 
         mmal_port_parameter_set(renderer_component->input[0], &region.hdr);
+}
+
+static void release_buf_cb(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *buf){
+        mmal_buffer_header_release(buf);
 }
 
 Rpi4_video_out::Rpi4_video_out(int x, int y, int width, int height, bool fs, int layer):
@@ -135,15 +165,139 @@ Rpi4_video_out::Rpi4_video_out(int x, int y, int width, int height, bool fs, int
 
         set_output_params();
 
+
         if(mmal_component_enable(renderer_component.get()) != MMAL_SUCCESS){
                 throw std::runtime_error("Failed to enable renderer component");
         }
 
+        if(mmal_port_enable(renderer_component->control, release_buf_cb) != MMAL_SUCCESS){
+                throw std::runtime_error("Failed to enable control port");
+        }
+
+
+        pool.reset(mmal_pool_create(MAX_BUFFER_SIZE, 0));
+        if(!pool){
+                throw std::runtime_error("Failed to create pool");
+        }
+
+        zero_copy_env.reset(av_rpi_zc_int_env_alloc(nullptr));
+}
+
+void Rpi4_video_out::stream_fmt_from_frame(MMAL_ES_FORMAT_T *stream_fmt, const AVFrame *f, const AVRpiZcRefPtr zc_frame){
+        MMAL_VIDEO_FORMAT_T *v_fmt = &stream_fmt->es->video;
+        const AVRpiZcFrameGeometry *geo = av_rpi_zc_geometry(zc_frame);
+
+        stream_fmt->flags = 0;
+
+        if(av_rpi_is_sand_format(geo->format)){
+                v_fmt->width = geo->height_y;
+                v_fmt->height = geo->height_y;
+
+                if(geo->stripe_is_yc)
+                        v_fmt->width += geo->height_c;
+
+                stream_fmt->flags |= MMAL_ES_FORMAT_FLAG_COL_FMTS_WIDTH_IS_COL_STRIDE;
+        } else {
+                v_fmt->width = geo->stride_y / geo->bytes_per_pel;
+                v_fmt->height = geo->height_y;
+        }
+
+        stream_fmt->type = MMAL_ES_TYPE_VIDEO;
+        assert(geo->format == AV_PIX_FMT_RPI4_8
+                        || geo->format == AV_PIX_FMT_SAND128);
+        stream_fmt->encoding = MMAL_ENCODING_YUVUV128;
+
+        v_fmt->crop.x = f->crop_left;
+        v_fmt->crop.y = f->crop_top;
+        v_fmt->crop.width = av_frame_cropped_width(f);
+        v_fmt->crop.height = av_frame_cropped_height(f);
+
+        v_fmt->frame_rate.den = 30;
+        v_fmt->frame_rate.num = 1;
+
+        v_fmt->par.den = f->sample_aspect_ratio.den;
+        v_fmt->par.num = f->sample_aspect_ratio.num;
+}
+
+void Rpi4_video_out::set_output_format(MMAL_ES_FORMAT_T *fmt){
+        //TODO: only do this when format actually changes
+
+        mmal_format_copy(renderer_component->input[0]->format, fmt);
+
+        if(mmal_port_format_commit(renderer_component->input[0]) != MMAL_SUCCESS){
+                throw std::runtime_error("Failed to commit port format");
+        }
+}
+
+static MMAL_BOOL_T buf_pre_release_cb(MMAL_BUFFER_HEADER_T * buf, void *){
+        if(buf->user_data){
+                av_zc_frame_deleter()(static_cast<AVRpiZcRefPtr>(buf->user_data));
+                buf->user_data = nullptr;
+        }
+
+        return MMAL_FALSE;
+}
+
+void Rpi4_video_out::display(AVFrame *f){
+        auto zc_frame = av_zero_copy_frame_unique(
+                        av_rpi_zc_ref(nullptr,
+                                zero_copy_env.get(),
+                                f,
+                                static_cast<AVPixelFormat>(f->format),
+                                true)
+                        );
+        if(!zc_frame)
+                return;
+
+
+        auto buf = mmal_buf_header_unique(mmal_queue_get(pool->queue));
+        if(!buf)
+                return;
+
+        MMAL_ES_SPECIFIC_FORMAT_T sfmt = {};
+        MMAL_ES_FORMAT_T stream_fmt = {};
+
+        stream_fmt.es = &sfmt;
+
+        stream_fmt_from_frame(&stream_fmt, f, zc_frame.get());
+        set_output_format(&stream_fmt);
+
+        renderer_component->input[0]->buffer_num = MAX_BUFFER_SIZE;
+        renderer_component->input[0]->buffer_size = av_rpi_zc_numbytes(zc_frame.get());
+
+        if(!renderer_component->input[0]->is_enabled){
+                mmal_port_parameter_set_boolean(renderer_component->input[0],
+                                MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE);
+
+                if(mmal_port_enable(renderer_component->input[0], release_buf_cb) != MMAL_SUCCESS){
+                        throw std::runtime_error("Failed to enable port");
+                }
+        }
+
+
+
+        buf->cmd = 0; //stream data
+        buf->flags = 0;
+        //buf->offset = 0;
+
+        mmal_buffer_header_reset(buf.get());
+
+        buf->data = reinterpret_cast<uint8_t *>(av_rpi_zc_vc_handle(zc_frame.get()));
+        buf->length = av_rpi_zc_length(zc_frame.get());
+        buf->offset = av_rpi_zc_offset(zc_frame.get());
+        buf->alloc_size = av_rpi_zc_numbytes(zc_frame.get());
+        
+        mmal_buffer_header_pre_release_cb_set(buf.get(), buf_pre_release_cb, nullptr);
+        buf->user_data = zc_frame.get();
+        if(mmal_port_send_buffer(renderer_component->input[0], buf.get()) != MMAL_SUCCESS){
+                throw std::runtime_error("Failed to send buffer");
+        }
+
+        zc_frame.release();
+        buf.release();
 }
 
 } //anonymous namespace
-
-using unique_frame = std::unique_ptr<struct video_frame, frame_deleter>;
 
 struct rpi4_display_state{
         struct video_desc current_desc;
@@ -283,6 +437,8 @@ static void display_rpi4_run(void *state)
                 }
 
                 auto av_wrap = reinterpret_cast<struct av_frame_wrapper *>(frame->tiles[0].data);
+
+                s->video_out.display(av_wrap->av_frame);
 
                 vf_recycle(frame.get());
                 std::lock_guard(s->free_frames_mut);
