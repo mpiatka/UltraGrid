@@ -112,6 +112,8 @@ public:
         Rpi4_video_out(int x, int y, int width, int height, bool fs, int layer);
 
         void display(AVFrame *f);
+
+        void resize(int width, int height);
         void move(){
                 const int max_x = 1920 - out_width;
                 const int max_y = 1080 - out_height;
@@ -161,6 +163,16 @@ private:
         mmal_pool_unique pool;
         av_zc_env_unique zero_copy_env;
 };
+
+void Rpi4_video_out::resize(int width, int height){
+        if(width == out_width && height == out_height)
+                return;
+
+        out_width = width;
+        out_height = height;
+
+        set_output_params();
+}
 
 void Rpi4_video_out::set_output_params(){
         MMAL_DISPLAYREGION_T region = {};
@@ -486,6 +498,8 @@ static int display_rpi4_reconfigure(void *state, struct video_desc desc)
 
         assert(desc.color_spec == RPI4_8);
         s->current_desc = desc;
+
+        s->video_out.resize(desc.width, desc.height);
 
         return TRUE;
 }
