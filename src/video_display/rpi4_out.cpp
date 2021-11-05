@@ -177,7 +177,7 @@ void Rpi4_video_out::set_output_params(){
         mmal_port_parameter_set(renderer_component->input[0], &region.hdr);
 }
 
-static void release_buf_cb(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *buf){
+static void release_buf_cb(MMAL_PORT_T *, MMAL_BUFFER_HEADER_T *buf){
         mmal_buffer_header_release(buf);
 }
 
@@ -469,7 +469,8 @@ static void display_rpi4_run(void *state)
                         break;
                 }
 
-                auto av_wrap = reinterpret_cast<struct av_frame_wrapper *>(frame->tiles[0].data);
+                auto av_wrap = reinterpret_cast<struct av_frame_wrapper *>(
+                                reinterpret_cast<void *>(frame->tiles[0].data));
 
                 s->video_out.display(av_wrap->av_frame);
 
