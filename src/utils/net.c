@@ -397,29 +397,56 @@ bool is_ipv6_supported(void)
         return true;
 }
 
-const char *get_sockaddr_str(struct sockaddr *sa)
-{
-        _Thread_local static char addr[IN6_MAX_ASCII_LEN + 3 /* []: */ + 5 /* port */ + 1 /* \0 */] = "";
+unsigned get_sockaddr_addr_port(struct sockaddr *sa){
         unsigned port = 0;
+        if (sa->sa_family == AF_INET6) {
+                port = ntohs(((struct sockaddr_in6 *)(void *) sa)->sin6_port);
+        } else if (sa->sa_family == AF_INET) {
+                port = ntohs(((struct sockaddr_in *)(void *) sa)->sin_port);
+        } else {
+                return UINT_MAX;
+        }
+
+        return port;
+}
+
+const char *get_sockaddr_addr_str(struct sockaddr *sa){
+        //Leave enough space for get_sockaddr_str() to write port number
+        _Thread_local static char addr[IN6_MAX_ASCII_LEN + 3 /* []: */ + 5 /* port */ + 1 /* \0 */] = "";
+
         const void *src = NULL;
         if (sa->sa_family == AF_INET6) {
                 strcpy(addr, "[");
                 src = &((struct sockaddr_in6 *)(void *) sa)->sin6_addr;
-                port = ntohs(((struct sockaddr_in6 *)(void *) sa)->sin6_port);
         } else if (sa->sa_family == AF_INET) {
                 src = &((struct sockaddr_in *)(void *) sa)->sin_addr;
-                port = ntohs(((struct sockaddr_in *)(void *) sa)->sin_port);
         } else {
-                return "(unknown)";
+                strcpy(addr, "(unknown)");
+                return addr;
         }
         if (inet_ntop(sa->sa_family, src, addr + strlen(addr), sizeof addr - strlen(addr)) == NULL) {
                 perror("get_sockaddr_str");
-                return "(error)";
+                strcpy(addr, "(error)");
+                return addr;
         }
 
         if (sa->sa_family == AF_INET6) {
-                strcpy(addr + strlen(addr), "]");
+                strcat(addr, "]");
         }
+
+        return addr;
+}
+
+const char *get_sockaddr_str(struct sockaddr *sa)
+{
+        /* HACK: cast away const. get_sockaddr_addr_str returns pointer to
+         * writable static thread local buffer. */
+        const char *addr_const = get_sockaddr_addr_str(sa);
+        char *addr = (char *) (uintptr_t) addr_const;
+
+        unsigned port = get_sockaddr_addr_port(sa);
+        if(port == UINT_MAX)
+                return addr;
         sprintf(addr + strlen(addr), ":%u", port);
 
         return addr;
