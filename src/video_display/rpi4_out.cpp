@@ -45,6 +45,7 @@
 #include "video_codec.h"
 #include "video_display.h"
 #include "hwaccel_rpi4.h"
+#include "utils/misc.h"
 
 #include <memory>
 #include <queue>
@@ -54,6 +55,7 @@
 #include <stdexcept>
 #include <type_traits>
 #include <chrono>
+#include <charconv>
 
 #include <bcm_host.h>
 #include <interface/mmal/mmal.h>
@@ -352,14 +354,69 @@ struct rpi4_display_state{
         std::mutex free_frames_mut;
         std::stack<unique_frame> free_frames;
 
+        int requested_pos_x = 0;
+        int requested_pos_y = 0;
+        int force_w = 0;
+        int force_h = 0;
+        bool fullscreen = false;
+
         Rpi4_video_out video_out;
 };
 
+static bool sv_starts_with(std::string_view str, std::string_view prefix){
+        return str.substr(0, prefix.length()) == prefix;
+}
+
 static void *display_rpi4_init(struct module *parent, const char *cfg, unsigned int flags)
 {
-        rpi4_display_state *s = new rpi4_display_state();
-        s->video_out = Rpi4_video_out(0, 0, 1280, 720, false, 2);
-        return s;
+        auto s = std::make_unique<rpi4_display_state>();
+
+        std::string_view conf(cfg);
+        while(!conf.empty()){
+                auto token = tokenize(conf, ':');
+
+                auto key = tokenize(token, '=');
+                if(key == "force-size"){
+                        auto val = tokenize(token, '=');
+
+                        auto width = tokenize(val, 'x');
+                        auto height = tokenize(val, 'x');
+
+                        if(width.empty() || height.empty())
+                                return nullptr;
+
+                        if(std::from_chars(width.data(), width.data() + width.size(), s->force_w).ec != std::errc()
+                                        || std::from_chars(height.data(), height.data() + height.size(), s->force_h).ec != std::errc())
+                        {
+                                return nullptr;
+                        }
+                } else if(key == "fullscreen"){
+                        s->fullscreen = true;
+                } else if(key == "position"){
+                        auto val = tokenize(token, '=');
+
+                        auto x_str = tokenize(val, 'x');
+                        auto y_str = tokenize(val, 'x');
+
+                        if(x_str.empty() || y_str.empty())
+                                return nullptr;
+
+                        if(std::from_chars(x_str.data(), x_str.data() + x_str.size(), s->requested_pos_x).ec != std::errc()
+                                        || std::from_chars(y_str.data(), y_str.data() + y_str.size(), s->requested_pos_y).ec != std::errc())
+                        {
+                                return nullptr;
+                        }
+                }
+        }
+
+        int width = s->force_w ? s->force_w : 640;
+        int height = s->force_h ? s->force_h : 480;
+        
+        s->video_out = Rpi4_video_out(s->requested_pos_x, s->requested_pos_y,
+                        width, height,
+                        s->fullscreen, 2);
+
+        return s.release();
 }
 
 static void display_rpi4_done(void *state) {
@@ -499,7 +556,8 @@ static int display_rpi4_reconfigure(void *state, struct video_desc desc)
         assert(desc.color_spec == RPI4_8);
         s->current_desc = desc;
 
-        s->video_out.resize(desc.width, desc.height);
+        if(s->force_w == 0 && s->force_h == 0)
+                s->video_out.resize(desc.width, desc.height);
 
         return TRUE;
 }
