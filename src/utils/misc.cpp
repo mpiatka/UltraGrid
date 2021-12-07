@@ -339,6 +339,7 @@ int get_cpu_core_count(void)
         }
         return MIN(numCPU, INT_MAX);
 #endif
+}
 
 std::string_view tokenize(std::string_view& str, char delim){
         if(str.empty())
