@@ -1814,6 +1814,51 @@ if test $libavcodec_req = yes -a $libavcodec = no; then
 fi
 
 # -------------------------------------------------------------------------------------------------
+# Rpi4 hw. accelerated decode and display
+# -------------------------------------------------------------------------------------------------
+rpi4_hw_acc=no
+AC_ARG_ENABLE(rpi4_hw_acc,
+[  --disable-rpi4_hw_acc          disable rpi4_hw_acc support (default is auto)]
+[                          Requires: Raspbian-patched ffmpeg libmmal],
+[rpi4_hw_acc=$enableval],
+[rpi4_hw_accfile_req=$build_default]
+)
+
+RPI4_HW_ACC_INC="-I/opt/vc/include -I/opt/vc/include/interface/vcos/pthreads -I/opt/vc/include/interface/vmcs_host/linux"
+RPI4_HW_ACC_LIB="-L/opt/vc/lib/ -lbcm_host -lmmal -lmmal_core -lmmal_components -lmmal_util"
+
+RPI4_HW_ACC_INC=""
+RPI4_HW_ACC_LIB=""
+
+CFLAGS_BACKUP="${CFLAGS}"
+LDFLAGS_BACKUP="${LDFLAGS}"
+
+#CFLAGS="${CFLAGS} $RPI4_HW_ACC_INC"
+#LDFLAGS="${LDFLAGS_BACKUP} $RPI4_HW_ACC_LIB"
+
+#AC_CHECK_HEADER([interface/mmal/mmal.h])
+#AC_CHECK_LIB(mmal, mmal_pool_destroy)
+
+SAVED_PKG_CONFIG_PATH=$PKG_CONFIG_PATH
+PKG_CONFIG_PATH="$PKG_CONFIG_PATH:/opt/vc/lib/pkgconfig/"
+export PKG_CONFIG_PATH
+
+PKG_CHECK_MODULES([MMAL], [mmal], [ found_rpi4_mmal=yes ], [ found_rpi4_mmal=no ])
+PKG_CHECK_MODULES([BCM_HOST], [bcm_host], [ ], [ found_rpi4_mmal=no ])
+
+PKG_CONFIG_PATH=$SAVED_PKG_CONFIG_PATH
+export PKG_CONFIG_PATH
+
+AC_CHECK_HEADER([libavcodec/rpi_zc.h], [found_rpi4_ffmpeg_patch=yes], [found_rpi4_ffmpeg_patch=no], [#include <libavcodec/avcodec.h>])
+
+COMMON_FLAGS="$COMMON_FLAGS $MMAL_CFLAGS $BCM_HOST_CFLAGS"
+LIBS="$LIBS $MMAL_LIBS $BCM_HOST_LIBS"
+
+
+CFLAGS="${CFLAGS_BACKUP}"
+LDFLAGS="${LDFLAGS_BACKUP}"
+
+# -------------------------------------------------------------------------------------------------
 # File input
 # -------------------------------------------------------------------------------------------------
 file=no
