@@ -496,6 +496,7 @@ fail:
 }
 #endif
 
+#ifdef HWACCEL_RPI4
 int rpi4_hwacc_init(struct AVCodecContext *s,
                 struct hw_accel_state *state,
                 codec_t out_codec)
@@ -504,6 +505,7 @@ int rpi4_hwacc_init(struct AVCodecContext *s,
         state->copy = false;
         return 0;
 }
+#endif
 
 static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribute__((unused)), const enum AVPixelFormat *fmt)
 {
@@ -537,7 +539,9 @@ static enum AVPixelFormat get_format_callback(struct AVCodecContext *s __attribu
 #ifdef HAVE_MACOSX
                 {AV_PIX_FMT_VIDEOTOOLBOX, HWACCEL_VIDEOTOOLBOX, videotoolbox_init}
 #endif
+#ifdef HWACCEL_RPI4
                 {AV_PIX_FMT_RPI4_8, HWACCEL_RPI4, rpi4_hwacc_init}
+#endif
         };
 
         if (hwaccel && state->out_codec != VIDEO_CODEC_NONE) { // not probing internal format
