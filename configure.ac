@@ -1821,7 +1821,7 @@ AC_ARG_ENABLE(rpi4_hw_acc,
 [  --disable-rpi4_hw_acc          disable rpi4_hw_acc support (default is auto)]
 [                          Requires: Raspbian-patched ffmpeg libmmal],
 [rpi4_hw_acc=$enableval],
-[rpi4_hw_accfile_req=$build_default]
+[rpi4_hw_acc_req=$build_default]
 )
 
 RPI4_HW_ACC_INC="-I/opt/vc/include -I/opt/vc/include/interface/vcos/pthreads -I/opt/vc/include/interface/vmcs_host/linux"
@@ -1830,8 +1830,8 @@ RPI4_HW_ACC_LIB="-L/opt/vc/lib/ -lbcm_host -lmmal -lmmal_core -lmmal_components 
 RPI4_HW_ACC_INC=""
 RPI4_HW_ACC_LIB=""
 
-CFLAGS_BACKUP="${CFLAGS}"
-LDFLAGS_BACKUP="${LDFLAGS}"
+#CFLAGS_BACKUP="${CFLAGS}"
+#LDFLAGS_BACKUP="${LDFLAGS}"
 
 #CFLAGS="${CFLAGS} $RPI4_HW_ACC_INC"
 #LDFLAGS="${LDFLAGS_BACKUP} $RPI4_HW_ACC_LIB"
@@ -1851,12 +1851,15 @@ export PKG_CONFIG_PATH
 
 AC_CHECK_HEADER([libavcodec/rpi_zc.h], [found_rpi4_ffmpeg_patch=yes], [found_rpi4_ffmpeg_patch=no], [#include <libavcodec/avcodec.h>])
 
-COMMON_FLAGS="$COMMON_FLAGS $MMAL_CFLAGS $BCM_HOST_CFLAGS"
-LIBS="$LIBS $MMAL_LIBS $BCM_HOST_LIBS"
+if test $rpi4_hw_acc_req != no -a $libavcodec = yes -a $found_rpi4_mmal = yes -a $found_rpi4_ffmpeg_patch = yes
+then
+	rpi4_hw_acc=yes
+	ADD_MODULE("rpi4_hw_accel", "src/video_display/rpi4_out.o", "$MMAL_LIBS $BCM_HOST_LIBS")
+	echo "$MMAL_LIBS $BCM_HOST_LIBS"
+	COMMON_FLAGS="$COMMON_FLAGS $MMAL_CFLAGS $BCM_HOST_CFLAGS"
+fi
 
-
-CFLAGS="${CFLAGS_BACKUP}"
-LDFLAGS="${LDFLAGS_BACKUP}"
+#LIBS="$LIBS $MMAL_LIBS $BCM_HOST_LIBS"
 
 # -------------------------------------------------------------------------------------------------
 # File input
