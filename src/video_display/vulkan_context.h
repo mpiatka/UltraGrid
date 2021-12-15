@@ -1,8 +1,8 @@
 #pragma once
 
-#ifdef NO_EXCEPTIONS
-#define VULKAN_HPP_NO_EXCEPTIONS
-#endif //NO_EXCEPTIONS
+#ifdef VULKAN_DISPLAY_NO_EXCEPTIONS
+#define VULKAN_HPP_VULKAN_DISPLAY_NO_EXCEPTIONS
+#endif //VULKAN_DISPLAY_NO_EXCEPTIONS
 
 #include <vulkan/vulkan.hpp>
 static_assert(VK_HEADER_VERSION > 100); // minimum Vulkan SDK version is 1.1.101
@@ -34,20 +34,20 @@ constexpr inline vk::Result to_vk_result(vk::Result res) {
 } // namespace vulkan_display_detail
 
 
-#ifdef NO_EXCEPTIONS //-------------------------------------------------------
+#ifdef VULKAN_DISPLAY_NO_EXCEPTIONS //-------------------------------------------------------
 //EXCEPTIONS ARE DISABLED
 inline std::string vulkan_display_error_message;
 
-#define RETURN_TYPE vk::Result
+#define VKD_RETURN_TYPE vk::Result
 
-#define PASS_RESULT(expr) {                                              \
+#define VKD_PASS_RESULT(expr) {                                              \
         if (vk::Result res = expr; res != vk::Result::eSuccess) {        \
                 assert(false);                                           \
                 return res;                                              \
         }                                                                \
 }
 
-#define CHECK(expr, msg) {                                               \
+#define VKD_CHECK(expr, msg) {                                               \
         vk::Result res = to_vk_result(expr);                             \
         if ( res != vk::Result::eSuccess) {                              \
                 assert(false);                                           \
@@ -56,7 +56,7 @@ inline std::string vulkan_display_error_message;
         }                                                                \
 }
 
-#define CHECKED_ASSIGN(variable, expr) {                                 \
+#define VKD_CHECKED_ASSIGN(variable, expr) {                                 \
         auto[checked_assign_return_val, checked_assign_value] = expr;    \
         if (checked_assign_return_val != vk::Result::eSuccess) {         \
                 assert(false);                                           \
@@ -64,7 +64,7 @@ inline std::string vulkan_display_error_message;
         } else {variable = std::move(checked_assign_value);}             \
 }
 
-#else //NO_EXCEPTIONS -------------------------------------------------------
+#else //VULKAN_DISPLAY_NO_EXCEPTIONS -------------------------------------------------------
 //EXCEPTIONS ARE ENABLED
 #include<exception>
 
@@ -73,15 +73,15 @@ struct  vulkan_display_exception : public std::runtime_error {
                 std::runtime_error{ msg } { }
 };
 
-#define RETURN_TYPE void
+#define VKD_RETURN_TYPE void
 
-#define PASS_RESULT(expr) { expr; }
+#define VKD_PASS_RESULT(expr) { expr; }
 
-#define CHECK(expr, msg) { if (to_vk_result(expr) != vk::Result::eSuccess) throw vulkan_display_exception{msg}; }
+#define VKD_CHECK(expr, msg) { if (to_vk_result(expr) != vk::Result::eSuccess) throw vulkan_display_exception{msg}; }
 
-#define CHECKED_ASSIGN(variable, expr) { (variable) = (expr); }
+#define VKD_CHECKED_ASSIGN(variable, expr) { (variable) = (expr); }
 
-#endif //NO_EXCEPTIONS -------------------------------------------------------
+#endif //VULKAN_DISPLAY_NO_EXCEPTIONS -------------------------------------------------------
 
 
 namespace vulkan_display {
@@ -167,17 +167,17 @@ public:
         vk::Format get_swapchain_image_format() { return swapchain_atributes.format.format; };
         vk::Extent2D get_window_size() { return window_size; }
 private:
-        RETURN_TYPE create_physical_device(uint32_t gpu_index);
+        VKD_RETURN_TYPE create_physical_device(uint32_t gpu_index);
 
-        RETURN_TYPE create_logical_device();
+        VKD_RETURN_TYPE create_logical_device();
 
-        RETURN_TYPE get_present_mode();
+        VKD_RETURN_TYPE get_present_mode();
 
-        RETURN_TYPE get_surface_format();
+        VKD_RETURN_TYPE get_surface_format();
 
-        RETURN_TYPE create_swap_chain(vk::SwapchainKHR old_swap_chain = vk::SwapchainKHR{});
+        VKD_RETURN_TYPE create_swap_chain(vk::SwapchainKHR old_swap_chain = vk::SwapchainKHR{});
 
-        RETURN_TYPE create_swapchain_views();
+        VKD_RETURN_TYPE create_swapchain_views();
 
         void destroy_swapchain_views() {
                 for (auto& image : swapchain_images) {
@@ -196,14 +196,14 @@ public:
 
         vulkan_context() = default;
 
-        RETURN_TYPE init(vulkan_display::vulkan_instance&& instance, VkSurfaceKHR surface, 
+        VKD_RETURN_TYPE init(vulkan_display::vulkan_instance&& instance, VkSurfaceKHR surface, 
                 window_parameters, uint32_t gpu_index);
 
-        RETURN_TYPE destroy();
+        VKD_RETURN_TYPE destroy();
 
-        RETURN_TYPE create_framebuffers(vk::RenderPass render_pass);
+        VKD_RETURN_TYPE create_framebuffers(vk::RenderPass render_pass);
 
-        RETURN_TYPE acquire_next_swapchain_image(uint32_t& image_index, vk::Semaphore acquire_semaphore) const;
+        VKD_RETURN_TYPE acquire_next_swapchain_image(uint32_t& image_index, vk::Semaphore acquire_semaphore) const;
 
         vk::Framebuffer get_framebuffer(uint32_t framebuffer_id) {
                 return swapchain_images[framebuffer_id].framebuffer;
@@ -213,7 +213,7 @@ public:
                 return { window_size.width, window_size.height, vsync };
         }
 
-        RETURN_TYPE recreate_swapchain(window_parameters parameters, vk::RenderPass render_pass);
+        VKD_RETURN_TYPE recreate_swapchain(window_parameters parameters, vk::RenderPass render_pass);
 };
 
 }//namespace vulkan_display_detail ----------------------------------------------------------------
@@ -231,9 +231,9 @@ class vulkan_instance {
         vk::DebugUtilsMessengerEXT messenger{};
         uint32_t vulkan_version = VK_API_VERSION_1_1;
 
-        RETURN_TYPE init_validation_layers_error_messenger();
+        VKD_RETURN_TYPE init_validation_layers_error_messenger();
 
-        friend RETURN_TYPE vulkan_display_detail::vulkan_context::init(vulkan_instance&& instance, 
+        friend VKD_RETURN_TYPE vulkan_display_detail::vulkan_context::init(vulkan_instance&& instance, 
                 VkSurfaceKHR surface, window_parameters parameters, uint32_t gpu_index);
 public:
         vulkan_instance() = default;
@@ -251,20 +251,20 @@ public:
          *                              usually needed for creating vulkan surface
          * @param enable_validation     Enable vulkan validation layers, they should be disabled in release build.
          */
-        RETURN_TYPE init(std::vector<const char*>& required_extensions, bool enable_validation, std::function<void(std::string_view sv)> logging_function = cout_output);
+        VKD_RETURN_TYPE init(std::vector<const char*>& required_extensions, bool enable_validation, std::function<void(std::string_view sv)> logging_function = cout_output);
         
         /**
          * @brief returns all available grafhics cards
          *  first parameter is gpu name,
          *  second parameter is true only if the gpu is suitable for vulkan_display
          */
-        RETURN_TYPE get_available_gpus(std::vector<std::pair<std::string, bool>>& gpus);
+        VKD_RETURN_TYPE get_available_gpus(std::vector<std::pair<std::string, bool>>& gpus);
 
         vk::Instance& get_instance() {
                 return instance;
         }
 
-        RETURN_TYPE destroy();
+        VKD_RETURN_TYPE destroy();
 };
 
 }

@@ -58,12 +58,12 @@ public:
         const vulkan_display::image_description& get_description() { return description; }
         uint32_t get_id() { return id; }
 
-        static RETURN_TYPE is_image_description_supported(bool& supported, vk::PhysicalDevice gpu,
+        static VKD_RETURN_TYPE is_image_description_supported(bool& supported, vk::PhysicalDevice gpu,
                 vulkan_display::image_description description);
         
-        RETURN_TYPE init(vk::Device device, uint32_t id);
+        VKD_RETURN_TYPE init(vk::Device device, uint32_t id);
 
-        RETURN_TYPE create(vk::Device device, vk::PhysicalDevice gpu, vulkan_display::image_description description);
+        VKD_RETURN_TYPE create(vk::Device device, vk::PhysicalDevice gpu, vulkan_display::image_description description);
 
         vk::ImageMemoryBarrier create_memory_barrier(
                 vk::ImageLayout new_layout,
@@ -71,10 +71,10 @@ public:
                 uint32_t src_queue_family_index = VK_QUEUE_FAMILY_IGNORED,
                 uint32_t dst_queue_family_index = VK_QUEUE_FAMILY_IGNORED);
 
-        RETURN_TYPE prepare_for_rendering(vk::Device device, vk::DescriptorSet descriptor_set, 
+        VKD_RETURN_TYPE prepare_for_rendering(vk::Device device, vk::DescriptorSet descriptor_set, 
                 vk::Sampler sampler, vk::SamplerYcbcrConversion conversion);
 
-        RETURN_TYPE destroy(vk::Device device, bool destroy_fence = true);
+        VKD_RETURN_TYPE destroy(vk::Device device, bool destroy_fence = true);
 
         transfer_image() = default;
         transfer_image(vk::Device device, uint32_t id) {

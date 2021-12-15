@@ -18,27 +18,27 @@ using namespace vulkan_display_detail;
 
 namespace {
 
-RETURN_TYPE create_shader(vk::ShaderModule& shader,
+VKD_RETURN_TYPE create_shader(vk::ShaderModule& shader,
         const std::filesystem::path& file_path,
         const vk::Device& device)
 {
         std::ifstream file(file_path, std::ios::binary);
-        CHECK(file.is_open(), "Failed to open file:"s + file_path.string());
+        VKD_CHECK(file.is_open(), "Failed to open file:"s + file_path.string());
         auto size = std::filesystem::file_size(file_path);
         assert(size % 4 == 0);
         std::vector<std::uint32_t> shader_code(size / 4);
         file.read(reinterpret_cast<char*>(shader_code.data()), static_cast<std::streamsize>(size));
-        CHECK(file.good(), "Error reading from file:"s + file_path.string());
+        VKD_CHECK(file.good(), "Error reading from file:"s + file_path.string());
 
         vk::ShaderModuleCreateInfo shader_info;
         shader_info
                 .setCodeSize(shader_code.size() * 4)
                 .setPCode(shader_code.data());
-        CHECKED_ASSIGN(shader, device.createShaderModule(shader_info));
-        return RETURN_TYPE();
+        VKD_CHECKED_ASSIGN(shader, device.createShaderModule(shader_info));
+        return VKD_RETURN_TYPE();
 }
 
-RETURN_TYPE update_render_area_viewport_scissor(render_area& render_area, vk::Viewport& viewport, vk::Rect2D& scissor, 
+VKD_RETURN_TYPE update_render_area_viewport_scissor(render_area& render_area, vk::Viewport& viewport, vk::Rect2D& scissor, 
         vk::Extent2D window_size, vk::Extent2D transfer_image_size) {
 
         double wnd_aspect = static_cast<double>(window_size.width) / window_size.height;
@@ -66,7 +66,7 @@ RETURN_TYPE update_render_area_viewport_scissor(render_area& render_area, vk::Vi
         scissor
                 .setOffset({ static_cast<int32_t>(render_area.x), static_cast<int32_t>(render_area.y) })
                 .setExtent({ render_area.width, render_area.height });
-        return RETURN_TYPE();
+        return VKD_RETURN_TYPE();
 }
 
 [[nodiscard]] transfer_image& acquire_transfer_image(
@@ -106,7 +106,7 @@ constexpr bool is_yCbCr_format(vk::Format format) {
 
 namespace vulkan_display {
 
-RETURN_TYPE vulkan_display::create_texture_sampler(vk::Format format) {
+VKD_RETURN_TYPE vulkan_display::create_texture_sampler(vk::Format format) {
         device.destroy(sampler);
         if (yCbCr_conversion) {
                 device.destroy(yCbCr_conversion);
@@ -123,7 +123,7 @@ RETURN_TYPE vulkan_display::create_texture_sampler(vk::Format format) {
                         .setXChromaOffset(vk::ChromaLocation::eMidpoint)
                         .setYChromaOffset(vk::ChromaLocation::eMidpoint)
                         .setForceExplicitReconstruction(false);
-                CHECKED_ASSIGN(yCbCr_conversion, device.createSamplerYcbcrConversion(conversion_info));
+                VKD_CHECKED_ASSIGN(yCbCr_conversion, device.createSamplerYcbcrConversion(conversion_info));
         }
 
         vk::SamplerYcbcrConversionInfo yCbCr_info{ yCbCr_conversion };
@@ -138,11 +138,11 @@ RETURN_TYPE vulkan_display::create_texture_sampler(vk::Format format) {
                 .setAnisotropyEnable(false)
                 .setUnnormalizedCoordinates(false)
                 .setPNext(yCbCr_conversion ? &yCbCr_info : nullptr);
-        CHECKED_ASSIGN(sampler, device.createSampler(sampler_info));
-        return RETURN_TYPE();
+        VKD_CHECKED_ASSIGN(sampler, device.createSampler(sampler_info));
+        return VKD_RETURN_TYPE();
 }
 
-RETURN_TYPE vulkan_display::create_render_pass() {
+VKD_RETURN_TYPE vulkan_display::create_render_pass() {
         vk::RenderPassCreateInfo render_pass_info;
 
         vk::AttachmentDescription color_attachment;
@@ -183,16 +183,16 @@ RETURN_TYPE vulkan_display::create_render_pass() {
                 .setDependencyCount(1)
                 .setPDependencies(&subpass_dependency);
 
-        CHECKED_ASSIGN(render_pass, device.createRenderPass(render_pass_info));
+        VKD_CHECKED_ASSIGN(render_pass, device.createRenderPass(render_pass_info));
 
         vk::ClearColorValue clear_color_value{};
         clear_color_value.setFloat32({ 0.01f, 0.01f, 0.01f, 1.0f });
         clear_color.setColor(clear_color_value);
 
-        return RETURN_TYPE();
+        return VKD_RETURN_TYPE();
 }
 
-RETURN_TYPE vulkan_display::create_descriptor_set_layout() {
+VKD_RETURN_TYPE vulkan_display::create_descriptor_set_layout() {
         device.destroy(descriptor_set_layout);
         vk::DescriptorSetLayoutBinding descriptor_set_layout_bindings;
         descriptor_set_layout_bindings
@@ -207,12 +207,12 @@ RETURN_TYPE vulkan_display::create_descriptor_set_layout() {
                 .setBindingCount(1)
                 .setPBindings(&descriptor_set_layout_bindings);
 
-        CHECKED_ASSIGN(descriptor_set_layout,
+        VKD_CHECKED_ASSIGN(descriptor_set_layout,
                 device.createDescriptorSetLayout(descriptor_set_layout_info));
-        return RETURN_TYPE();
+        return VKD_RETURN_TYPE();
 }
 
-RETURN_TYPE vulkan_display::create_graphics_pipeline() {
+VKD_RETURN_TYPE vulkan_display::create_graphics_pipeline() {
         device.destroy(pipeline_layout);
         device.destroy(pipeline);
         vk::PipelineLayoutCreateInfo pipeline_layout_info{};
@@ -227,7 +227,7 @@ RETURN_TYPE vulkan_display::create_graphics_pipeline() {
                 .setPPushConstantRanges(&push_constants)
                 .setSetLayoutCount(1)
                 .setPSetLayouts(&descriptor_set_layout);
-        CHECKED_ASSIGN(pipeline_layout, device.createPipelineLayout(pipeline_layout_info));
+        VKD_CHECKED_ASSIGN(pipeline_layout, device.createPipelineLayout(pipeline_layout_info));
 
         vk::GraphicsPipelineCreateInfo pipeline_info{};
 
@@ -292,45 +292,45 @@ RETURN_TYPE vulkan_display::create_graphics_pipeline() {
                 .setRenderPass(render_pass);
 
         auto result = device.createGraphicsPipelines(nullptr, 1, &pipeline_info, nullptr, &pipeline);
-        CHECK(result, "Pipeline cannot be created.");       
-	return RETURN_TYPE();
+        VKD_CHECK(result, "Pipeline cannot be created.");       
+	return VKD_RETURN_TYPE();
 }
 
-RETURN_TYPE vulkan_display::create_image_semaphores()
+VKD_RETURN_TYPE vulkan_display::create_image_semaphores()
 {
         vk::SemaphoreCreateInfo semaphore_info;
 
         image_semaphores.resize(transfer_image_count);
 
         for (auto& image_semaphores : image_semaphores) {
-                CHECKED_ASSIGN(image_semaphores.image_acquired, device.createSemaphore(semaphore_info));
-                CHECKED_ASSIGN(image_semaphores.image_rendered, device.createSemaphore(semaphore_info));
+                VKD_CHECKED_ASSIGN(image_semaphores.image_acquired, device.createSemaphore(semaphore_info));
+                VKD_CHECKED_ASSIGN(image_semaphores.image_rendered, device.createSemaphore(semaphore_info));
         }
 
-        return RETURN_TYPE();
+        return VKD_RETURN_TYPE();
 }
 
-RETURN_TYPE vulkan_display::create_command_pool() {
+VKD_RETURN_TYPE vulkan_display::create_command_pool() {
         vk::CommandPoolCreateInfo pool_info{};
         using bits = vk::CommandPoolCreateFlagBits;
         pool_info
                 .setQueueFamilyIndex(context.get_queue_familt_index())
                 .setFlags(bits::eTransient | bits::eResetCommandBuffer);
-        CHECKED_ASSIGN(command_pool, device.createCommandPool(pool_info));
-        return RETURN_TYPE();
+        VKD_CHECKED_ASSIGN(command_pool, device.createCommandPool(pool_info));
+        return VKD_RETURN_TYPE();
 }
 
-RETURN_TYPE vulkan_display::create_command_buffers() {
+VKD_RETURN_TYPE vulkan_display::create_command_buffers() {
         vk::CommandBufferAllocateInfo allocate_info{};
         allocate_info
                 .setCommandPool(command_pool)
                 .setLevel(vk::CommandBufferLevel::ePrimary)
                 .setCommandBufferCount(static_cast<uint32_t>(transfer_image_count));
-        CHECKED_ASSIGN(command_buffers, device.allocateCommandBuffers(allocate_info));
-        return RETURN_TYPE();
+        VKD_CHECKED_ASSIGN(command_buffers, device.allocateCommandBuffers(allocate_info));
+        return VKD_RETURN_TYPE();
 }
 
-RETURN_TYPE vulkan_display::allocate_description_sets() {
+VKD_RETURN_TYPE vulkan_display::allocate_description_sets() {
         assert(transfer_image_count != 0);
         assert(descriptor_set_layout);
         device.destroy(descriptor_pool);
@@ -344,7 +344,7 @@ RETURN_TYPE vulkan_display::allocate_description_sets() {
                 .setPoolSizeCount(1)
                 .setPPoolSizes(&descriptor_sizes)
                 .setMaxSets(transfer_image_count);
-        CHECKED_ASSIGN(descriptor_pool, device.createDescriptorPool(pool_info));
+        VKD_CHECKED_ASSIGN(descriptor_pool, device.createDescriptorPool(pool_info));
 
         std::vector<vk::DescriptorSetLayout> layouts(transfer_image_count, descriptor_set_layout);
 
@@ -354,12 +354,12 @@ RETURN_TYPE vulkan_display::allocate_description_sets() {
                 .setDescriptorSetCount(static_cast<uint32_t>(layouts.size()))
                 .setPSetLayouts(layouts.data());
 
-        CHECKED_ASSIGN(descriptor_sets, device.allocateDescriptorSets(allocate_info));
+        VKD_CHECKED_ASSIGN(descriptor_sets, device.allocateDescriptorSets(allocate_info));
 
-        return RETURN_TYPE();
+        return VKD_RETURN_TYPE();
 }
 
-RETURN_TYPE vulkan_display::init(vulkan_instance&& instance, VkSurfaceKHR surface, uint32_t transfer_image_count,
+VKD_RETURN_TYPE vulkan_display::init(vulkan_instance&& instance, VkSurfaceKHR surface, uint32_t transfer_image_count,
         window_changed_callback& window, uint32_t gpu_index, std::filesystem::path path_to_shaders) {
         // Order of following calls is important
         assert(surface);
@@ -367,15 +367,15 @@ RETURN_TYPE vulkan_display::init(vulkan_instance&& instance, VkSurfaceKHR surfac
         this->transfer_image_count = transfer_image_count;
         this->filled_img_max_count = (transfer_image_count + 1) / 2;
         auto window_parameters = window.get_window_parameters();
-        PASS_RESULT(context.init(std::move(instance), surface, window_parameters, gpu_index));
+        VKD_PASS_RESULT(context.init(std::move(instance), surface, window_parameters, gpu_index));
         device = context.get_device();
-        PASS_RESULT(create_command_pool());
-        PASS_RESULT(create_command_buffers());
-        PASS_RESULT(create_shader(vertex_shader, path_to_shaders / "vert.spv", device));
-        PASS_RESULT(create_shader(fragment_shader, path_to_shaders / "frag.spv", device));
-        PASS_RESULT(create_render_pass());
+        VKD_PASS_RESULT(create_command_pool());
+        VKD_PASS_RESULT(create_command_buffers());
+        VKD_PASS_RESULT(create_shader(vertex_shader, path_to_shaders / "vert.spv", device));
+        VKD_PASS_RESULT(create_shader(fragment_shader, path_to_shaders / "frag.spv", device));
+        VKD_PASS_RESULT(create_render_pass());
         context.create_framebuffers(render_pass);
-        PASS_RESULT(create_image_semaphores());
+        VKD_PASS_RESULT(create_image_semaphores());
 
         transfer_images.reserve(transfer_image_count);
         auto[lock, deque] = available_img_queue.get_underlying_deque();
@@ -386,18 +386,18 @@ RETURN_TYPE vulkan_display::init(vulkan_instance&& instance, VkSurfaceKHR surfac
                 deque.push_front(&transfer_images.back());
         }
 
-        return RETURN_TYPE();
+        return VKD_RETURN_TYPE();
 }
 
-RETURN_TYPE vulkan_display::destroy() {
+VKD_RETURN_TYPE vulkan_display::destroy() {
         if (!destroyed) {
                 destroyed = true;
                 if (device) {
-                        PASS_RESULT(device.waitIdle());
+                        VKD_PASS_RESULT(device.waitIdle());
                         device.destroy(descriptor_pool);
 
                         for (auto& image : transfer_images) {
-                                PASS_RESULT(image.destroy(device));
+                                VKD_PASS_RESULT(image.destroy(device));
                         }
                         device.destroy(command_pool);
                         device.destroy(render_pass);
@@ -417,26 +417,26 @@ RETURN_TYPE vulkan_display::destroy() {
                 }
                 context.destroy();
         }
-        return RETURN_TYPE();
+        return VKD_RETURN_TYPE();
 }
 
-RETURN_TYPE vulkan_display::is_image_description_supported(bool& supported, image_description description) {
+VKD_RETURN_TYPE vulkan_display::is_image_description_supported(bool& supported, image_description description) {
         if (!is_yCbCr_supported() && is_yCbCr_format(description.format)) {
                 supported = false;
-                return RETURN_TYPE();
+                return VKD_RETURN_TYPE();
         }
         std::scoped_lock lock(device_mutex);
-        PASS_RESULT(transfer_image::is_image_description_supported(supported, context.get_gpu(), description));
-        return RETURN_TYPE();
+        VKD_PASS_RESULT(transfer_image::is_image_description_supported(supported, context.get_gpu(), description));
+        return VKD_RETURN_TYPE();
 }
 
-RETURN_TYPE vulkan_display::record_graphics_commands(transfer_image& transfer_image, uint32_t swapchain_image_id) {
+VKD_RETURN_TYPE vulkan_display::record_graphics_commands(transfer_image& transfer_image, uint32_t swapchain_image_id) {
         vk::CommandBuffer& cmd_buffer = command_buffers[transfer_image.get_id()];
         cmd_buffer.reset(vk::CommandBufferResetFlags{});
 
         vk::CommandBufferBeginInfo begin_info{};
         begin_info.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
-        PASS_RESULT(cmd_buffer.begin(begin_info));
+        VKD_PASS_RESULT(cmd_buffer.begin(begin_info));
 
         auto render_begin_memory_barrier = transfer_image.create_memory_barrier(
                 vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
@@ -468,12 +468,12 @@ RETURN_TYPE vulkan_display::record_graphics_commands(transfer_image& transfer_im
         cmd_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eFragmentShader, vk::PipelineStageFlagBits::eHost,
                 vk::DependencyFlagBits::eByRegion, nullptr, nullptr, render_end_memory_barrier);
 
-        PASS_RESULT(cmd_buffer.end());
+        VKD_PASS_RESULT(cmd_buffer.end());
 
-        return RETURN_TYPE();
+        return VKD_RETURN_TYPE();
 }
 
-RETURN_TYPE vulkan_display::acquire_image(image& result, image_description description) {
+VKD_RETURN_TYPE vulkan_display::acquire_image(image& result, image_description description) {
         assert(description.size.width * description.size.height != 0);
         assert(description.format != vk::Format::eUndefined);
         if (!context.is_yCbCr_supported()) {
@@ -482,7 +482,7 @@ RETURN_TYPE vulkan_display::acquire_image(image& result, image_description descr
                         if (get_vulkan_version() == VK_API_VERSION_1_0) {
                                 error_msg.append("\nVulkan 1.1 or higher is needed for YCbCr support."sv);
                         }
-                        CHECK(false, error_msg);
+                        VKD_CHECK(false, error_msg);
                 }
         }
         transfer_image& transfer_image = acquire_transfer_image(available_img_queue, 
@@ -492,7 +492,7 @@ RETURN_TYPE vulkan_display::acquire_image(image& result, image_description descr
                 std::unique_lock device_lock(device_mutex, std::defer_lock);
                 if (transfer_image.fence_set) {
                         device_lock.lock();
-                        CHECK(device.waitForFences(transfer_image.is_available_fence, VK_TRUE, UINT64_MAX),
+                        VKD_CHECK(device.waitForFences(transfer_image.is_available_fence, VK_TRUE, UINT64_MAX),
                                 "Waiting for fence failed.");
                 }
 
@@ -505,23 +505,23 @@ RETURN_TYPE vulkan_display::acquire_image(image& result, image_description descr
                 }
         }
         result = image{ transfer_image };
-        return RETURN_TYPE();
+        return VKD_RETURN_TYPE();
 }
 
-RETURN_TYPE vulkan_display::copy_and_queue_image(std::byte* frame, image_description description) {
+VKD_RETURN_TYPE vulkan_display::copy_and_queue_image(std::byte* frame, image_description description) {
         image image;
         acquire_image(image, description);
         memcpy(image.get_memory_ptr(), frame, image.get_size().height * image.get_row_pitch());
         queue_image(image);
-        return RETURN_TYPE();
+        return VKD_RETURN_TYPE();
 }
 
-RETURN_TYPE vulkan_display::queue_image(image image) {
+VKD_RETURN_TYPE vulkan_display::queue_image(image image) {
         filled_img_queue.push(image);
-        return RETURN_TYPE();
+        return VKD_RETURN_TYPE();
 }
 
-RETURN_TYPE vulkan_display::display_queued_image(bool* displayed) {
+VKD_RETURN_TYPE vulkan_display::display_queued_image(bool* displayed) {
         if (displayed) {
                 *displayed = false;
         }
@@ -529,18 +529,18 @@ RETURN_TYPE vulkan_display::display_queued_image(bool* displayed) {
         if (window_parameters.width * window_parameters.height == 0) {
                 auto image = filled_img_queue.try_pop();
                 if (image.has_value()) {
-                        PASS_RESULT(discard_image(*image));
+                        VKD_PASS_RESULT(discard_image(*image));
                 }
-                return RETURN_TYPE();
+                return VKD_RETURN_TYPE();
         }
 
         auto maybe_image = filled_img_queue.try_pop();
         if (!maybe_image.has_value()) {
-                return RETURN_TYPE();
+                return VKD_RETURN_TYPE();
         }
         auto& image = *maybe_image;
         if (!image.get_transfer_image()) {
-                return RETURN_TYPE();
+                return VKD_RETURN_TYPE();
         }
 
         image.preprocess();
@@ -555,41 +555,41 @@ RETURN_TYPE vulkan_display::display_queued_image(bool* displayed) {
                 auto image_format = transfer_image.get_description().format;
                 if (image_format != current_image_description.format) {
                         log_msg("Recreating pipeline");
-                        PASS_RESULT(context.get_queue().waitIdle());
+                        VKD_PASS_RESULT(context.get_queue().waitIdle());
                         
-                        PASS_RESULT(create_texture_sampler(image_format));
-                        PASS_RESULT(create_descriptor_set_layout());
-                        PASS_RESULT(create_graphics_pipeline());
-                        PASS_RESULT(allocate_description_sets());
+                        VKD_PASS_RESULT(create_texture_sampler(image_format));
+                        VKD_PASS_RESULT(create_descriptor_set_layout());
+                        VKD_PASS_RESULT(create_graphics_pipeline());
+                        VKD_PASS_RESULT(allocate_description_sets());
                 }
                 current_image_description = transfer_image.get_description();
                 auto parameters = context.get_window_parameters();
-                PASS_RESULT(update_render_area_viewport_scissor(render_area, viewport, scissor,
+                VKD_PASS_RESULT(update_render_area_viewport_scissor(render_area, viewport, scissor,
                         { parameters.width, parameters.height }, current_image_description.size));
         }
-        PASS_RESULT(context.acquire_next_swapchain_image(swapchain_image_id, semaphores.image_acquired));
+        VKD_PASS_RESULT(context.acquire_next_swapchain_image(swapchain_image_id, semaphores.image_acquired));
         int swapchain_recreation_attempt = 0;
         while (swapchain_image_id == SWAPCHAIN_IMAGE_OUT_OF_DATE || swapchain_image_id == SWAPCHAIN_IMAGE_TIMEOUT) 
         {
                 swapchain_recreation_attempt++;
-                CHECK(swapchain_recreation_attempt <= 3, "Cannot acquire swapchain image");
+                VKD_CHECK(swapchain_recreation_attempt <= 3, "Cannot acquire swapchain image");
                 
                 window_parameters = window->get_window_parameters();
                 if (window_parameters.width * window_parameters.height == 0) {
                         // window is minimalised
                         auto image = filled_img_queue.try_pop();
                         if (image.has_value()) {
-                                PASS_RESULT(discard_image(*image));
+                                VKD_PASS_RESULT(discard_image(*image));
                         }
-                        return RETURN_TYPE();
+                        return VKD_RETURN_TYPE();
                 }
-                PASS_RESULT(context.recreate_swapchain(window_parameters, render_pass));
-                PASS_RESULT(update_render_area_viewport_scissor(
+                VKD_PASS_RESULT(context.recreate_swapchain(window_parameters, render_pass));
+                VKD_PASS_RESULT(update_render_area_viewport_scissor(
                         render_area, viewport, scissor,
                         { window_parameters.width, window_parameters.height },
                         current_image_description.size));
                 
-                PASS_RESULT(context.acquire_next_swapchain_image(swapchain_image_id, semaphores.image_acquired));
+                VKD_PASS_RESULT(context.acquire_next_swapchain_image(swapchain_image_id, semaphores.image_acquired));
         }
         transfer_image.prepare_for_rendering(device, 
                 descriptor_sets[transfer_image.get_id()], sampler, yCbCr_conversion);
@@ -609,7 +609,7 @@ RETURN_TYPE vulkan_display::display_queued_image(bool* displayed) {
                 .setSignalSemaphoreCount(1)
                 .setPSignalSemaphores(&semaphores.image_rendered);
 
-        PASS_RESULT(context.get_queue().submit(submit_info, transfer_image.is_available_fence));
+        VKD_PASS_RESULT(context.get_queue().submit(submit_info, transfer_image.is_available_fence));
 
         auto swapchain = context.get_swapchain();
         vk::PresentInfoKHR present_info{};
@@ -627,23 +627,23 @@ RETURN_TYPE vulkan_display::display_queued_image(bool* displayed) {
                 // skip recoverable errors, othervise return/throw error 
                 case res::eErrorOutOfDateKHR: break;
                 case res::eSuboptimalKHR: break;
-                default: CHECK(false, "Error presenting image:"s + vk::to_string(present_result));
+                default: VKD_CHECK(false, "Error presenting image:"s + vk::to_string(present_result));
                 }
         }
         if (displayed) {
                 *displayed = true;
         }
         available_img_queue.push(&transfer_image);
-        return RETURN_TYPE();
+        return VKD_RETURN_TYPE();
 }
 
-RETURN_TYPE vulkan_display::window_parameters_changed(window_parameters new_parameters) {
+VKD_RETURN_TYPE vulkan_display::window_parameters_changed(window_parameters new_parameters) {
         if (new_parameters != context.get_window_parameters() && new_parameters.width * new_parameters.height != 0) {
-                PASS_RESULT(context.recreate_swapchain(new_parameters, render_pass));
-                PASS_RESULT(update_render_area_viewport_scissor(render_area, viewport, scissor,
+                VKD_PASS_RESULT(context.recreate_swapchain(new_parameters, render_pass));
+                VKD_PASS_RESULT(update_render_area_viewport_scissor(render_area, viewport, scissor,
                         { new_parameters.width, new_parameters.height }, current_image_description.size));
         }
-        return RETURN_TYPE();
+        return VKD_RETURN_TYPE();
 }
 
 } //namespace vulkan_display

@@ -73,7 +73,7 @@
 #define VK_USE_PLATFORM_WIN32_KHR
 #endif
 
-#include "vulkan_display.h" // Vulkan.h must be before GLFW/SDL
+#include "vulkan_display.h" // vulkan.h must be before GLFW/SDL
 
 // @todo remove the defines when no longer needed
 #ifdef __arm64__

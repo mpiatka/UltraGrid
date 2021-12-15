@@ -78,27 +78,27 @@ class vulkan_display {
         bool destroyed = false;
 private:
 
-        RETURN_TYPE create_texture_sampler(vk::Format format);
+        VKD_RETURN_TYPE create_texture_sampler(vk::Format format);
 
-        RETURN_TYPE create_render_pass();
+        VKD_RETURN_TYPE create_render_pass();
 
-        RETURN_TYPE create_descriptor_set_layout();
+        VKD_RETURN_TYPE create_descriptor_set_layout();
 
-        RETURN_TYPE create_pipeline_layout();
+        VKD_RETURN_TYPE create_pipeline_layout();
 
-        RETURN_TYPE create_graphics_pipeline();
+        VKD_RETURN_TYPE create_graphics_pipeline();
 
-        RETURN_TYPE create_command_pool();
+        VKD_RETURN_TYPE create_command_pool();
 
-        RETURN_TYPE create_command_buffers();
+        VKD_RETURN_TYPE create_command_buffers();
 
-        RETURN_TYPE create_transfer_image(transfer_image*& result, image_description description);
+        VKD_RETURN_TYPE create_transfer_image(transfer_image*& result, image_description description);
 
-        RETURN_TYPE create_image_semaphores();
+        VKD_RETURN_TYPE create_image_semaphores();
 
-        RETURN_TYPE allocate_description_sets();
+        VKD_RETURN_TYPE allocate_description_sets();
 
-        RETURN_TYPE record_graphics_commands(transfer_image& transfer_image, uint32_t swapchain_image_id);
+        VKD_RETURN_TYPE record_graphics_commands(transfer_image& transfer_image, uint32_t swapchain_image_id);
 
 public:
         vulkan_display() = default;
@@ -114,28 +114,28 @@ public:
                 }
         }
 
-        RETURN_TYPE init(vulkan_instance&& instance, VkSurfaceKHR surface, uint32_t transfer_image_count,
+        VKD_RETURN_TYPE init(vulkan_instance&& instance, VkSurfaceKHR surface, uint32_t transfer_image_count,
                 window_changed_callback& window, uint32_t gpu_index = NO_GPU_SELECTED,
                 std::filesystem::path path_to_shaders = "./shaders");
 
-        RETURN_TYPE destroy();
+        VKD_RETURN_TYPE destroy();
 
-        RETURN_TYPE is_image_description_supported(bool& supported, image_description description);
+        VKD_RETURN_TYPE is_image_description_supported(bool& supported, image_description description);
 
-        RETURN_TYPE acquire_image(image& image, image_description description);
+        VKD_RETURN_TYPE acquire_image(image& image, image_description description);
 
-        RETURN_TYPE queue_image(image img);
+        VKD_RETURN_TYPE queue_image(image img);
 
-        RETURN_TYPE copy_and_queue_image(std::byte* frame, image_description description);
+        VKD_RETURN_TYPE copy_and_queue_image(std::byte* frame, image_description description);
 
-        RETURN_TYPE discard_image(image image) {
+        VKD_RETURN_TYPE discard_image(image image) {
                 auto* ptr = image.get_transfer_image();
                 assert(ptr);
                 available_img_queue.push(ptr);
-                return RETURN_TYPE();
+                return VKD_RETURN_TYPE();
         }
 
-        RETURN_TYPE display_queued_image(bool* displayed = nullptr);
+        VKD_RETURN_TYPE display_queued_image(bool* displayed = nullptr);
 
         uint32_t get_vulkan_version() { return context.get_vulkan_version(); }
         
@@ -144,11 +144,11 @@ public:
         /**
          * @brief Hint to vulkan display that some window parameters spicified in struct Window_parameters changed
          */
-        RETURN_TYPE window_parameters_changed(window_parameters new_parameters);
+        VKD_RETURN_TYPE window_parameters_changed(window_parameters new_parameters);
 
-        RETURN_TYPE window_parameters_changed() {
-                PASS_RESULT(window_parameters_changed(window->get_window_parameters()));
-                return RETURN_TYPE();
+        VKD_RETURN_TYPE window_parameters_changed() {
+                VKD_PASS_RESULT(window_parameters_changed(window->get_window_parameters()));
+                return VKD_RETURN_TYPE();
         }
 };
 
