@@ -21,6 +21,16 @@ struct render_area {
 
 namespace vulkan_display {
 
+constexpr inline bool is_yCbCr_format(vk::Format format) {
+        auto f = static_cast<VkFormat>(format);
+        return VK_FORMAT_G8B8G8R8_422_UNORM <= f && f <= VK_FORMAT_G16_B16_R16_3PLANE_444_UNORM;
+}
+
+constexpr inline bool is_compressed_format(vk::Format format) {
+        auto f = static_cast<VkFormat>(format);
+        return VK_FORMAT_BC1_RGB_UNORM_BLOCK <= f && f <= VK_FORMAT_ASTC_12x12_SRGB_BLOCK;
+}
+
 class window_changed_callback {
 protected:
         ~window_changed_callback() = default;

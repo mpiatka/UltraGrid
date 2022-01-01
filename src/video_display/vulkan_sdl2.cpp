@@ -763,14 +763,15 @@ void display_sdl2_done(void* state) {
         delete s;
 }
 
-constexpr std::array<std::pair<codec_t, vk::Format>, 4> codec_to_vulkan_format_mapping {{
+constexpr std::array<std::pair<codec_t, vk::Format>, 5> codec_to_vulkan_format_mapping {{
         {RGBA, vk::Format::eR8G8B8A8Srgb},
         {UYVY, vk::Format::eB8G8R8G8422Unorm},
         {YUYV, vk::Format::eG8B8G8R8422Unorm},
-        {Y216, vk::Format::eG16B16G16R16422Unorm}
+        {Y216, vk::Format::eG16B16G16R16422Unorm},
+        {DXT1, vk::Format::eBc1RgbSrgbBlock}
 }};
 
-vkd::image_description to_vkd_image_desc(video_desc ultragrid_desc) {
+vkd::image_description to_vkd_image_desc(const video_desc& ultragrid_desc) {
         auto& mapping = codec_to_vulkan_format_mapping;
         codec_t searched_codec = ultragrid_desc.color_spec;
         auto iter = std::find_if(mapping.begin(), mapping.end(),
@@ -793,7 +794,11 @@ video_frame* display_sdl2_getf(void* state) {
         
         video_frame& frame = s->video_frames[image.get_id()];
         update_description(desc, frame);
-        frame.tiles[0].data_len = image.get_row_pitch() * image.get_size().height;
+        auto texel_height = image.get_size().height;
+        if (vkd::is_compressed_format(image.get_description().format)){
+                texel_height /= 4;
+        }
+        frame.tiles[0].data_len = image.get_row_pitch() * texel_height;
         frame.tiles[0].data = reinterpret_cast<char*>(image.get_memory_ptr());
         return &frame;
 }
@@ -820,8 +825,8 @@ int display_sdl2_putf(void* state, video_frame* frame, int nonblock) {
                 return 0;
         }
         assert(image.get_id() == id);
-
-        if (s->deinterlace) {
+        
+        if (s->deinterlace && !vkd::is_compressed_format(image.get_description().format)) {
                 image.set_process_function([](vkd::image& image) {
                         vc_deinterlace(reinterpret_cast<unsigned char*>(image.get_memory_ptr()),
                                 image.get_row_pitch(),
@@ -856,7 +861,7 @@ int display_sdl2_get_property(void* state, int property, void* val, size_t* len)
                                 codecs.push_back(pair.first);
                         }
                 }
-                LOG(LOG_LEVEL_INFO) << MOD_NAME "Supported codecs are:";
+                LOG(LOG_LEVEL_INFO) << MOD_NAME "Supported codecs are: ";
                 for (auto codec : codecs) {
                         LOG(LOG_LEVEL_INFO) << get_codec_name(codec) << " ";
                 }
@@ -881,6 +886,9 @@ int display_sdl2_get_property(void* state, int property, void* val, size_t* len)
                 try {
                         s->vulkan->acquire_image(image, to_vkd_image_desc(desc));
                         auto value = static_cast<int>(image.get_row_pitch());
+                        if (vkd::is_compressed_format(image.get_description().format)){
+                                value /= 4;
+                        }
                         memcpy(val, &value, sizeof(value));
                         s->vulkan->discard_image(image);
                 } 

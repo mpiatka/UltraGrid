@@ -221,7 +221,7 @@ public:
 
 namespace vulkan_display {
 
-inline void cout_output(std::string_view msg) {
+inline void cout_msg(std::string_view msg) {
         std::cout << msg << std::endl;
 }
 
@@ -251,7 +251,7 @@ public:
          *                              usually needed for creating vulkan surface
          * @param enable_validation     Enable vulkan validation layers, they should be disabled in release build.
          */
-        VKD_RETURN_TYPE init(std::vector<const char*>& required_extensions, bool enable_validation, std::function<void(std::string_view sv)> logging_function = cout_output);
+        VKD_RETURN_TYPE init(std::vector<const char*>& required_extensions, bool enable_validation, std::function<void(std::string_view sv)> logging_function = cout_msg);
         
         /**
          * @brief returns all available grafhics cards

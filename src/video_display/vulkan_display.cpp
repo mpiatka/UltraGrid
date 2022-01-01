@@ -96,11 +96,6 @@ VKD_RETURN_TYPE update_render_area_viewport_scissor(render_area& render_area, vk
         return *available_img_queue.pop();
 }
 
-constexpr bool is_yCbCr_format(vk::Format format) {
-        auto f = static_cast<VkFormat>(format);
-        return VK_FORMAT_G8B8G8R8_422_UNORM <= f && f <= VK_FORMAT_G16_B16_R16_3PLANE_444_UNORM;
-}
-
 } //namespace -------------------------------------------------------------
 
 
