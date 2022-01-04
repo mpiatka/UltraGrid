@@ -42,7 +42,7 @@ if [ $ARCH = armhf ]; then # Raspbian - build own FFmpeg with OMX camera patch
         git checkout n4.3.3
 
         # apply patches
-        FF_PATCH_DIR=$GITHUB_WORKSPACE/.github/scripts/Linux/arm/ffmpeg-arm-patches
+        FF_PATCH_DIR=/ffmpeg-arm-patches
         for n in `ls $FF_PATCH_DIR`; do
                 git apply $FF_PATCH_DIR/$n
         done
