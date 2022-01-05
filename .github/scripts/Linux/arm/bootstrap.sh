@@ -33,7 +33,7 @@ apt -y install portaudio19-dev libglib2.0-dev libglew-dev libcurl4-openssl-dev f
 
 # FFmpeg
 if [ $ARCH = armhf ]; then # Raspbian - build own FFmpeg with OMX camera patch
-        apt -y install libraspberrypi-dev
+        apt -y install libraspberrypi-dev libdrm-dev
         sed -i '/^deb /p;s/deb /deb-src /' /etc/apt/sources.list
         apt -y update && apt -y build-dep ffmpeg
         raspbian_build_sdl2
@@ -48,7 +48,7 @@ if [ $ARCH = armhf ]; then # Raspbian - build own FFmpeg with OMX camera patch
         done
 
 
-        ./configure --enable-gpl --disable-stripping --enable-libaom --enable-libmp3lame --enable-libopenjpeg --enable-libopus --enable-libspeex --enable-libvpx --enable-libwebp --enable-libx265 --enable-omx --enable-neon --enable-libx264 --enable-mmal --enable-omx-rpi --enable-rpi --enable-vout-drm --cpu=arm1176jzf-s --enable-shared --disable-static
+        ./configure --enable-gpl --disable-stripping --enable-libaom --enable-libmp3lame --enable-libopenjpeg --enable-libopus --enable-libspeex --enable-libvpx --enable-libwebp --enable-libx265 --enable-omx --enable-neon --enable-libx264 --enable-mmal --enable-omx-rpi --enable-rpi --enable-vout-drm --enable-libdrm --enable-v4l2-request --enable-libudev --cpu=arm1176jzf-s --enable-shared --disable-static
         make -j3 install
         cd $OLDPWD
 else
