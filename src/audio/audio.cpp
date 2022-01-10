@@ -150,6 +150,8 @@ struct state_audio {
         struct module audio_receiver_module;
         struct module audio_sender_module;
 
+        Filter_chain filter_chain;
+
         struct audio_codec_state *audio_encoder = nullptr;
         
         struct audio_network_parameters audio_network_parameters{};
@@ -294,6 +296,34 @@ struct state_audio * audio_cfg_init(struct module *parent,
 #endif /* HAVE_SPEEXDSP */
         } else {
                 s->echo_state = NULL;
+        }
+
+        if(opt->filter_cfg){
+                char *item, *save_ptr = nullptr;
+                std::string duplicate = opt->filter_cfg;
+
+                char *tmp = duplicate.data();
+                while((item = strtok_r(tmp, ",", &save_ptr))) {
+                        std::string filter_name = item;
+                        std::string config;
+
+                        size_t col_pos = filter_name.find(':');
+                        if(col_pos != std::string::npos){
+                                config = filter_name.substr(col_pos + 1);
+                                filter_name.erase(col_pos);
+                        }
+
+                        struct audio_filter afilter;
+                        if(audio_filter_init(filter_name.c_str(), config.c_str(),
+                                                &afilter) != 0)
+                        {
+                                printf("Failed to init audio filter\n");
+                        }
+
+                        s->filter_chain.push_back(afilter);
+
+                        tmp = nullptr;
+                }
         }
 
         if(encryption) {
@@ -990,13 +1020,6 @@ static void *audio_sender_thread(void *arg)
 
         printf("Audio sending started.\n");
 
-        struct audio_filter afilter;
-        if(audio_filter_init("delay", "", &afilter) != 0){
-                printf("Failed to init audio filter\n");
-        }
-
-        Filter_chain filter_chain;
-        filter_chain.push_back(afilter);
         while (!should_exit) {
                 struct message *msg;
                 while((msg = check_message(&s->audio_sender_module))) {
@@ -1036,7 +1059,7 @@ static void *audio_sender_thread(void *arg)
                                 continue;
                         }
 
-                        filter_chain.filter(buffer);
+                        s->filter_chain.filter(buffer);
 
                         audio_frame2 bf_n(buffer);
 
