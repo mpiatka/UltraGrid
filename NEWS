@@ -2,6 +2,8 @@ next
 ====
 
 * added Reed-Solomon for audio
+* added support for RPI4 hw. acceleration
+* add experimental echo canceller support
 
 1.7
 ====
