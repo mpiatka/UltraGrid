@@ -507,7 +507,7 @@ static void usage(const char *progname) {
                 s::bold << "\t\t--control-port <port_number>[:0|:1]" << s::reset << " - control port to connect to, optionally client/server (default)\n" <<
                 s::bold << "\t\t--blend" << s::reset << " - enable blending from original to newly received stream, increases latency\n" <<
                 s::bold << "\t\t--conference <width>:<height>[:fps]" << s::reset << " - enable combining of multiple inputs, increases latency\n" <<
-                s::bold << "\t\t--conference <compression>" << s::reset << " - compression for conference participants\n" <<
+                s::bold << "\t\t--conference-compression <compression>" << s::reset << " - compression for conference participants\n" <<
                 s::bold << "\t\t--capture-filter <cfg_string>" << s::reset << " - apply video capture filter to incoming video\n" <<
                 s::bold << "\t\t--param" << s::reset << " - additional parameters\n" <<
                 s::bold << "\t\t--help\n" << s::reset <<
