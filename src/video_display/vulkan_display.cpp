@@ -96,6 +96,14 @@ VKD_RETURN_TYPE update_render_area_viewport_scissor(render_area& render_area, vk
         return *available_img_queue.pop();
 }
 
+vk::PresentModeKHR get_present_mode(bool vsync_enabled, bool tearing_permitted){
+        using e = vk::PresentModeKHR;
+        if (vsync_enabled){
+                return tearing_permitted ? e::eFifoRelaxed : e::eFifo;
+        }
+        return tearing_permitted ? e::eImmediate : e::eMailbox;
+}
+
 } //namespace -------------------------------------------------------------
 
 
@@ -355,14 +363,15 @@ VKD_RETURN_TYPE vulkan_display::allocate_description_sets() {
 }
 
 VKD_RETURN_TYPE vulkan_display::init(vulkan_instance&& instance, VkSurfaceKHR surface, uint32_t transfer_image_count,
-        window_changed_callback& window, uint32_t gpu_index, std::filesystem::path path_to_shaders) {
+        window_changed_callback& window, uint32_t gpu_index, std::filesystem::path path_to_shaders, bool vsync, bool tearing_permitted) {
         // Order of following calls is important
         assert(surface);
         this->window = &window;
         this->transfer_image_count = transfer_image_count;
         this->filled_img_max_count = (transfer_image_count + 1) / 2;
         auto window_parameters = window.get_window_parameters();
-        VKD_PASS_RESULT(context.init(std::move(instance), surface, window_parameters, gpu_index));
+
+        VKD_PASS_RESULT(context.init(std::move(instance), surface, window_parameters, gpu_index, get_present_mode(vsync, tearing_permitted)));
         device = context.get_device();
         VKD_PASS_RESULT(create_command_pool());
         VKD_PASS_RESULT(create_command_buffers());

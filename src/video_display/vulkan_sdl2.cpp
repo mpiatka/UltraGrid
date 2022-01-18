@@ -138,7 +138,7 @@ public:
                         width = 0;
                         height = 0;
                 }
-                return { static_cast<uint32_t>(width), static_cast<uint32_t>(height), true };
+                return { static_cast<uint32_t>(width), static_cast<uint32_t>(height) };
         }
 };
 
@@ -153,7 +153,7 @@ struct state_vulkan_sdl2 {
         bool deinterlace = false;
         bool fullscreen = false;
         bool keep_aspect = false;
-       
+
         int width = 0;
         int height = 0;
         
@@ -434,7 +434,7 @@ void show_help() {
         
         cout << "VULKAN_SDL2 options:\n";
         cout << style::bold << fg::red << "\t-d vulkan_sdl2" << fg::reset;
-        cout << "[:d|:fs|:keep-aspect|:nocursor|:nodecorate|:novsync|:validation|:display=<dis_id>|"
+        cout << "[:d|:fs|:keep-aspect|:nocursor|:nodecorate|:novsync|:tearing|:validation|:display=<dis_id>|"
                 ":driver=<drv>|:gpu=<gpu_id>|:pos=<x>,<y>|:size=<W>x<H>|:window_flags=<f>|:help]\n";
 
         cout << style::reset << ("\twhere:\n");
@@ -446,6 +446,7 @@ void show_help() {
         cout << style::bold << "\t        nocursor" << style::reset << " - hides cursor\n";
         cout << style::bold << "\t      nodecorate" << style::reset << " - disable window border\n";
         cout << style::bold << "\t         novsync" << style::reset << " - disable vsync\n";
+        cout << style::bold << "\t         tearing" << style::reset << " - permits screen tearing\n"; 
         cout << style::bold << "\t      validation" << style::reset << " - enable vulkan validation layers\n";
 
         cout << style::bold << "\tdisplay=<dis_id>" << style::reset << " - display index, available indices: ";
@@ -514,6 +515,7 @@ struct command_line_arguments {
         bool cursor = true;
         bool help = false;
         bool vsync = true;
+        bool tearing_permitted = false;
         bool validation = false;
 
         int display_idx = 0;
@@ -573,6 +575,8 @@ bool parse_command_line_arguments(command_line_arguments& args, state_vulkan_sdl
                         args.window_flags |= SDL_WINDOW_BORDERLESS;
                 } else if (token == "novsync") {
                         res.vsync = false;
+                } else if (token == "tearing") {
+                        res.tearing_permitted = true;
                 } else if (token == "validation") {
                         res.validation = true;
                 } else if (starts_with(token, "display=")) {
@@ -695,7 +699,7 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
         assert(extension_count > 0);
         
         std::string path = get_executable_path();
-        std::filesystem::path path_to_shaders = {path.empty() ? "." : std::move(path)};
+        std::filesystem::path path_to_shaders{ path.empty() ? "." : std::move(path) };
         path_to_shaders.remove_filename(); //remove uv or uv.exe
         path_to_shaders = path_to_shaders / "../share/ultragrid/vulkan_shaders";
         LOG(LOG_LEVEL_INFO) << MOD_NAME "Path to shaders: " << path_to_shaders << '\n';
@@ -727,7 +731,7 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
                 }
 #endif
                 s->vulkan = std::make_unique<vkd::vulkan_display>();
-                s->vulkan->init(std::move(instance), surface, MAX_FRAME_COUNT, *s->window_callback, args.gpu_idx, path_to_shaders);
+                s->vulkan->init(std::move(instance), surface, MAX_FRAME_COUNT, *s->window_callback, args.gpu_idx, path_to_shaders, args.vsync, args.tearing_permitted);
                 LOG(LOG_LEVEL_NOTICE) << MOD_NAME "Vulkan display initialised." << std::endl;
         }
         catch (std::exception& e) { log_and_exit_uv(e); return nullptr; }

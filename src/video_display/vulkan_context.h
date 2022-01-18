@@ -89,12 +89,10 @@ namespace vulkan_display {
 struct window_parameters {
         uint32_t width;
         uint32_t height;
-        bool vsync;
 
         constexpr bool operator==(const window_parameters& other) const {
                 return width == other.width &&
-                        height == other.height &&
-                        vsync == other.vsync;
+                        height == other.height;
         }
         constexpr bool operator!=(const window_parameters& other) const {
                 return !(*this == other);
@@ -154,7 +152,7 @@ class vulkan_context {
         std::vector<swapchain_image> swapchain_images{};
 
         vk::Extent2D window_size{ 0, 0 };
-        bool vsync = true;
+        vk::PresentModeKHR preferred_present_mode;
 public:
         //getters
         uint32_t get_vulkan_version() { return vulkan_version; }
@@ -197,7 +195,7 @@ public:
         vulkan_context() = default;
 
         VKD_RETURN_TYPE init(vulkan_display::vulkan_instance&& instance, VkSurfaceKHR surface, 
-                window_parameters, uint32_t gpu_index);
+                window_parameters, uint32_t gpu_index, vk::PresentModeKHR preferred_mode);
 
         VKD_RETURN_TYPE destroy();
 
@@ -210,7 +208,7 @@ public:
         }
 
         window_parameters get_window_parameters() {
-                return { window_size.width, window_size.height, vsync };
+                return { window_size.width, window_size.height };
         }
 
         VKD_RETURN_TYPE recreate_swapchain(window_parameters parameters, vk::RenderPass render_pass);
@@ -233,8 +231,8 @@ class vulkan_instance {
 
         VKD_RETURN_TYPE init_validation_layers_error_messenger();
 
-        friend VKD_RETURN_TYPE vulkan_display_detail::vulkan_context::init(vulkan_instance&& instance, 
-                VkSurfaceKHR surface, window_parameters parameters, uint32_t gpu_index);
+        friend VKD_RETURN_TYPE vulkan_display_detail::vulkan_context::init(vulkan_instance&&, 
+                VkSurfaceKHR, window_parameters, uint32_t, vk::PresentModeKHR);
 public:
         vulkan_instance() = default;
         vulkan_instance(const vulkan_instance& other) = delete;

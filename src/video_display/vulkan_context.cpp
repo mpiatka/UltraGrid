@@ -319,25 +319,22 @@ VKD_RETURN_TYPE vulkan_context::get_present_mode() {
         std::vector<vk::PresentModeKHR> modes;
         VKD_CHECKED_ASSIGN(modes, gpu.getSurfacePresentModesKHR(surface));
 
-        vk::PresentModeKHR first_choice{}; 
-        vk::PresentModeKHR second_choice{};
-        if (vsync) {
-                first_choice = vk::PresentModeKHR::eFifo;
-                second_choice = vk::PresentModeKHR::eFifoRelaxed;
-        } else {
-                first_choice = vk::PresentModeKHR::eMailbox;
-                second_choice = vk::PresentModeKHR::eImmediate;
+        vk::PresentModeKHR preferred = preferred_present_mode;
+        if (std::any_of(modes.begin(), modes.end(), [preferred](auto mode) { return mode == preferred; })) {
+                swapchain_atributes.mode = preferred;
+                return VKD_RETURN_TYPE();
+        }
+        
+        // Mailbox is alternative to Immediate, Fifo to everything else
+        auto alternative = (preferred == vk::PresentModeKHR::eImmediate 
+                ? vk::PresentModeKHR::eMailbox
+                : vk::PresentModeKHR::eFifo);
+
+        if (std::any_of(modes.begin(), modes.end(), [alternative](auto mode) { return mode == alternative; })) {
+                swapchain_atributes.mode = alternative;
+                return VKD_RETURN_TYPE();
         }
 
-        if (std::any_of(modes.begin(), modes.end(), [first_choice](auto mode) { return mode == first_choice; })) {
-                swapchain_atributes.mode = first_choice;
-                swapchain_atributes.mode = first_choice;
-                return VKD_RETURN_TYPE();
-        }
-        if (std::any_of(modes.begin(), modes.end(), [second_choice](auto mode) { return mode == second_choice; })) {
-                swapchain_atributes.mode = second_choice;
-                return VKD_RETURN_TYPE();
-        }
         swapchain_atributes.mode = modes[0];
         return VKD_RETURN_TYPE();
 }
@@ -417,7 +414,7 @@ VKD_RETURN_TYPE vulkan_context::create_swapchain_views() {
 }
 
 VKD_RETURN_TYPE vulkan_context::init(vulkan_display::vulkan_instance&& instance, VkSurfaceKHR surface, 
-        window_parameters parameters, uint32_t gpu_index) 
+        window_parameters parameters, uint32_t gpu_index, vk::PresentModeKHR preferredMode) 
 {
         assert(!this->instance);
         this->instance = instance.instance;
@@ -428,8 +425,8 @@ VKD_RETURN_TYPE vulkan_context::init(vulkan_display::vulkan_instance&& instance,
         instance.messenger = nullptr;
 
         this->surface = surface;
+        this->preferred_present_mode = preferredMode;
         window_size = vk::Extent2D{ parameters.width, parameters.height };
-        vsync = parameters.vsync;
 
         VKD_PASS_RESULT(create_physical_device(gpu_index));
         VKD_PASS_RESULT(get_queue_family_index(queue_family_index, gpu, surface));
@@ -459,7 +456,6 @@ VKD_RETURN_TYPE vulkan_context::create_framebuffers(vk::RenderPass render_pass) 
 
 VKD_RETURN_TYPE vulkan_context::recreate_swapchain(window_parameters parameters, vk::RenderPass render_pass) {
         window_size = vk::Extent2D{ parameters.width, parameters.height };
-        vsync = parameters.vsync;
         
         log_msg("Recreating  swapchain");
 

@@ -126,7 +126,7 @@ public:
 
         VKD_RETURN_TYPE init(vulkan_instance&& instance, VkSurfaceKHR surface, uint32_t transfer_image_count,
                 window_changed_callback& window, uint32_t gpu_index = NO_GPU_SELECTED,
-                std::filesystem::path path_to_shaders = "./shaders");
+                std::filesystem::path path_to_shaders = "./shaders", bool vsync = true, bool tearing_permitted = false);
 
         VKD_RETURN_TYPE destroy();
 
