@@ -60,13 +60,14 @@
 using namespace std;
 
 struct state_recompress {
-        state_recompress(unique_ptr<ultragrid_rtp_video_rxtx> && vr, string const & h, int tp)
-                : video_rxtx(std::move(vr)), host(h), t0(chrono::system_clock::now()),
+        state_recompress(unique_ptr<ultragrid_rtp_video_rxtx> && vr, string const & h, const string& compress, int tp)
+                : video_rxtx(std::move(vr)), host(h), compress_cfg(compress), t0(chrono::system_clock::now()),
                 frames(0), tx_port(tp) {
         }
 
         unique_ptr<ultragrid_rtp_video_rxtx> video_rxtx;
         string host;
+		string compress_cfg;
 
         chrono::system_clock::time_point t0;
         int frames;
@@ -85,7 +86,7 @@ void *recompress_init(struct module *parent,
         // common
         params["parent"].ptr = parent;
         params["exporter"].ptr = NULL;
-        params["compression"].str = compress;
+        params["compression"].str = "none";
         params["rxtx_mode"].i = MODE_SENDER;
         params["paused"].b = false;
 
@@ -117,6 +118,7 @@ void *recompress_init(struct module *parent,
                 return new state_recompress(
                                 decltype(state_recompress::video_rxtx)(dynamic_cast<ultragrid_rtp_video_rxtx *>(rxtx)),
                                 host,
+								compress,
                                 tx_port
                                 );
         } catch (...) {
@@ -167,5 +169,11 @@ void recompress_done(void *state)
         s->video_rxtx->join();
 
         delete s;
+}
+
+const char *recompress_get_compress_cfg(void *state){
+        auto s = static_cast<state_recompress *>(state);
+
+		return s->compress_cfg.c_str();
 }
 

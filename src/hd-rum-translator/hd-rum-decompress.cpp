@@ -65,6 +65,7 @@
 #include "video_display.h"
 #include "video_display/pipe.hpp"
 #include "video_rxtx/ultragrid_rtp.h"
+#include "video_compress.h"
 
 static constexpr int MAX_QUEUE_SIZE = 2;
 
@@ -93,7 +94,7 @@ struct state_transcoder_decompress : public frame_recv_delegate {
                 };
         };
 
-        vector<output_port_info> output_ports;
+        vector<std::pair<output_port_info, compress_state *>> output_ports;
 
         ultragrid_rtp_video_rxtx* video_rxtx;
 
@@ -179,8 +180,8 @@ void hd_rum_decompress_set_active(void *state, void *recompress_port, bool activ
         struct state_transcoder_decompress *s = (struct state_transcoder_decompress *) state;
 
         for (auto && port : s->output_ports) {
-                if (port.state == recompress_port) {
-                        port.active = active;
+                if (port.first.state == recompress_port) {
+                        port.first.active = active;
                 }
         }
 }
@@ -208,16 +209,25 @@ void state_transcoder_decompress::worker()
                         should_exit = true;
                         break;
                 case message::REMOVE_INDEX:
-                        recompress_done(output_ports[msg.remove_index].state);
+                        recompress_done(output_ports[msg.remove_index].first.state);
+                        compress_done(output_ports[msg.remove_index].second);
                         output_ports.erase(output_ports.begin() + msg.remove_index);
                         break;
                 case message::NEW_RECOMPRESS:
-                        output_ports.emplace_back(msg.new_recompress_state, true);
+                        {
+                        compress_state *m_compress;
+                        //TODO: Error handling
+                        int ret = compress_init(nullptr, recompress_get_compress_cfg(msg.new_recompress_state), &m_compress);
+                        output_ports.emplace_back(output_port_info{msg.new_recompress_state, true}, m_compress);
                         break;
+                        }
                 case message::FRAME:
                         for (unsigned int i = 0; i < output_ports.size(); ++i) {
-                                if (output_ports[i].active)
-                                        recompress_process_async(output_ports[i].state, msg.frame);
+                                if (output_ports[i].first.active){
+                                        compress_frame(output_ports[i].second, msg.frame);
+                                        auto cmp_frame = compress_pop(output_ports[i].second);
+                                        recompress_process_async(output_ports[i].first.state, cmp_frame);
+                                }
                         }
                         break;
                 }
@@ -322,7 +332,7 @@ void hd_rum_decompress_done(void *state) {
 
         // cleanup
         for (unsigned int i = 0; i < s->output_ports.size(); ++i) {
-                recompress_done(s->output_ports[i].state);
+                recompress_done(s->output_ports[i].first.state);
         }
 
         display_put_frame(s->display, NULL, 0);
@@ -363,7 +373,7 @@ int hd_rum_decompress_get_num_active_ports(void *state)
 
         int ret = 0;
         for (auto && port : s->output_ports) {
-                if (port.active) {
+                if (port.first.active) {
                         ret += 1;
                 }
         }

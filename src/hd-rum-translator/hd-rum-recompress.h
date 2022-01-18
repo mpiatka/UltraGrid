@@ -55,6 +55,8 @@ void recompress_assign_ssrc(void *state, uint32_t ssrc);
 void recompress_done(void *state);
 uint32_t recompress_get_ssrc(void *state);
 
+const char *recompress_get_compress_cfg(void *state);
+
 #ifdef __cplusplus
 }
 #endif
