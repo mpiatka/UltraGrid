@@ -71,7 +71,7 @@ using namespace std;
 struct recompress_output_port {
         recompress_output_port(struct module *parent,
                 std::string host, unsigned short rx_port,
-                unsigned short tx_port, int mtu, std::string fec, long long bitrate);
+                unsigned short tx_port, int mtu, const char *fec, long long bitrate);
 
         std::unique_ptr<ultragrid_rtp_video_rxtx> video_rxtx;
         std::string host;
@@ -105,9 +105,8 @@ struct state_recompress {
 
 recompress_output_port::recompress_output_port(struct module *parent,
                 std::string host, unsigned short rx_port,
-                unsigned short tx_port, int mtu, std::string fec, long long bitrate) :
-        host(std::move(host)),
-        fec(std::move(fec))
+                unsigned short tx_port, int mtu, const char *fec, long long bitrate) :
+        host(std::move(host))
 {
         int force_ip_version = 0;
         auto start_time = std::chrono::steady_clock::now();
@@ -128,7 +127,7 @@ recompress_output_port::recompress_output_port(struct module *parent,
         params["tx_port"].i = tx_port;
         params["force_ip_version"].i = force_ip_version;
         params["mcast_if"].str = NULL;
-        params["fec"].str = this->fec.c_str();
+        params["fec"].str = fec;
         params["encryption"].str = NULL;
         params["bitrate"].ll = bitrate;
         params["start_time"].cptr = (const void *) &start_time;

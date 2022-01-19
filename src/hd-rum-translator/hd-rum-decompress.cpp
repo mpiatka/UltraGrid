@@ -390,6 +390,6 @@ int hd_rum_decompress_get_num_active_ports(void *state)
 
         return ret;
 #endif
-        return 0;
+        return 1;
 }
 
