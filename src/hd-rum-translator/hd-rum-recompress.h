@@ -48,14 +48,20 @@ extern "C" {
 struct module;
 struct video_frame;
 
-void *recompress_init(struct module *parent, const char *host, const char *compress,
-                unsigned short rx_port, unsigned short tx_port, int mtu, char *fec,
-                long long bitrate);
-void recompress_assign_ssrc(void *state, uint32_t ssrc);
-void recompress_done(void *state);
-uint32_t recompress_get_ssrc(void *state);
+struct state_recompress;
 
-const char *recompress_get_compress_cfg(void *state);
+struct state_recompress *recompress_init(struct module *parent);
+void recompress_done(struct state_recompress *state);
+
+uint32_t recompress_get_port_ssrc(struct state_recompress *s, int idx);
+
+
+int recompress_add_port(struct state_recompress *s,
+		const char *host, const char *compress, unsigned short rx_port,
+		unsigned short tx_port, int mtu, const char *fec, long long bitrate);
+
+void recompress_port_set_active(struct state_recompress *s,
+                int index, bool active);
 
 #ifdef __cplusplus
 }
@@ -64,5 +70,5 @@ const char *recompress_get_compress_cfg(void *state);
 #ifdef __cplusplus
 #include <memory>
 #include <string>
-void recompress_process_async(void *state, std::shared_ptr<video_frame> frame);
+void recompress_process_async(state_recompress *state, std::shared_ptr<video_frame> frame);
 #endif

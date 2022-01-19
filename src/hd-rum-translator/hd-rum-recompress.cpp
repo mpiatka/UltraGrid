@@ -47,6 +47,7 @@
 #include <cinttypes>
 #include <chrono>
 #include <memory>
+#include <thread>
 
 
 #include "hd-rum-translator/hd-rum-recompress.h"
@@ -55,33 +56,63 @@
 #include "host.h"
 #include "rtp/rtp.h"
 
+#include "video_compress.h"
+
 #include "video_rxtx/ultragrid_rtp.h"
+
+namespace {
+struct compress_state_deleter{
+        void operator()(struct compress_state *s){ module_done(CAST_MODULE(s)); }
+};
+}
 
 using namespace std;
 
-struct state_recompress {
-        state_recompress(unique_ptr<ultragrid_rtp_video_rxtx> && vr, string const & h, const string& compress, int tp)
-                : video_rxtx(std::move(vr)), host(h), compress_cfg(compress), t0(chrono::system_clock::now()),
-                frames(0), tx_port(tp) {
-        }
+struct recompress_output_port {
+        recompress_output_port(struct module *parent,
+                std::string host, unsigned short rx_port,
+                unsigned short tx_port, int mtu, std::string fec, long long bitrate);
 
-        unique_ptr<ultragrid_rtp_video_rxtx> video_rxtx;
-        string host;
-		string compress_cfg;
-
-        chrono::system_clock::time_point t0;
-        int frames;
+        std::unique_ptr<ultragrid_rtp_video_rxtx> video_rxtx;
+        std::string host;
+        int rx_port;
         int tx_port;
+        int mtu;
+        std::string fec;
+        long long bitrate;
+
+        std::chrono::steady_clock::time_point t0;
+        int frames;
+
+        bool active;
 };
 
-void *recompress_init(struct module *parent,
-                const char *host, const char *compress, unsigned short rx_port,
-                unsigned short tx_port, int mtu, char *fec, long long bitrate)
+struct recompress_worker_ctx {
+        std::string compress_cfg;
+        std::unique_ptr<compress_state, compress_state_deleter> compress;
+
+        std::mutex ports_mut;
+        std::vector<recompress_output_port> ports;
+
+        std::thread thread;
+};
+
+struct state_recompress {
+        struct module *parent;
+        std::map<std::string, recompress_worker_ctx> workers;
+        std::vector<std::pair<std::string, int>> index_to_port;
+};
+
+recompress_output_port::recompress_output_port(struct module *parent,
+                std::string host, unsigned short rx_port,
+                unsigned short tx_port, int mtu, std::string fec, long long bitrate) :
+        host(std::move(host)),
+        fec(std::move(fec))
 {
         int force_ip_version = 0;
-        chrono::steady_clock::time_point start_time(chrono::steady_clock::now());
+        auto start_time = std::chrono::steady_clock::now();
 
-        map<string, param_u> params;
+        std::map<std::string, param_u> params;
 
         // common
         params["parent"].ptr = parent;
@@ -92,12 +123,12 @@ void *recompress_init(struct module *parent,
 
         //RTP
         params["mtu"].i = mtu;
-        params["receiver"].str = host;
+        params["receiver"].str = this->host.c_str();
         params["rx_port"].i = rx_port;
         params["tx_port"].i = tx_port;
         params["force_ip_version"].i = force_ip_version;
         params["mcast_if"].str = NULL;
-        params["fec"].str = fec;
+        params["fec"].str = this->fec.c_str();
         params["encryption"].str = NULL;
         params["bitrate"].ll = bitrate;
         params["start_time"].cptr = (const void *) &start_time;
@@ -107,73 +138,136 @@ void *recompress_init(struct module *parent,
         params["decoder_mode"].l = VIDEO_NORMAL;
         params["display_device"].ptr = NULL;
 
-        try {
-                auto rxtx = video_rxtx::create("ultragrid_rtp", params);
-                if (strchr(host, ':') != NULL) {
-                        rxtx->m_port_id = string("[") + host + "]:" + to_string(tx_port);
-                } else {
-                        rxtx->m_port_id = string(host) + ":" + to_string(tx_port);
-                }
-
-                return new state_recompress(
-                                decltype(state_recompress::video_rxtx)(dynamic_cast<ultragrid_rtp_video_rxtx *>(rxtx)),
-                                host,
-								compress,
-                                tx_port
-                                );
-        } catch (...) {
-                return nullptr;
+        auto rxtx = video_rxtx::create("ultragrid_rtp", params);
+        if (host.find(':') != std::string::npos) {
+                rxtx->m_port_id = "[" + host + "]:" + to_string(tx_port);
+        } else {
+                rxtx->m_port_id = host + ":" + to_string(tx_port);
         }
+
+        video_rxtx.reset(dynamic_cast<ultragrid_rtp_video_rxtx *>(rxtx));
 }
 
-void recompress_process_async(void *state, shared_ptr<video_frame> frame)
+static void recompress_port_write(recompress_output_port& port, shared_ptr<video_frame> frame)
 {
-        auto s = static_cast<state_recompress *>(state);
+        port.frames += 1;
 
-        s->frames += 1;
+        auto now = chrono::steady_clock::now();
 
-        chrono::system_clock::time_point now = chrono::system_clock::now();
-        double seconds = chrono::duration_cast<chrono::microseconds>(now - s->t0).count() / 1000000.0;
+        double seconds = chrono::duration_cast<chrono::seconds>(now - port.t0).count();
         if(seconds > 5) {
-                double fps = s->frames / seconds;
+                double fps = port.frames / seconds;
                 log_msg(LOG_LEVEL_INFO, "[0x%08" PRIx32 "->%s:%d:0x%08" PRIx32 "] %d frames in %g seconds = %g FPS\n",
                                 frame->ssrc,
-                                s->host.c_str(), s->tx_port,
-                                s->video_rxtx->get_ssrc(),
-                                s->frames, seconds, fps);
-                s->t0 = now;
-                s->frames = 0;
+                                port.host.c_str(), port.tx_port,
+                                port.video_rxtx->get_ssrc(),
+                                port.frames, seconds, fps);
+                port.t0 = now;
+                port.frames = 0;
         }
 
-        s->video_rxtx->send(frame);
+        port.video_rxtx->send(frame);
 }
 
-void recompress_assign_ssrc(void *state, uint32_t ssrc)
+static void recompress_worker(struct recompress_worker_ctx *ctx){
+        assert(ctx->compress);
+
+        while(auto frame = compress_pop(ctx->compress.get())){
+                if(!frame){
+                        //poisoned
+                        break;
+                }
+
+                std::lock_guard<std::mutex>(ctx->ports_mut);
+                for(auto& port : ctx->ports){
+                        recompress_port_write(port, frame);
+                }
+        }
+}
+
+int recompress_add_port(struct state_recompress *s,
+		const char *host, const char *compress, unsigned short rx_port,
+		unsigned short tx_port, int mtu, const char *fec, long long bitrate)
 {
-        // UNIMPLEMENTED NOW
-        UNUSED(state);
-        UNUSED(ssrc);
+        auto port = recompress_output_port(s->parent, host, rx_port, tx_port,
+                        mtu, fec, bitrate);
+
+        auto& worker = s->workers[compress];
+        if(!worker.compress){
+                worker.compress_cfg = compress;
+                compress_state *cmp = nullptr;
+                //TODO error check
+                int ret = compress_init(s->parent, compress, &cmp);
+                worker.compress.reset(cmp);
+
+                worker.thread = std::thread(recompress_worker, &worker);
+        }
+
+        int index_in_worker = -1;
+        {
+                std::lock_guard<std::mutex>(worker.ports_mut);
+                index_in_worker = worker.ports.size();
+                worker.ports.push_back(std::move(port));
+        }
+
+        int index_of_port = s->index_to_port.size();
+        s->index_to_port.emplace_back(compress, index_in_worker);
+
+        return index_of_port;
 }
 
+uint32_t recompress_get_port_ssrc(struct state_recompress *s, int idx){
+        auto [compress_cfg, i] = s->index_to_port[idx];
+
+        return s->workers[compress_cfg].ports[i].video_rxtx->get_ssrc();
+}
+
+void recompress_port_set_active(struct state_recompress *s,
+                int index, bool active)
+{
+        auto [compress_cfg, i] = s->index_to_port[index];
+
+        std::unique_lock<std::mutex>(s->workers[compress_cfg].ports_mut);
+        s->workers[compress_cfg].ports[i].active = active;
+}
+
+struct state_recompress *recompress_init(struct module *parent) {
+        auto state = new state_recompress();
+        if(!state)
+                return nullptr;
+
+        state->parent = parent;
+
+        return state;
+}
+
+void recompress_process_async(state_recompress *s, std::shared_ptr<video_frame> frame){
+        for(const auto& worker : s->workers){
+                compress_frame(worker.second.compress.get(), frame);
+        }
+}
+
+/*
 uint32_t recompress_get_ssrc(void *state)
 {
         auto s = static_cast<state_recompress *>(state);
 
         return s->video_rxtx->get_ssrc();
 }
+*/
 
-void recompress_done(void *state)
-{
-        auto s = static_cast<state_recompress *>(state);
+void recompress_done(struct state_recompress *s) {
+        for(auto& worker : s->workers){
+                //poison compress
+                compress_frame(worker.second.compress.get(), nullptr);
 
-        s->video_rxtx->join();
+                for(const auto& port : worker.second.ports){
+                        port.video_rxtx->join();
+                }
+
+                worker.second.thread.join();
+        }
 
         delete s;
-}
-
-const char *recompress_get_compress_cfg(void *state){
-        auto s = static_cast<state_recompress *>(state);
-
-		return s->compress_cfg.c_str();
 }
 

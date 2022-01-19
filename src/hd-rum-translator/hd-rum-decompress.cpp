@@ -73,12 +73,6 @@ using namespace std;
 
 namespace hd_rum_decompress {
 struct state_transcoder_decompress : public frame_recv_delegate {
-        struct output_port_info {
-                inline output_port_info(void *s, bool a) : state(s), active(a) {}
-                void *state;
-                bool active;
-        };
-
         struct message {
                 inline message(shared_ptr<video_frame> && f) : type(FRAME), frame(std::move(f)) {}
                 inline message() : type(QUIT) {}
@@ -94,15 +88,9 @@ struct state_transcoder_decompress : public frame_recv_delegate {
                 };
         };
 
-        vector<output_port_info> output_ports;
-
-        struct compressed_output {
-                compress_state *compress = nullptr;
-                std::vector<unsigned> indices;
-        };
-        std::map<std::string, compressed_output> compressions;
-
         ultragrid_rtp_video_rxtx* video_rxtx;
+
+        struct state_recompress *recompress;
 
         queue<message> received_frame;
 
@@ -183,6 +171,7 @@ using namespace hd_rum_decompress;
 
 void hd_rum_decompress_set_active(void *state, void *recompress_port, bool active)
 {
+#if 0
         struct state_transcoder_decompress *s = (struct state_transcoder_decompress *) state;
 
         for (auto && port : s->output_ports) {
@@ -190,6 +179,7 @@ void hd_rum_decompress_set_active(void *state, void *recompress_port, bool activ
                         port.active = active;
                 }
         }
+#endif
 }
 
 ssize_t hd_rum_decompress_write(void *state, void *buf, size_t count)
@@ -215,6 +205,7 @@ void state_transcoder_decompress::worker()
                         should_exit = true;
                         break;
                 case message::REMOVE_INDEX:
+#if 0
                         {
                         auto recompress_state = output_ports[msg.remove_index].state;
                         recompress_done(recompress_state);
@@ -228,9 +219,11 @@ void state_transcoder_decompress::worker()
                         }
 
                         output_ports.erase(output_ports.begin() + msg.remove_index);
-                        break;
                         }
+#endif
+                        break;
                 case message::NEW_RECOMPRESS:
+#if 0
                         {
                         auto cmp_cfg = recompress_get_compress_cfg(msg.new_recompress_state);
                         auto& output = compressions[cmp_cfg];
@@ -240,16 +233,11 @@ void state_transcoder_decompress::worker()
                                 //TODO: Error handling
                                 int ret = compress_init(nullptr, cmp_cfg, &output.compress);
                         }
+                        }
+#endif
                         break;
-                        }
                 case message::FRAME:
-                        for (const auto& c : compressions) {
-                                compress_frame(c.second.compress, msg.frame);
-                                auto cmp_frame = compress_pop(c.second.compress);
-                                for (unsigned idx : c.second.indices){
-                                        recompress_process_async(output_ports[idx].state, cmp_frame);
-                                }
-                        }
+                        recompress_process_async(recompress, msg.frame);
                         break;
                 }
 
@@ -261,13 +249,15 @@ void state_transcoder_decompress::worker()
         }
 }
 
-void *hd_rum_decompress_init(struct module *parent, struct hd_rum_output_conf conf, const char *capture_filter)
+void *hd_rum_decompress_init(struct module *parent, struct hd_rum_output_conf conf, const char *capture_filter, struct state_recompress *recompress)
 {
         struct state_transcoder_decompress *s;
         int force_ip_version = 0;
 
         s = new state_transcoder_decompress();
         chrono::steady_clock::time_point start_time(chrono::steady_clock::now());
+
+        s->recompress = recompress;
 
         char cfg[128] = "";
         int ret;
@@ -352,9 +342,7 @@ void hd_rum_decompress_done(void *state) {
         s->worker_thread.join();
 
         // cleanup
-        for (unsigned int i = 0; i < s->output_ports.size(); ++i) {
-                recompress_done(s->output_ports[i].state);
-        }
+        recompress_done(s->recompress);
 
         display_put_frame(s->display, NULL, 0);
         s->display_thread.join();
@@ -390,6 +378,7 @@ void hd_rum_decompress_append_port(void *state, void *recompress_state)
 
 int hd_rum_decompress_get_num_active_ports(void *state)
 {
+#if 0
         struct state_transcoder_decompress *s = (struct state_transcoder_decompress *) state;
 
         int ret = 0;
@@ -400,5 +389,7 @@ int hd_rum_decompress_get_num_active_ports(void *state)
         }
 
         return ret;
+#endif
+        return 0;
 }
 

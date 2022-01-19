@@ -112,7 +112,6 @@ struct replica {
         mod.priv_data = this;
         module_register(&mod, parent);
         type = replica::type_t::NONE;
-        recompress = nullptr;
     }
 
     ~replica() {
@@ -133,7 +132,6 @@ struct replica {
     };
     enum type_t type;
     socket_udp *sock;
-    void *recompress;
 };
 
 struct hd_rum_translator_state {
@@ -167,6 +165,7 @@ struct hd_rum_translator_state {
 
     vector<replica *> replicas;
     void *decompress;
+	struct state_recompress *recompress;
 };
 
 /*
@@ -288,8 +287,8 @@ static struct response *change_replica_type(struct hd_rum_translator_state *s,
         return new_response(RESPONSE_BAD_REQUEST, NULL);
     }
 
-    hd_rum_decompress_set_active(s->decompress, r->recompress,
-            r->type == replica::type_t::RECOMPRESS);
+	recompress_port_set_active(s->recompress, index,
+			r->type == replica::type_t::RECOMPRESS);
 
     return new_response(RESPONSE_OK, NULL);
 }
@@ -399,29 +398,36 @@ static void *writer(void *arg)
                 if (compress) {
                     rep->type = replica::type_t::RECOMPRESS;
                     char *fec = NULL;
-                    rep->recompress = recompress_init(&rep->mod,
+					int idx = recompress_add_port(s->recompress,
                             host, compress,
                             0, tx_port, 1500, fec, RATE_UNLIMITED);
-                    if (!rep->recompress) {
+                    if (idx < 0) {
                         delete s->replicas[s->replicas.size() - 1];
                         s->replicas.erase(s->replicas.end() - 1);
 
                         log_msg(LOG_LEVEL_ERROR, "Unable to create recompress!\n");
                     } else {
-                        hd_rum_decompress_append_port(s->decompress, rep->recompress);
-                        hd_rum_decompress_set_active(s->decompress, rep->recompress, true);
-                        log_msg(LOG_LEVEL_NOTICE, "Created new transcoding output port %s:%d:0x%08" PRIx32 ".\n", host, tx_port, recompress_get_ssrc(rep->recompress));
+						assert(idx == s->replicas.size() - 1);
+						recompress_port_set_active(s->recompress, idx, true);
+                        log_msg(LOG_LEVEL_NOTICE, "Created new transcoding output port %s:%d:0x%08" PRIx32 ".\n", host, tx_port, recompress_get_port_ssrc(s->recompress, idx));
                     }
                 } else {
                     rep->type = replica::type_t::USE_SOCK;
                     char compress[] = "none";
                     char *fec = NULL;
-                    rep->recompress = recompress_init(&rep->mod,
+					int idx = recompress_add_port(s->recompress,
                             host, compress,
                             0, tx_port, 1500, fec, RATE_UNLIMITED);
-                    hd_rum_decompress_append_port(s->decompress, rep->recompress);
-                    hd_rum_decompress_set_active(s->decompress, rep->recompress, false);
-                    log_msg(LOG_LEVEL_NOTICE, "Created new forwarding output port %s:%d.\n", host, tx_port);
+                    if (idx < 0) {
+                        delete s->replicas[s->replicas.size() - 1];
+                        s->replicas.erase(s->replicas.end() - 1);
+
+                        log_msg(LOG_LEVEL_ERROR, "Unable to create recompress!\n");
+                    } else {
+						assert(idx == s->replicas.size() - 1);
+						recompress_port_set_active(s->recompress, idx, false);
+						log_msg(LOG_LEVEL_NOTICE, "Created new forwarding output port %s:%d.\n", host, tx_port);
+                    }
                 }
             } else {
                 r = new_response(RESPONSE_BAD_REQUEST, NULL);
@@ -841,8 +847,15 @@ int main(int argc, char **argv)
         control_start(state.control_state);
     }
 
+	//one shared recompressor, which manages compressions and sends to all hosts
+	state.recompress = recompress_init(&state.mod);
+    if(!state.recompress) {
+        EXIT(EXIT_FAIL_COMPRESS);
+    }
+
     // we need only one shared receiver decompressor for all recompressing streams
-    state.decompress = hd_rum_decompress_init(&state.mod, params.out_conf, params.capture_filter);
+    state.decompress = hd_rum_decompress_init(&state.mod, params.out_conf,
+			params.capture_filter, state.recompress);
     if(!state.decompress) {
         EXIT(EXIT_FAIL_DECODER);
     }
@@ -865,26 +878,31 @@ int main(int argc, char **argv)
             state.replicas[i]->type = replica::type_t::USE_SOCK;
             char compress[] = "none";
             char *fec = NULL;
-            state.replicas[i]->recompress = recompress_init(&state.replicas[i]->mod,
+			int idx = recompress_add_port(state.recompress,
                     params.hosts[i].addr, compress,
                     0, tx_port, params.hosts[i].mtu, fec, params.hosts[i].bitrate);
-            hd_rum_decompress_append_port(state.decompress, state.replicas[i]->recompress);
-            hd_rum_decompress_set_active(state.decompress, state.replicas[i]->recompress, false);
-        } else {
-            state.replicas[i]->type = replica::type_t::RECOMPRESS;
-
-            state.replicas[i]->recompress = recompress_init(&state.replicas[i]->mod,
-                    params.hosts[i].addr, params.hosts[i].compression,
-                    0, tx_port, params.hosts[i].mtu, params.hosts[i].fec, params.hosts[i].bitrate);
-            if(state.replicas[i]->recompress == 0) {
+            if(idx < 0) {
                 fprintf(stderr, "Initializing output port '%s' failed!\n",
                         params.hosts[i].addr);
                 EXIT(EXIT_FAILURE);
             }
-            // we don't care about this clients, we only tell decompressor to
+			assert(idx == i);
+            recompress_port_set_active(state.recompress, i, false);
+        } else {
+            state.replicas[i]->type = replica::type_t::RECOMPRESS;
+
+            int idx = recompress_add_port(state.recompress,
+                    params.hosts[i].addr, params.hosts[i].compression,
+                    0, tx_port, params.hosts[i].mtu, params.hosts[i].fec, params.hosts[i].bitrate);
+            if(idx < 0) {
+                fprintf(stderr, "Initializing output port '%s' failed!\n",
+                        params.hosts[i].addr);
+                EXIT(EXIT_FAILURE);
+            }
+			assert(idx == i);
+            // we don't care about this clients, we only tell recompressor to
             // take care about them
-            hd_rum_decompress_append_port(state.decompress, state.replicas[i]->recompress);
-            hd_rum_decompress_set_active(state.decompress, state.replicas[i]->recompress, true);
+            recompress_port_set_active(state.recompress, i, true);
         }
     }
 
