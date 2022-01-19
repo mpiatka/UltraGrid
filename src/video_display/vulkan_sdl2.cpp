@@ -114,8 +114,8 @@ using namespace std::literals;
 
 namespace {
 
-constexpr int MAGIC_VULKAN_SDL2 = 0x3cc234a2;
-constexpr int MAX_FRAME_COUNT = 5;
+constexpr int magic_vulkan_sdl2 = 0x3cc234a2;
+constexpr int max_frame_count = 3;
 #define MOD_NAME "[VULKAN_SDL2] "
 
 
@@ -142,6 +142,33 @@ public:
         }
 };
 
+constexpr size_t add_padding(size_t size, size_t allignment){
+        return ((size + allignment - 1) / allignment) * allignment;
+}
+constexpr size_t frame_size = add_padding(sizeof(video_frame) + sizeof(tile), alignof(video_frame));
+
+struct ug_frames{
+        std::byte* base;
+        void init(){
+                base = reinterpret_cast<std::byte*>(malloc(max_frame_count * frame_size));
+        }
+        void destroy(){
+                if (base) {
+                        free(base);
+                }
+        }
+        size_t get_id(video_frame* frame){
+                auto diff = reinterpret_cast<std::byte*>(frame) - base;
+                assert(diff >= 0 && size_t(diff) % frame_size == 0);
+                size_t id = size_t(diff) / frame_size;
+                assert(id < max_frame_count);
+                return id;
+        } 
+        video_frame* operator[](size_t pos){
+                return reinterpret_cast<video_frame*>(base + pos * frame_size);
+        }
+};
+
 struct state_vulkan_sdl2 {
         module mod{};
 
@@ -161,15 +188,15 @@ struct state_vulkan_sdl2 {
         std::unique_ptr<vkd::vulkan_display> vulkan = nullptr;
         std::unique_ptr<::window_callback> window_callback = nullptr;
         
-        std::array<video_frame, MAX_FRAME_COUNT> video_frames{};
-        std::array<vkd::image, MAX_FRAME_COUNT> images{};
-
+        std::array<vkd::image, max_frame_count> images{};
+        ::ug_frames ug_frames;
+        
         std::atomic<bool> should_exit = false;
         video_desc current_desc{};
 
         explicit state_vulkan_sdl2(module* parent) {
                 module_init_default(&mod);
-                mod.priv_magic = MAGIC_VULKAN_SDL2;
+                mod.priv_magic = magic_vulkan_sdl2;
                 mod.new_message = display_sdl2_new_message;
                 mod.cls = MODULE_CLASS_DATA;
                 module_register(&mod, parent);
@@ -361,7 +388,7 @@ void process_events(state_vulkan_sdl2& s) {
 
 void display_sdl2_run(void* state) {
         auto* s = static_cast<state_vulkan_sdl2*>(state);
-        assert(s->mod.priv_magic == MAGIC_VULKAN_SDL2);
+        assert(s->mod.priv_magic == magic_vulkan_sdl2);
         
         s->time = chrono::steady_clock::now();
         while (!s->should_exit) {
@@ -470,7 +497,7 @@ void show_help() {
 
 int display_sdl2_reconfigure(void* state, video_desc desc) {
         auto* s = static_cast<state_vulkan_sdl2*>(state);
-        assert(s->mod.priv_magic == MAGIC_VULKAN_SDL2);
+        assert(s->mod.priv_magic == magic_vulkan_sdl2);
 
         assert(desc.tile_count == 1);
         s->current_desc = desc;
@@ -731,14 +758,12 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
                 }
 #endif
                 s->vulkan = std::make_unique<vkd::vulkan_display>();
-                s->vulkan->init(std::move(instance), surface, MAX_FRAME_COUNT, *s->window_callback, args.gpu_idx, path_to_shaders, args.vsync, args.tearing_permitted);
+                s->vulkan->init(std::move(instance), surface, max_frame_count, *s->window_callback, args.gpu_idx, path_to_shaders, args.vsync, args.tearing_permitted);
                 LOG(LOG_LEVEL_NOTICE) << MOD_NAME "Vulkan display initialised." << std::endl;
         }
         catch (std::exception& e) { log_and_exit_uv(e); return nullptr; }
 
-        for (auto& frame : s->video_frames) {
-                frame = video_frame{};
-        }
+        s->ug_frames.init();
 
         draw_splashscreen(*s);
         return static_cast<void*>(s.release());
@@ -746,7 +771,7 @@ void* display_sdl2_init(module* parent, const char* fmt, unsigned int flags) {
 
 void display_sdl2_done(void* state) {
         auto* s = static_cast<state_vulkan_sdl2*>(state);
-        assert(s->mod.priv_magic == MAGIC_VULKAN_SDL2);
+        assert(s->mod.priv_magic == magic_vulkan_sdl2);
 
         SDL_ShowCursor(SDL_ENABLE);
 
@@ -760,6 +785,7 @@ void display_sdl2_done(void* state) {
                 SDL_DestroyWindow(s->window);
                 s->window = nullptr;
         }
+        s->ug_frames.destroy();
 
         SDL_QuitSubSystem(SDL_INIT_EVENTS);
         SDL_Quit();
@@ -786,7 +812,7 @@ vkd::image_description to_vkd_image_desc(const video_desc& ultragrid_desc) {
 
 video_frame* display_sdl2_getf(void* state) {
         auto* s = static_cast<state_vulkan_sdl2*>(state);
-        assert(s->mod.priv_magic == MAGIC_VULKAN_SDL2);
+        assert(s->mod.priv_magic == magic_vulkan_sdl2);
         
         const auto& desc = s->current_desc;
         vulkan_display::image image;
@@ -794,9 +820,10 @@ video_frame* display_sdl2_getf(void* state) {
                 s->vulkan->acquire_image(image, to_vkd_image_desc(desc));
         } 
         catch (std::exception& e) { log_and_exit_uv(e); return nullptr; }
+        assert(image.get_id() < max_frame_count);
         s->images[image.get_id()] = image;
         
-        video_frame& frame = s->video_frames[image.get_id()];
+        video_frame& frame = *s->ug_frames[image.get_id()];
         update_description(desc, frame);
         auto texel_height = image.get_size().height;
         if (vkd::is_compressed_format(image.get_description().format)){
@@ -809,26 +836,25 @@ video_frame* display_sdl2_getf(void* state) {
 
 int display_sdl2_putf(void* state, video_frame* frame, int nonblock) {
         auto* s = static_cast<state_vulkan_sdl2*>(state);
-        assert(s->mod.priv_magic == MAGIC_VULKAN_SDL2);
-
-        uint32_t id = std::distance(s->video_frames.data(), frame);
-        auto& image = s->images[id];
-        if (nonblock == PUTF_DISCARD) {
-                assert(frame != nullptr);
-                assert(image.get_id() == id);
-                try {
-                        s->vulkan->discard_image(s->images[id]);
-                } 
-                catch (std::exception& e) { log_and_exit_uv(e); return 1; }
-                return 0;
-        }
+        assert(s->mod.priv_magic == magic_vulkan_sdl2);
 
         if (!frame) {
                 s->should_exit = true;
                 s->vulkan->queue_image(vkd::image{});
                 return 0;
         }
+
+        size_t id = s->ug_frames.get_id(frame);
+        auto& image = s->images[id];
         assert(image.get_id() == id);
+
+        if (nonblock == PUTF_DISCARD) {
+                try {
+                        s->vulkan->discard_image(s->images[id]);
+                } 
+                catch (std::exception& e) { log_and_exit_uv(e); return 1; }
+                return 0;
+        }
         
         if (s->deinterlace && !vkd::is_compressed_format(image.get_description().format)) {
                 image.set_process_function([](vkd::image& image) {
@@ -847,7 +873,7 @@ int display_sdl2_putf(void* state, video_frame* frame, int nonblock) {
 
 int display_sdl2_get_property(void* state, int property, void* val, size_t* len) {
         auto* s = static_cast<state_vulkan_sdl2*>(state);
-        assert(s->mod.priv_magic == MAGIC_VULKAN_SDL2);
+        assert(s->mod.priv_magic == magic_vulkan_sdl2);
 
         switch (property) {
         case DISPLAY_PROPERTY_CODECS: {
@@ -907,7 +933,7 @@ int display_sdl2_get_property(void* state, int property, void* val, size_t* len)
 
 void display_sdl2_new_message(module* mod) {
         auto s = reinterpret_cast<state_vulkan_sdl2*>(mod);
-        assert(s->mod.priv_magic == MAGIC_VULKAN_SDL2);
+        assert(s->mod.priv_magic == magic_vulkan_sdl2);
 
         SDL_Event event{};
         event.type = s->sdl_user_new_message_event;

@@ -369,10 +369,10 @@ VKD_RETURN_TYPE vulkan_context::create_swap_chain(vk::SwapchainKHR old_swapchain
                 capabilities.minImageExtent.height,
                 capabilities.maxImageExtent.height);
 
-        uint32_t image_count = capabilities.minImageCount + 1;
-        if (capabilities.maxImageCount != 0) {
+        uint32_t image_count = capabilities.minImageCount;
+        /*if (capabilities.maxImageCount != 0) {
                 image_count = std::min(image_count, capabilities.maxImageCount);
-        }
+        }*/
 
         //assert(capabilities.supportedUsageFlags & vk::ImageUsageFlagBits::eTransferDst);
         vk::SwapchainCreateInfoKHR swapchain_info{};

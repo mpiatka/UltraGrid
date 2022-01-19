@@ -385,11 +385,8 @@ VKD_RETURN_TYPE vulkan_display::init(vulkan_instance&& instance, VkSurfaceKHR su
         auto[lock, deque] = available_img_queue.get_underlying_deque();
         for (uint32_t i = 0; i < transfer_image_count; i++) {
                 transfer_images.emplace_back(device, i);
-                //push_front - discarded images should be pushed at the front,
-                // because they will not wait in the function device.waitForFences
-                deque.push_front(&transfer_images.back());
+                deque.push_back(&transfer_images.back());
         }
-
         return VKD_RETURN_TYPE();
 }
 
