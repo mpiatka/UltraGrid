@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <optional>
@@ -10,6 +11,7 @@ template<typename T>
 class concurrent_queue {
         std::deque<T> deque{};
         mutable std::mutex mutex{};
+        std::atomic<bool> try_pop_skip = false; // try pop doesn't acquires scope_lock if queue is empty
         std::condition_variable queue_non_empty{};
 public:
         concurrent_queue() = default;
@@ -29,7 +31,8 @@ public:
 
         auto size() const {
                 std::scoped_lock lock{ mutex };
-                return deque.size();
+                auto size = deque.size();
+                return size;
         }
 
         void push(const T& value) {
@@ -46,6 +49,7 @@ public:
                         std::scoped_lock lock{ mutex };
                         deque.emplace_back(std::forward<Args>(args)...);
                 }
+                try_pop_skip = false;
                 queue_non_empty.notify_one();
         }
 
@@ -55,6 +59,7 @@ public:
                         std::scoped_lock lock{ mutex };
                         deque.emplace_front(std::forward<Args>(args)...);
                 }
+                try_pop_skip = false;
                 queue_non_empty.notify_one();
         }
 
@@ -67,9 +72,13 @@ public:
         }
         
         std::optional<T> try_pop() {
+                if (try_pop_skip){
+                        return std::nullopt;
+                }
                 std::scoped_lock lock{ mutex };
                 if (deque.empty()) {
-                        return {};
+                        try_pop_skip = true;
+                        return std::nullopt;
                 }
                 T result = std::move(deque.front());
                 deque.pop_front();
