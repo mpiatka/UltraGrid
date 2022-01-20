@@ -550,7 +550,7 @@ struct command_line_arguments {
         int y = SDL_WINDOWPOS_UNDEFINED;
 
         uint32_t window_flags = 0 ; ///< user requested flags
-        uint32_t gpu_idx = vkd::NO_GPU_SELECTED;
+        uint32_t gpu_idx = vkd::no_gpu_selected;
         std::string driver{};
 };
 

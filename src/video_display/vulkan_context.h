@@ -99,7 +99,7 @@ struct window_parameters {
         }
 };
 
-constexpr uint32_t NO_GPU_SELECTED = UINT32_MAX;
+constexpr uint32_t no_gpu_selected = UINT32_MAX;
 
 inline vk::ImageViewCreateInfo default_image_view_create_info(vk::Format format) {
         vk::ImageViewCreateInfo image_view_info{ {}, {}, vk::ImageViewType::e2D, format };
@@ -119,9 +119,9 @@ namespace vulkan_display_detail {
 using c_str = const char*;
 using namespace std::literals;
 
-constexpr uint32_t NO_QUEUE_FAMILY_INDEX_FOUND = UINT32_MAX;
-constexpr uint32_t SWAPCHAIN_IMAGE_OUT_OF_DATE = UINT32_MAX;
-constexpr uint32_t SWAPCHAIN_IMAGE_TIMEOUT = UINT32_MAX - 1;
+constexpr uint32_t no_queue_index_found = UINT32_MAX;
+constexpr uint32_t swapchain_image_out_of_date = UINT32_MAX;
+constexpr uint32_t swapchain_image_timeout = UINT32_MAX - 1;
 
 class vulkan_context {
         vk::Instance instance;
@@ -133,7 +133,7 @@ class vulkan_context {
         vk::Device device;
         bool yCbCr_supported = false;
 
-        uint32_t queue_family_index = NO_QUEUE_FAMILY_INDEX_FOUND;
+        uint32_t queue_family_index = no_queue_index_found;
         vk::Queue queue;
 
         vk::SurfaceKHR surface;

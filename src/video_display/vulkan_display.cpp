@@ -570,7 +570,7 @@ VKD_RETURN_TYPE vulkan_display::display_queued_image(bool* displayed) {
         }
         VKD_PASS_RESULT(context.acquire_next_swapchain_image(swapchain_image_id, semaphores.image_acquired));
         int swapchain_recreation_attempt = 0;
-        while (swapchain_image_id == SWAPCHAIN_IMAGE_OUT_OF_DATE || swapchain_image_id == SWAPCHAIN_IMAGE_TIMEOUT) 
+        while (swapchain_image_id == swapchain_image_out_of_date || swapchain_image_id == swapchain_image_timeout) 
         {
                 swapchain_recreation_attempt++;
                 VKD_CHECK(swapchain_recreation_attempt <= 3, "Cannot acquire swapchain image");

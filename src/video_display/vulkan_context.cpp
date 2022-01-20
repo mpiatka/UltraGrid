@@ -68,7 +68,7 @@ VKD_RETURN_TYPE get_queue_family_index(uint32_t& index, vk::PhysicalDevice gpu, 
 
         std::vector<vk::QueueFamilyProperties> families = gpu.getQueueFamilyProperties();
 
-        index = NO_QUEUE_FAMILY_INDEX_FOUND;
+        index = no_queue_index_found;
         for (uint32_t i = 0; i < families.size(); i++) {
                 VkBool32 surface_supported = true;
                 if (surface) {
@@ -90,9 +90,9 @@ VKD_RETURN_TYPE is_gpu_suitable(bool& result, bool propagate_error, vk::Physical
         if (!result) {
                 return VKD_RETURN_TYPE();
         }
-        uint32_t index = NO_QUEUE_FAMILY_INDEX_FOUND;
+        uint32_t index = no_queue_index_found;
         VKD_PASS_RESULT(get_queue_family_index(index, gpu, surface));
-        if (index == NO_QUEUE_FAMILY_INDEX_FOUND) {
+        if (index == no_queue_index_found) {
                 result = false;
         }
         return VKD_RETURN_TYPE();
@@ -256,7 +256,7 @@ VKD_RETURN_TYPE vulkan_context::create_physical_device(uint32_t gpu_index) {
         std::vector<vk::PhysicalDevice> gpus;
         VKD_CHECKED_ASSIGN(gpus, instance.enumeratePhysicalDevices());
 
-        if (gpu_index == vulkan_display::NO_GPU_SELECTED) {
+        if (gpu_index == vulkan_display::no_gpu_selected) {
                 VKD_PASS_RESULT(choose_suitable_GPU(gpu, gpus, surface));
         } else {
                 VKD_PASS_RESULT(choose_gpu_by_index(gpu, gpus, gpu_index));
@@ -281,7 +281,7 @@ VKD_RETURN_TYPE vulkan_context::create_physical_device(uint32_t gpu_index) {
 
 VKD_RETURN_TYPE vulkan_context::create_logical_device() {
         assert(gpu);
-        assert(queue_family_index != NO_QUEUE_FAMILY_INDEX_FOUND);
+        assert(queue_family_index != no_queue_index_found);
 
         constexpr std::array priorities = { 1.0f };
         vk::DeviceQueueCreateInfo queue_info{};
@@ -477,10 +477,10 @@ VKD_RETURN_TYPE vulkan_context::acquire_next_swapchain_image(uint32_t& image_ind
         switch (acquired) {
         case vk::Result::eSuboptimalKHR: [[fallthrough]];
         case vk::Result::eErrorOutOfDateKHR:
-                image_index = SWAPCHAIN_IMAGE_OUT_OF_DATE;
+                image_index = swapchain_image_out_of_date;
                 break;
         case vk::Result::eTimeout:
-                image_index = SWAPCHAIN_IMAGE_TIMEOUT;
+                image_index = swapchain_image_timeout;
                 break;
         default:
                 VKD_CHECK(acquired, "Next swapchain image cannot be acquired."s + vk::to_string(acquired));
