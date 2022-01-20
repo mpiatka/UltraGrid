@@ -73,22 +73,11 @@ using namespace std;
 
 namespace hd_rum_decompress {
 struct state_transcoder_decompress : public frame_recv_delegate {
-        struct message {
-                inline message(shared_ptr<video_frame> && f) : type(FRAME), frame(std::move(f)) {}
-                inline message() : type(QUIT) {}
-                inline message(message && original);
-                inline ~message();
-                enum { FRAME, QUIT } type;
-                union {
-                        shared_ptr<video_frame> frame;
-                };
-        };
-
         ultragrid_rtp_video_rxtx* video_rxtx;
 
         struct state_recompress *recompress;
 
-        queue<message> received_frame;
+        std::queue<std::shared_ptr<video_frame>> received_frame;
 
         mutex              lock;
         condition_variable have_frame_cv;
@@ -132,28 +121,9 @@ void state_transcoder_decompress::frame_arrived(struct video_frame *f, struct au
                 fprintf(stderr, "Hd-rum-decompress max queue size (%d) reached!\n", MAX_QUEUE_SIZE);
         }
         frame_consumed_cv.wait(l, [this]{ return received_frame.size() < MAX_QUEUE_SIZE; });
-        received_frame.push(shared_ptr<video_frame>(f, deleter));
+        received_frame.emplace(f, deleter);
         l.unlock();
         have_frame_cv.notify_one();
-}
-
-inline state_transcoder_decompress::message::message(message && original)
-        : type(original.type)
-{
-        switch (original.type) {
-                case FRAME:
-                        new (&frame) shared_ptr<video_frame>(std::move(original.frame));
-                        break;
-                case QUIT:
-                        break;
-        }
-}
-
-inline state_transcoder_decompress::message::~message() {
-        // shared_ptr has non-trivial destructor
-        if (type == FRAME) {
-                frame.~shared_ptr<video_frame>();
-        }
 }
 } // end of hd-rum-decompress namespace
 
@@ -174,16 +144,13 @@ void state_transcoder_decompress::worker()
                 unique_lock<mutex> l(lock);
                 have_frame_cv.wait(l, [this]{return !received_frame.empty();});
 
-                message msg(std::move(received_frame.front()));
+                auto frame = std::move(received_frame.front());
                 l.unlock();
 
-                switch (msg.type) {
-                case message::QUIT:
+                if(!frame){
                         should_exit = true;
-                        break;
-                case message::FRAME:
-                        recompress_process_async(recompress, msg.frame);
-                        break;
+                } else {
+                        recompress_process_async(recompress, frame);
                 }
 
                 // we are removing from queue now because special messages are "accepted" when queue is empty
