@@ -60,6 +60,8 @@ int recompress_add_port(struct state_recompress *s,
 		const char *host, const char *compress, unsigned short rx_port,
 		unsigned short tx_port, int mtu, const char *fec, long long bitrate);
 
+void recompress_remove_port(struct state_recompress *s, int index);
+
 void recompress_port_set_active(struct state_recompress *s,
                 int index, bool active);
 

@@ -215,6 +215,25 @@ int recompress_add_port(struct state_recompress *s,
         return index_of_port;
 }
 
+void recompress_remove_port(struct state_recompress *s, int index){
+        auto [compress_cfg, i] = s->index_to_port[index];
+
+        auto& worker = s->workers[compress_cfg];
+        {
+                std::unique_lock<std::mutex> lock(worker.ports_mut);
+                worker.ports[i].video_rxtx->join();
+                worker.ports.erase(worker.ports.begin() + i);
+        }
+        s->index_to_port.erase(s->index_to_port.begin() + index);
+
+        if(worker.ports.empty()){
+                //poison compress
+                compress_frame(worker.compress.get(), nullptr);
+                worker.thread.join();
+                s->workers.erase(compress_cfg);
+        }
+}
+
 uint32_t recompress_get_port_ssrc(struct state_recompress *s, int idx){
         auto [compress_cfg, i] = s->index_to_port[idx];
 
@@ -246,15 +265,6 @@ void recompress_process_async(state_recompress *s, std::shared_ptr<video_frame> 
         }
 }
 
-/*
-uint32_t recompress_get_ssrc(void *state)
-{
-        auto s = static_cast<state_recompress *>(state);
-
-        return s->video_rxtx->get_ssrc();
-}
-*/
-
 void recompress_done(struct state_recompress *s) {
         for(auto& worker : s->workers){
                 //poison compress
@@ -263,10 +273,8 @@ void recompress_done(struct state_recompress *s) {
                 for(const auto& port : worker.second.ports){
                         port.video_rxtx->join();
                 }
-
                 worker.second.thread.join();
         }
-
         delete s;
 }
 
