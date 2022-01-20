@@ -76,15 +76,11 @@ struct state_transcoder_decompress : public frame_recv_delegate {
         struct message {
                 inline message(shared_ptr<video_frame> && f) : type(FRAME), frame(std::move(f)) {}
                 inline message() : type(QUIT) {}
-                inline message(int ri) : type(REMOVE_INDEX), remove_index(ri) {}
-                inline message(void *ns) : type(NEW_RECOMPRESS), new_recompress_state(ns) {}
                 inline message(message && original);
                 inline ~message();
-                enum { FRAME, REMOVE_INDEX, NEW_RECOMPRESS, QUIT } type;
+                enum { FRAME, QUIT } type;
                 union {
                         shared_ptr<video_frame> frame;
-                        int remove_index;
-                        void *new_recompress_state;
                 };
         };
 
@@ -148,12 +144,6 @@ inline state_transcoder_decompress::message::message(message && original)
                 case FRAME:
                         new (&frame) shared_ptr<video_frame>(std::move(original.frame));
                         break;
-                case REMOVE_INDEX:
-                        remove_index = original.remove_index;
-                        break;
-                case NEW_RECOMPRESS:
-                        new_recompress_state = original.new_recompress_state;
-                        break;
                 case QUIT:
                         break;
         }
@@ -168,19 +158,6 @@ inline state_transcoder_decompress::message::~message() {
 } // end of hd-rum-decompress namespace
 
 using namespace hd_rum_decompress;
-
-void hd_rum_decompress_set_active(void *state, void *recompress_port, bool active)
-{
-#if 0
-        struct state_transcoder_decompress *s = (struct state_transcoder_decompress *) state;
-
-        for (auto && port : s->output_ports) {
-                if (port.state == recompress_port) {
-                        port.active = active;
-                }
-        }
-#endif
-}
 
 ssize_t hd_rum_decompress_write(void *state, void *buf, size_t count)
 {
@@ -203,38 +180,6 @@ void state_transcoder_decompress::worker()
                 switch (msg.type) {
                 case message::QUIT:
                         should_exit = true;
-                        break;
-                case message::REMOVE_INDEX:
-#if 0
-                        {
-                        auto recompress_state = output_ports[msg.remove_index].state;
-                        recompress_done(recompress_state);
-
-                        auto cmp_cfg = recompress_get_compress_cfg(recompress_state);
-                        auto& indices = compressions[cmp_cfg].indices;
-                        indices.erase(std::remove(indices.begin(), indices.end(), msg.remove_index), indices.end());
-                        if(indices.empty()){
-                                module_done(CAST_MODULE(compressions[cmp_cfg].compress));
-                                compressions.erase(cmp_cfg);
-                        }
-
-                        output_ports.erase(output_ports.begin() + msg.remove_index);
-                        }
-#endif
-                        break;
-                case message::NEW_RECOMPRESS:
-#if 0
-                        {
-                        auto cmp_cfg = recompress_get_compress_cfg(msg.new_recompress_state);
-                        auto& output = compressions[cmp_cfg];
-                        output.indices.push_back(output_ports.size());
-                        output_ports.emplace_back(msg.new_recompress_state, true);
-                        if(output.compress == nullptr){
-                                //TODO: Error handling
-                                int ret = compress_init(nullptr, cmp_cfg, &output.compress);
-                        }
-                        }
-#endif
                         break;
                 case message::FRAME:
                         recompress_process_async(recompress, msg.frame);
@@ -342,6 +287,7 @@ void hd_rum_decompress_done(void *state) {
         s->worker_thread.join();
 
         // cleanup
+        // TODO should this be here?
         recompress_done(s->recompress);
 
         display_put_frame(s->display, NULL, 0);
@@ -355,41 +301,3 @@ void hd_rum_decompress_done(void *state) {
 
         delete s;
 }
-
-void hd_rum_decompress_remove_port(void *state, int index) {
-        struct state_transcoder_decompress *s = (struct state_transcoder_decompress *) state;
-
-        unique_lock<mutex> l(s->lock);
-        s->received_frame.push(index);
-        s->have_frame_cv.notify_one();
-        s->frame_consumed_cv.wait(l, [s]{ return s->received_frame.size() == 0; });
-}
-
-
-void hd_rum_decompress_append_port(void *state, void *recompress_state)
-{
-        struct state_transcoder_decompress *s = (struct state_transcoder_decompress *) state;
-
-        unique_lock<mutex> l(s->lock);
-        s->received_frame.push(recompress_state);
-        s->have_frame_cv.notify_one();
-        s->frame_consumed_cv.wait(l, [s]{ return s->received_frame.size() == 0; });
-}
-
-int hd_rum_decompress_get_num_active_ports(void *state)
-{
-#if 0
-        struct state_transcoder_decompress *s = (struct state_transcoder_decompress *) state;
-
-        int ret = 0;
-        for (auto && port : s->output_ports) {
-                if (port.active) {
-                        ret += 1;
-                }
-        }
-
-        return ret;
-#endif
-        return 1;
-}
-

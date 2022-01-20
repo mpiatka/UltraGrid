@@ -347,7 +347,7 @@ static void *writer(void *arg)
                     }
                 }
                 if (index >= 0) {
-                    hd_rum_decompress_remove_port(s->decompress, index);
+                    recompress_remove_port(s->recompress, index);
                     delete s->replicas[index];
                     s->replicas.erase(s->replicas.begin() + index);
                     log_msg(LOG_LEVEL_NOTICE, "Deleted output port %d.\n", index);
@@ -443,7 +443,8 @@ static void *writer(void *arg)
             }
 
             // pass it for transcoding if needed
-            if (hd_rum_decompress_get_num_active_ports(s->decompress) > 0) {
+			// TODO
+            if (true) {
                 ssize_t ret = hd_rum_decompress_write(s->decompress, s->qhead->buf, s->qhead->size);
                 if (ret < 0) {
                     perror("hd_rum_decompress_write");
