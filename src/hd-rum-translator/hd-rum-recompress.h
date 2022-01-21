@@ -65,6 +65,8 @@ void recompress_remove_port(struct state_recompress *s, int index);
 void recompress_port_set_active(struct state_recompress *s,
                 int index, bool active);
 
+int recompress_get_num_active_ports(struct state_recompress *s);
+
 #ifdef __cplusplus
 }
 #endif

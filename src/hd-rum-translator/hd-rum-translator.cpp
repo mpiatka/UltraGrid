@@ -443,8 +443,7 @@ static void *writer(void *arg)
             }
 
             // pass it for transcoding if needed
-			// TODO
-            if (true) {
+            if (recompress_get_num_active_ports(s->recompress) > 0) {
                 ssize_t ret = hd_rum_decompress_write(s->decompress, s->qhead->buf, s->qhead->size);
                 if (ret < 0) {
                     perror("hd_rum_decompress_write");

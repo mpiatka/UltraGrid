@@ -249,6 +249,18 @@ void recompress_port_set_active(struct state_recompress *s,
         s->workers[compress_cfg].ports[i].active = active;
 }
 
+int recompress_get_num_active_ports(struct state_recompress *s){
+        int ret = 0;
+        for(const auto& worker : s->workers){
+                for(const auto& port : worker.second.ports){
+                        if(port.active)
+                                ret++;
+                }
+        }
+
+        return ret;
+}
+
 struct state_recompress *recompress_init(struct module *parent) {
         auto state = new state_recompress();
         if(!state)
