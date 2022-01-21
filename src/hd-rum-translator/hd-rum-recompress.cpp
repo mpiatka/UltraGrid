@@ -106,7 +106,14 @@ struct state_recompress {
 recompress_output_port::recompress_output_port(struct module *parent,
                 std::string host, unsigned short rx_port,
                 unsigned short tx_port, int mtu, const char *fec, long long bitrate) :
-        host(std::move(host))
+        host(std::move(host)),
+        rx_port(rx_port),
+        tx_port(tx_port),
+        mtu(mtu),
+        fec(fec ? fec : ""),
+        bitrate(bitrate),
+        frames(0),
+        active(true)
 {
         int force_ip_version = 0;
         auto start_time = std::chrono::steady_clock::now();
