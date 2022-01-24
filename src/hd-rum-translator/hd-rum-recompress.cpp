@@ -205,8 +205,9 @@ int recompress_add_port(struct state_recompress *s,
         if(!worker.compress){
                 worker.compress_cfg = compress;
                 compress_state *cmp = nullptr;
-                //TODO error check
                 int ret = compress_init(s->parent, compress, &cmp);
+                if(ret != 0)
+                        return -1;
                 worker.compress.reset(cmp);
 
                 worker.thread = std::thread(recompress_worker, &worker);

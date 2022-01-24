@@ -398,7 +398,7 @@ static void *writer(void *arg)
                 if (compress) {
                     rep->type = replica::type_t::RECOMPRESS;
                     char *fec = NULL;
-					int idx = recompress_add_port(s->recompress,
+                    int idx = recompress_add_port(s->recompress,
                             host, compress,
                             0, tx_port, 1500, fec, RATE_UNLIMITED);
                     if (idx < 0) {
@@ -415,7 +415,7 @@ static void *writer(void *arg)
                     rep->type = replica::type_t::USE_SOCK;
                     char compress[] = "none";
                     char *fec = NULL;
-					int idx = recompress_add_port(s->recompress,
+                    int idx = recompress_add_port(s->recompress,
                             host, compress,
                             0, tx_port, 1500, fec, RATE_UNLIMITED);
                     if (idx < 0) {
@@ -881,7 +881,7 @@ int main(int argc, char **argv)
             state.replicas[i]->type = replica::type_t::USE_SOCK;
             char compress[] = "none";
             char *fec = NULL;
-			int idx = recompress_add_port(state.recompress,
+            int idx = recompress_add_port(state.recompress,
                     params.hosts[i].addr, compress,
                     0, tx_port, params.hosts[i].mtu, fec, params.hosts[i].bitrate);
             if(idx < 0) {
