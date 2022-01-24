@@ -708,6 +708,9 @@ static void hd_rum_translator_deinit(struct hd_rum_translator_state *s) {
         hd_rum_decompress_done(s->decompress);
     }
 
+    if(s->recompress)
+            recompress_done(s->recompress);
+
     for (unsigned int i = 0; i < s->replicas.size(); i++) {
         delete s->replicas[i];
     }

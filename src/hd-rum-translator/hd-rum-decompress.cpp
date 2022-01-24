@@ -253,10 +253,6 @@ void hd_rum_decompress_done(void *state) {
 
         s->worker_thread.join();
 
-        // cleanup
-        // TODO should this be here?
-        recompress_done(s->recompress);
-
         display_put_frame(s->display, NULL, 0);
         s->display_thread.join();
         s->video_rxtx->join();
