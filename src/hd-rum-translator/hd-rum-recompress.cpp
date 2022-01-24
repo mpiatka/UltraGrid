@@ -232,7 +232,6 @@ void recompress_remove_port(struct state_recompress *s, int index){
         auto& worker = s->workers[compress_cfg];
         {
                 std::unique_lock<std::mutex> lock(worker.ports_mut);
-                worker.ports[i].video_rxtx->join();
                 worker.ports.erase(worker.ports.begin() + i);
         }
         s->index_to_port.erase(s->index_to_port.begin() + index);
@@ -306,10 +305,6 @@ void recompress_done(struct state_recompress *s) {
                 compress_frame(worker.second.compress.get(), nullptr);
 
                 worker.second.thread.join();
-
-                for(const auto& port : worker.second.ports){
-                        port.video_rxtx->join();
-                }
         }
         delete s;
 }
