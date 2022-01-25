@@ -48,6 +48,8 @@
 #include <chrono>
 #include <memory>
 #include <thread>
+#include <string>
+#include <string_view>
 
 
 #include "hd-rum-translator/hd-rum-recompress.h"
@@ -69,6 +71,7 @@ struct compress_state_deleter{
 using namespace std;
 
 struct recompress_output_port {
+        recompress_output_port() = default;
         recompress_output_port(struct module *parent,
                 std::string host, unsigned short rx_port,
                 unsigned short tx_port, int mtu, const char *fec, long long bitrate);
@@ -226,23 +229,37 @@ int recompress_add_port(struct state_recompress *s,
         return index_of_port;
 }
 
+static void extract_port(struct state_recompress *s,
+                const std::string& compress_cfg, int i,
+                recompress_output_port *move_to = nullptr)
+{
+        auto& worker = s->workers[compress_cfg];
+        {
+                std::unique_lock<std::mutex> lock(worker.ports_mut);
+                if(move_to)
+                        *move_to = std::move(worker.ports[i]);
+                worker.ports.erase(worker.ports.begin() + i);
+
+                if(worker.ports.empty()){
+                        //poison compress
+                        compress_frame(worker.compress.get(), nullptr);
+                        worker.thread.join();
+                        s->workers.erase(compress_cfg);
+                }
+        }
+
+        for(auto& p : s->index_to_port){
+                if(p.first == compress_cfg && p.second > i)
+                        p.second--;
+        }
+}
+
 void recompress_remove_port(struct state_recompress *s, int index){
         std::lock_guard<std::mutex> lock(s->mut);
         auto [compress_cfg, i] = s->index_to_port[index];
 
-        auto& worker = s->workers[compress_cfg];
-        {
-                std::unique_lock<std::mutex> lock(worker.ports_mut);
-                worker.ports.erase(worker.ports.begin() + i);
-        }
+        extract_port(s, compress_cfg, i);
         s->index_to_port.erase(s->index_to_port.begin() + index);
-
-        if(worker.ports.empty()){
-                //poison compress
-                compress_frame(worker.compress.get(), nullptr);
-                worker.thread.join();
-                s->workers.erase(compress_cfg);
-        }
 }
 
 uint32_t recompress_get_port_ssrc(struct state_recompress *s, int idx){
