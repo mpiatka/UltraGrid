@@ -218,11 +218,11 @@ static int move_port_to_worker(struct state_recompress *s, const std::string& co
         return index_in_worker;
 }
 
-int recompress_add_port(struct state_recompress *s,
+int recompress_add_port(struct state_recompress *s, struct module *parent_rep,
 		const char *host, const char *compress, unsigned short rx_port,
 		unsigned short tx_port, int mtu, const char *fec, long long bitrate)
 {
-        auto port = recompress_output_port(s->parent, host, rx_port, tx_port,
+        auto port = recompress_output_port(parent_rep, host, rx_port, tx_port,
                         mtu, fec, bitrate);
 
         std::lock_guard<std::mutex> lock(s->mut);
@@ -282,6 +282,24 @@ void recompress_port_set_active(struct state_recompress *s,
 
         std::unique_lock<std::mutex> worker_lock(s->workers[compress_cfg].ports_mut);
         s->workers[compress_cfg].ports[i].active = active;
+}
+
+int recompress_port_change_compress(struct state_recompress *s, int index,
+                const char *new_compress)
+{
+        std::lock_guard<std::mutex> lock(s->mut);
+        auto [old_compress, i] = s->index_to_port[index];
+
+        if(old_compress == new_compress)
+                return 0;
+
+        recompress_output_port port;
+        extract_port(s, old_compress, i, &port);
+        int index_in_worker = move_port_to_worker(s, new_compress, std::move(port));
+
+        s->index_to_port[index] = {new_compress, index_in_worker};
+
+        return 0;
 }
 
 static int worker_get_num_active_ports(const recompress_worker_ctx& worker){
