@@ -196,14 +196,9 @@ static void recompress_worker(struct recompress_worker_ctx *ctx){
         }
 }
 
-int recompress_add_port(struct state_recompress *s,
-		const char *host, const char *compress, unsigned short rx_port,
-		unsigned short tx_port, int mtu, const char *fec, long long bitrate)
+static int move_port_to_worker(struct state_recompress *s, const std::string& compress,
+                recompress_output_port&& port)
 {
-        auto port = recompress_output_port(s->parent, host, rx_port, tx_port,
-                        mtu, fec, bitrate);
-
-        std::lock_guard<std::mutex> lock(s->mut);
         auto& worker = s->workers[compress];
         if(!worker.compress){
                 worker.compress_cfg = compress;
@@ -216,12 +211,22 @@ int recompress_add_port(struct state_recompress *s,
                 worker.thread = std::thread(recompress_worker, &worker);
         }
 
-        int index_in_worker = -1;
-        {
-                std::lock_guard<std::mutex> lock(worker.ports_mut);
-                index_in_worker = worker.ports.size();
-                worker.ports.push_back(std::move(port));
-        }
+        std::lock_guard<std::mutex> lock(worker.ports_mut);
+        int index_in_worker = worker.ports.size();
+        worker.ports.push_back(std::move(port));
+
+        return index_in_worker;
+}
+
+int recompress_add_port(struct state_recompress *s,
+		const char *host, const char *compress, unsigned short rx_port,
+		unsigned short tx_port, int mtu, const char *fec, long long bitrate)
+{
+        auto port = recompress_output_port(s->parent, host, rx_port, tx_port,
+                        mtu, fec, bitrate);
+
+        std::lock_guard<std::mutex> lock(s->mut);
+        int index_in_worker = move_port_to_worker(s, compress, std::move(port));
 
         int index_of_port = s->index_to_port.size();
         s->index_to_port.emplace_back(compress, index_in_worker);
