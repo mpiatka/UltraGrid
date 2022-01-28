@@ -411,8 +411,8 @@ static void *writer(void *arg)
 
                         log_msg(LOG_LEVEL_ERROR, "Unable to create recompress!\n");
                     } else {
-						assert(idx == s->replicas.size() - 1);
-						recompress_port_set_active(s->recompress, idx, true);
+                        assert((unsigned) idx == s->replicas.size() - 1);
+                        recompress_port_set_active(s->recompress, idx, true);
                         log_msg(LOG_LEVEL_NOTICE, "Created new transcoding output port %s:%d:0x%08" PRIx32 ".\n", host, tx_port, recompress_get_port_ssrc(s->recompress, idx));
                     }
                 } else {
@@ -428,9 +428,9 @@ static void *writer(void *arg)
 
                         log_msg(LOG_LEVEL_ERROR, "Unable to create recompress!\n");
                     } else {
-						assert(idx == s->replicas.size() - 1);
-						recompress_port_set_active(s->recompress, idx, false);
-						log_msg(LOG_LEVEL_NOTICE, "Created new forwarding output port %s:%d.\n", host, tx_port);
+                        assert((unsigned) idx == s->replicas.size() - 1);
+                        recompress_port_set_active(s->recompress, idx, false);
+                        log_msg(LOG_LEVEL_NOTICE, "Created new forwarding output port %s:%d.\n", host, tx_port);
                     }
                 }
             } else {
