@@ -78,11 +78,7 @@ struct recompress_output_port {
 
         std::unique_ptr<ultragrid_rtp_video_rxtx> video_rxtx;
         std::string host;
-        int rx_port;
         int tx_port;
-        int mtu;
-        std::string fec;
-        long long bitrate;
 
         std::chrono::steady_clock::time_point t0;
         int frames;
@@ -111,11 +107,7 @@ recompress_output_port::recompress_output_port(struct module *parent,
                 std::string host, unsigned short rx_port,
                 unsigned short tx_port, int mtu, const char *fec, long long bitrate) :
         host(std::move(host)),
-        rx_port(rx_port),
         tx_port(tx_port),
-        mtu(mtu),
-        fec(fec ? fec : ""),
-        bitrate(bitrate),
         frames(0),
         active(true)
 {
