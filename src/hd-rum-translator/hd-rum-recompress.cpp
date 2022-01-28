@@ -196,7 +196,7 @@ static void recompress_worker(struct recompress_worker_ctx *ctx){
         }
 }
 
-static int move_port_to_worker(struct state_recompress *s, const std::string& compress,
+static int move_port_to_worker(struct state_recompress *s, const char *compress,
                 recompress_output_port&& port)
 {
         auto& worker = s->workers[compress];
