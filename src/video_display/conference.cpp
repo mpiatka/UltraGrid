@@ -57,13 +57,153 @@
 #include <unordered_map>
 #include <thread>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-align"
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#include <opencv2/core/mat.hpp>
+#include <opencv2/imgproc.hpp>
+#pragma GCC diagnostic pop
+
 #include "utils/profile_timer.hpp"
 
 #define MOD_NAME "[conference] "
 
 namespace{
+using clock = std::chrono::steady_clock;
 
 struct frame_deleter{ void operator()(video_frame *f){ vf_free(f); } };
+using Unique_frame = std::unique_ptr<video_frame, frame_deleter>;
+
+struct Participant{
+        void to_cv_frame();
+        Unique_frame frame;
+        clock::time_point last_time_recieved;
+
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+
+        cv::Mat luma;
+        cv::Mat chroma;
+};
+
+void Participant::to_cv_frame(){
+        if(!frame)
+                return;
+
+        assert(frame->color_spec == UYVY);
+        assert(frame->tile_count == 1);
+
+        auto& frame_tile = frame->tiles[0];
+        luma.create(cv::Size(frame_tile.width, frame_tile.height), CV_8UC1);
+        chroma.create(cv::Size(frame_tile.width / 2, frame_tile.height), CV_8UC2);
+
+        assert(luma.isContinuous() && chroma.isContinuous());
+        unsigned char *src = reinterpret_cast<unsigned char *>(frame_tile.data);
+        unsigned char *luma_dst = luma.ptr(0);
+        unsigned char *chroma_dst = chroma.ptr(0);
+        for(unsigned i = 0; i < frame_tile.data_len; i += 4){
+                *chroma_dst++ = *src++;
+                *luma_dst++ = *src++;
+                *chroma_dst++ = *src++;
+                *luma_dst++ = *src++;
+        }
+}
+
+class Video_mixer{
+public:
+        Video_mixer(int width, int height, codec_t color_space);
+
+        void process_frame(Unique_frame&& f);
+        void get_mixed(video_frame *result);
+
+private:
+        void compute_layout();
+        int width;
+        int height;
+        codec_t color_space;
+
+        cv::Mat mixed_luma;
+        cv::Mat mixed_chroma;
+
+        std::map<uint32_t, Participant> participants;
+};
+
+Video_mixer::Video_mixer(int width, int height, codec_t color_space):
+        width(width),
+        height(height),
+        color_space(color_space)
+{
+        mixed_luma.create(cv::Size(width, height), CV_8UC1);
+        mixed_chroma.create(cv::Size(width / 2, height), CV_8UC2);
+}
+
+void Video_mixer::compute_layout(){
+        unsigned tileW;
+        unsigned tileH;
+
+        if(participants.size() == 1){
+                auto& t = (*participants.begin()).second;
+                t.x = 0;
+                t.y = 0;
+                t.width = width;
+                t.height = height;
+                return;
+        }
+
+        unsigned rows = (unsigned) ceil(sqrt(participants.size()));
+        tileW = width / rows;
+        tileH = height / rows;
+
+        unsigned i = 0;
+        int pos = 0;
+        for(auto& [ssrc, t]: participants){
+                t.x = (pos % rows) * tileW;
+                t.y = (pos / rows) * tileH;
+
+                t.width = tileW;
+                t.height = tileH;
+
+                i++;
+                pos++;
+        }
+}
+
+void Video_mixer::process_frame(Unique_frame&& f){
+        auto iter = participants.find(f->ssrc);
+        auto& p = participants[f->ssrc];
+        p.frame = std::move(f);
+        p.last_time_recieved = clock::now();
+
+        if(iter == participants.end()){
+                compute_layout();
+                mixed_luma.setTo(0);
+                mixed_chroma.setTo(128);
+        }
+}
+
+void Video_mixer::get_mixed(video_frame *result){
+        for(auto& [ssrc, p] : participants){
+                p.to_cv_frame();
+
+                cv::Size l_size(p.width, p.height);
+                cv::Size c_size(p.width / 2, p.height);
+                cv::resize(p.luma, mixed_luma(cv::Rect(p.x, p.y, p.width, p.height)), l_size, 0, 0);
+                cv::resize(p.chroma, mixed_chroma(cv::Rect(p.x / 2, p.y, p.width / 2, p.height)), c_size, 0, 0);
+        }
+
+        unsigned char *dst = reinterpret_cast<unsigned char *>(result->tiles[0].data);
+        unsigned char *chroma_src = mixed_chroma.ptr(0);
+        unsigned char *luma_src = mixed_luma.ptr(0);
+        assert(mixed_luma.isContinuous() && mixed_chroma.isContinuous());
+        for(unsigned i = 0; i < result->tiles[0].data_len; i += 4){
+                *dst++ = *chroma_src++;
+                *dst++ = *luma_src++;
+                *dst++ = *chroma_src++;
+                *dst++ = *luma_src++;
+        }
+}
 
 }//anon namespace
 
@@ -73,24 +213,25 @@ static constexpr unsigned int IN_QUEUE_MAX_BUFFER_LEN = 5;
 struct state_conference_common{
         state_conference_common() = default;
         ~state_conference_common(){
+                if(real_display_thread.joinable())
+                        real_display_thread.join();
 
+                display_done(real_display);
         };
 
 
         struct module *parent = nullptr;
 
-        int width;
-        int height;
-        double fps;
-        struct video_desc display_desc = {};
+        struct video_desc desc = {};
 
         std::thread real_display_thread;
         struct display *real_display = {};
+        struct video_desc display_desc = {};
 
         std::mutex incoming_frames_lock;
         std::condition_variable incoming_frame_consumed;
         std::condition_variable new_incoming_frame_cv;
-        std::queue<std::unique_ptr<video_frame, frame_deleter>> incoming_frames;
+        std::queue<Unique_frame> incoming_frames;
 };
 
 struct state_conference {
@@ -127,13 +268,15 @@ static void *display_conference_init(struct module *parent, const char *fmt, uns
         auto s = std::make_unique<state_conference>();
         char *fmt_copy = NULL;
         const char *requested_display = "gl";
-        const char *cfg = NULL;
+        const char *cfg = "";
 
         log_msg(LOG_LEVEL_VERBOSE, MOD_NAME "init fmt: %s\n", fmt);
 
-        int width;
-        int height;
-        double fps;
+        video_desc desc;
+        desc.color_spec = UYVY;
+        desc.interlacing = PROGRESSIVE;
+        desc.tile_count = 1;
+        desc.fps = 0;
 
         if(fmt && strlen(fmt) > 0){
                 if (isdigit(fmt[0])) { // fork
@@ -168,7 +311,7 @@ static void *display_conference_init(struct module *parent, const char *fmt, uns
                                 free(tmp);
                                 return &display_init_noerr;
                         }
-                        width = atoi(item);
+                        desc.width = atoi(item);
                         item = strchr(item, ':');
                         if(!item || strlen(item + 1) == 0){
                                 show_help();
@@ -176,9 +319,9 @@ static void *display_conference_init(struct module *parent, const char *fmt, uns
                                 free(tmp);
                                 return &display_init_noerr;
                         }
-                        height = atoi(++item);
+                        desc.height = atoi(++item);
                         if((item = strchr(item, ':'))){
-                                fps = atoi(++item);
+                                desc.fps = atoi(++item);
                         }
                         free(tmp);
                 }
@@ -189,6 +332,7 @@ static void *display_conference_init(struct module *parent, const char *fmt, uns
 
         s->common = std::make_shared<state_conference_common>();
         s->common->parent = parent;
+        s->common->desc = desc;
 
         int ret = initialize_video_display(parent, requested_display, cfg,
                         flags, nullptr, &s->common->real_display);
@@ -207,21 +351,9 @@ static void check_reconf(struct state_conference_common *s, struct video_desc de
 {
         if (!video_desc_eq(desc, s->display_desc)) {
                 s->display_desc = desc;
-                fprintf(stderr, "RECONFIGURED\n");
+                log_msg(LOG_LEVEL_VERBOSE, MOD_NAME "reconfiguring real display\n");
                 display_reconfigure(s->real_display, s->display_desc, VIDEO_NORMAL);
         }
-}
-
-static video_desc get_video_desc(std::shared_ptr<struct state_conference_common> s){
-        video_desc desc;
-        desc.width = s->width;
-        desc.height = s->height;
-        desc.fps = s->fps;
-        desc.color_spec = UYVY;
-        desc.interlacing = PROGRESSIVE;
-        desc.tile_count = 1;
-
-        return desc;
 }
 
 static auto extract_incoming_frame(state_conference_common *s){
@@ -241,15 +373,34 @@ static void display_conference_run(void *state)
         PROFILE_FUNC;
         auto s = static_cast<state_conference *>(state)->common;
 
+        Video_mixer mixer(s->desc.width, s->desc.height, UYVY);
+
+        auto next_frame_time = clock::now();
         for(;;){
                 auto frame = extract_incoming_frame(s.get());
-
                 if(!frame){
                         display_put_frame(s->real_display, nullptr, PUTF_BLOCKING);
                         break;
                 }
 
-                auto now = std::chrono::steady_clock::now();
+                mixer.process_frame(std::move(frame));
+
+                auto now = clock::now();
+                if(next_frame_time <= now){
+                        check_reconf(s.get(), s->desc);
+                        auto disp_frame = display_get_frame(s->real_display);
+
+                        mixer.get_mixed(disp_frame);
+
+                        display_put_frame(s->real_display, disp_frame, PUTF_BLOCKING);
+
+                        using namespace std::chrono_literals;
+                        next_frame_time += std::chrono::duration_cast<clock::duration>(1s / s->desc.fps);
+                        if(next_frame_time < now){
+                                //log_msg(LOG_LEVEL_WARNING, MOD_NAME "unable to keep up");
+                                next_frame_time = now;
+                        }
+                }
         }
 
         return;
@@ -265,9 +416,17 @@ static int display_conference_get_property(void *state, int property, void *val,
                 *len = sizeof(struct multi_sources_supp_info);
                 return TRUE;
 
-        } else {
-                return display_ctl_property(s->real_display, property, val, len);
+        } else if(property == DISPLAY_PROPERTY_CODECS) {
+                codec_t codecs[] = {UYVY};
+
+                memcpy(val, codecs, sizeof(codecs));
+
+                *len = sizeof(codecs);
+
+                return TRUE;
         }
+        
+        return display_ctl_property(s->real_display, property, val, len);
 }
 
 static int display_conference_reconfigure(void *state, struct video_desc desc)
@@ -299,6 +458,7 @@ static int display_conference_reconfigure_audio(void *state, int quant_samples, 
 static void display_conference_done(void *state)
 {
         auto s = static_cast<state_conference *>(state);
+
         delete s;
 }
 
