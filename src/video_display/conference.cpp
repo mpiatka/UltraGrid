@@ -95,6 +95,8 @@ void Participant::to_cv_frame(){
         assert(frame->color_spec == UYVY);
         assert(frame->tile_count == 1);
 
+        PROFILE_FUNC;
+
         auto& frame_tile = frame->tiles[0];
         luma.create(cv::Size(frame_tile.width, frame_tile.height), CV_8UC1);
         chroma.create(cv::Size(frame_tile.width / 2, frame_tile.height), CV_8UC2);
@@ -178,13 +180,15 @@ void Video_mixer::process_frame(Unique_frame&& f){
 
         if(iter == participants.end()){
                 compute_layout();
-                mixed_luma.setTo(0);
+                mixed_luma.setTo(16);
                 mixed_chroma.setTo(128);
         }
 }
 
 void Video_mixer::get_mixed(video_frame *result){
+        PROFILE_FUNC;
         for(auto& [ssrc, p] : participants){
+                PROFILE_DETAIL("process participant");
                 p.to_cv_frame();
 
                 cv::Size l_size(p.width, p.height);
@@ -197,6 +201,7 @@ void Video_mixer::get_mixed(video_frame *result){
         unsigned char *chroma_src = mixed_chroma.ptr(0);
         unsigned char *luma_src = mixed_luma.ptr(0);
         assert(mixed_luma.isContinuous() && mixed_chroma.isContinuous());
+        PROFILE_DETAIL("Convert to ug frame");
         for(unsigned i = 0; i < result->tiles[0].data_len; i += 4){
                 *dst++ = *chroma_src++;
                 *dst++ = *luma_src++;
@@ -464,6 +469,7 @@ static void display_conference_done(void *state)
 
 static struct video_frame *display_conference_getf(void *state)
 {
+        PROFILE_FUNC;
         auto s = static_cast<state_conference *>(state);
 
         return vf_alloc_desc_data(s->desc);
