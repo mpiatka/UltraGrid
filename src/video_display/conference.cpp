@@ -64,6 +64,17 @@
 #include <opencv2/imgproc.hpp>
 #pragma GCC diagnostic pop
 
+#ifdef __SSSE3__
+#include "tmmintrin.h"
+// compat with older Clang compiler
+#ifndef _mm_bslli_si128
+#define _mm_bslli_si128 _mm_slli_si128
+#endif
+#ifndef _mm_bsrli_si128
+#define _mm_bsrli_si128 _mm_srli_si128
+#endif
+#endif
+
 #include "utils/profile_timer.hpp"
 
 #define MOD_NAME "[conference] "
@@ -105,11 +116,41 @@ void Participant::to_cv_frame(){
         unsigned char *src = reinterpret_cast<unsigned char *>(frame_tile.data);
         unsigned char *luma_dst = luma.ptr(0);
         unsigned char *chroma_dst = chroma.ptr(0);
-        for(unsigned i = 0; i < frame_tile.data_len; i += 4){
+
+        unsigned src_len = frame_tile.data_len;
+
+#ifdef __SSSE3__
+        __m128i uv_shuff = _mm_set_epi8(255, 255, 255, 255, 255, 255, 255, 255, 14, 12, 10, 8, 6, 4, 2, 0);
+        __m128i y_shuff = _mm_set_epi8(255, 255, 255, 255, 255, 255, 255, 255, 15, 13, 11, 9, 7, 5, 3, 1);
+        while(src_len >= 32){
+                __m128i uyvy = _mm_lddqu_si128((__m128i *)(void *) src);
+                src += 16;
+
+                __m128i y_low = _mm_shuffle_epi8(uyvy, y_shuff);
+                __m128i uv_low = _mm_shuffle_epi8(uyvy, uv_shuff);
+                
+                uyvy = _mm_lddqu_si128((__m128i *)(void *) src);
+                src += 16;
+
+                __m128i y_high = _mm_shuffle_epi8(uyvy, y_shuff);
+                __m128i uv_high = _mm_shuffle_epi8(uyvy, uv_shuff);
+
+                _mm_store_si128((__m128i *)(void *) luma_dst, _mm_or_si128(y_low, _mm_slli_si128(y_high, 8)));
+                luma_dst += 16;
+                _mm_store_si128((__m128i *)(void *) chroma_dst, _mm_or_si128(uv_low, _mm_slli_si128(uv_high, 8)));
+                chroma_dst += 16;
+
+                src_len -= 32;
+        }
+#endif
+
+        while(src_len >= 4){
                 *chroma_dst++ = *src++;
                 *luma_dst++ = *src++;
                 *chroma_dst++ = *src++;
                 *luma_dst++ = *src++;
+
+                src_len -= 4;
         }
 }
 
@@ -188,13 +229,14 @@ void Video_mixer::process_frame(Unique_frame&& f){
 void Video_mixer::get_mixed(video_frame *result){
         PROFILE_FUNC;
         for(auto& [ssrc, p] : participants){
-                PROFILE_DETAIL("process participant");
                 p.to_cv_frame();
 
+                PROFILE_DETAIL("resize participant");
                 cv::Size l_size(p.width, p.height);
                 cv::Size c_size(p.width / 2, p.height);
                 cv::resize(p.luma, mixed_luma(cv::Rect(p.x, p.y, p.width, p.height)), l_size, 0, 0);
                 cv::resize(p.chroma, mixed_chroma(cv::Rect(p.x / 2, p.y, p.width / 2, p.height)), c_size, 0, 0);
+                PROFILE_DETAIL("");
         }
 
         unsigned char *dst = reinterpret_cast<unsigned char *>(result->tiles[0].data);
@@ -202,11 +244,39 @@ void Video_mixer::get_mixed(video_frame *result){
         unsigned char *luma_src = mixed_luma.ptr(0);
         assert(mixed_luma.isContinuous() && mixed_chroma.isContinuous());
         PROFILE_DETAIL("Convert to ug frame");
-        for(unsigned i = 0; i < result->tiles[0].data_len; i += 4){
+        unsigned dst_len = result->tiles[0].data_len;
+
+#ifdef __SSSE3__
+        __m128i y_shuff = _mm_set_epi8(7, 0xFF, 6, 0xFF, 5, 0xFF, 4, 0xFF, 3, 0xFF, 2, 0xFF, 1, 0xFF, 0, 0xFF);
+        __m128i uv_shuff = _mm_set_epi8(0xFF, 7, 0xFF, 6, 0xFF, 5, 0xFF, 4, 0xFF, 3, 0xFF, 2, 0xFF, 1, 0xFF, 0);
+        while(dst_len >= 32){
+               __m128i luma = _mm_load_si128((__m128i const*)(const void *) luma_src); 
+               luma_src += 16;
+               __m128i chroma = _mm_load_si128((__m128i const*)(const void *) chroma_src); 
+               chroma_src += 16;
+
+               __m128i res = _mm_or_si128(_mm_shuffle_epi8(luma, y_shuff), _mm_shuffle_epi8(chroma, uv_shuff));
+               _mm_storeu_si128((__m128i *)(void *) dst, res);
+               dst += 16;
+
+               luma = _mm_srli_si128(luma, 8);
+               chroma = _mm_srli_si128(chroma, 8);
+
+               res = _mm_or_si128(_mm_shuffle_epi8(luma, y_shuff), _mm_shuffle_epi8(chroma, uv_shuff));
+               _mm_storeu_si128((__m128i *)(void *) dst, res);
+               dst += 16;
+
+               dst_len -= 32;
+        }
+#endif
+
+        while(dst_len >= 4){
                 *dst++ = *chroma_src++;
                 *dst++ = *luma_src++;
                 *dst++ = *chroma_src++;
                 *dst++ = *luma_src++;
+
+                dst_len -= 4;
         }
 }
 
