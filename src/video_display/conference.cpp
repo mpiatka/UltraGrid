@@ -228,7 +228,16 @@ void Video_mixer::process_frame(Unique_frame&& f){
 
 void Video_mixer::get_mixed(video_frame *result){
         PROFILE_FUNC;
-        for(auto& [ssrc, p] : participants){
+
+        auto now = clock::now();
+        for(auto it = participants.begin(); it != participants.end();){
+                auto& p = it->second;
+                if(now - p.last_time_recieved > std::chrono::seconds(2)){
+                        it = participants.erase(it);
+                        compute_layout();
+                        continue;
+                }
+
                 p.to_cv_frame();
 
                 PROFILE_DETAIL("resize participant");
@@ -236,6 +245,7 @@ void Video_mixer::get_mixed(video_frame *result){
                 cv::Size c_size(p.width / 2, p.height);
                 cv::resize(p.luma, mixed_luma(cv::Rect(p.x, p.y, p.width, p.height)), l_size, 0, 0);
                 cv::resize(p.chroma, mixed_chroma(cv::Rect(p.x / 2, p.y, p.width / 2, p.height)), c_size, 0, 0);
+                ++it;
                 PROFILE_DETAIL("");
         }
 
