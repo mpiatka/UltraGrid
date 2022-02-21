@@ -83,11 +83,11 @@ namespace{
 using clock = std::chrono::steady_clock;
 
 struct frame_deleter{ void operator()(video_frame *f){ vf_free(f); } };
-using Unique_frame = std::unique_ptr<video_frame, frame_deleter>;
+using unique_frame = std::unique_ptr<video_frame, frame_deleter>;
 
 struct Participant{
         void to_cv_frame();
-        Unique_frame frame;
+        unique_frame frame;
         clock::time_point last_time_recieved;
 
         int x = 0;
@@ -158,7 +158,7 @@ class Video_mixer{
 public:
         Video_mixer(int width, int height, codec_t color_space);
 
-        void process_frame(Unique_frame&& f);
+        void process_frame(unique_frame&& f);
         void get_mixed(video_frame *result);
 
 private:
@@ -213,7 +213,7 @@ void Video_mixer::compute_layout(){
         }
 }
 
-void Video_mixer::process_frame(Unique_frame&& f){
+void Video_mixer::process_frame(unique_frame&& f){
         auto iter = participants.find(f->ssrc);
         auto& p = participants[f->ssrc];
         p.frame = std::move(f);
@@ -290,29 +290,25 @@ void Video_mixer::get_mixed(video_frame *result){
         }
 }
 
+struct display_deleter{ void operator()(display *d){ display_done(d); } };
+using unique_disp = std::unique_ptr<display, display_deleter>;
 }//anon namespace
 
 static constexpr std::chrono::milliseconds SOURCE_TIMEOUT(500);
 static constexpr unsigned int IN_QUEUE_MAX_BUFFER_LEN = 5;
 
 struct state_conference_common{
-        state_conference_common() = default;
-        ~state_conference_common(){
-                display_done(real_display);
-        };
-
-
         struct module *parent = nullptr;
 
         struct video_desc desc = {};
 
-        struct display *real_display = {};
+        unique_disp real_display;
         struct video_desc display_desc = {};
 
         std::mutex incoming_frames_lock;
         std::condition_variable incoming_frame_consumed;
         std::condition_variable new_incoming_frame_cv;
-        std::queue<Unique_frame> incoming_frames;
+        std::queue<unique_frame> incoming_frames;
 };
 
 struct state_conference {
@@ -411,13 +407,16 @@ static void *display_conference_init(struct module *parent, const char *fmt, uns
         s->common->parent = parent;
         s->common->desc = desc;
 
+        struct display *d_ptr;
         int ret = initialize_video_display(parent, requested_display, cfg,
-                        flags, nullptr, &s->common->real_display);
+                        flags, nullptr, &d_ptr);
 
         if(ret != 0){
                 log_msg(LOG_LEVEL_ERROR, MOD_NAME "Unable to init real display\n");
                 return nullptr;
         }
+
+        s->common->real_display.reset(d_ptr);
 
         return s.release();
 }
@@ -427,7 +426,7 @@ static void check_reconf(struct state_conference_common *s, struct video_desc de
         if (!video_desc_eq(desc, s->display_desc)) {
                 s->display_desc = desc;
                 log_msg(LOG_LEVEL_VERBOSE, MOD_NAME "reconfiguring real display\n");
-                display_reconfigure(s->real_display, s->display_desc, VIDEO_NORMAL);
+                display_reconfigure(s->real_display.get(), s->display_desc, VIDEO_NORMAL);
         }
 }
 
@@ -451,7 +450,7 @@ static void display_conference_worker(std::shared_ptr<state_conference_common> s
         for(;;){
                 auto frame = extract_incoming_frame(s.get());
                 if(!frame){
-                        display_put_frame(s->real_display, nullptr, PUTF_BLOCKING);
+                        display_put_frame(s->real_display.get(), nullptr, PUTF_BLOCKING);
                         break;
                 }
 
@@ -460,11 +459,11 @@ static void display_conference_worker(std::shared_ptr<state_conference_common> s
                 auto now = clock::now();
                 if(next_frame_time <= now){
                         check_reconf(s.get(), s->desc);
-                        auto disp_frame = display_get_frame(s->real_display);
+                        auto disp_frame = display_get_frame(s->real_display.get());
 
                         mixer.get_mixed(disp_frame);
 
-                        display_put_frame(s->real_display, disp_frame, PUTF_BLOCKING);
+                        display_put_frame(s->real_display.get(), disp_frame, PUTF_BLOCKING);
 
                         using namespace std::chrono_literals;
                         next_frame_time += std::chrono::duration_cast<clock::duration>(1s / s->desc.fps);
@@ -485,7 +484,7 @@ static void display_conference_run(void *state)
 
         std::thread worker = std::thread(display_conference_worker, s);
 
-        display_run_this_thread(s->real_display);
+        display_run_this_thread(s->real_display.get());
 
         worker.join();
 }
@@ -510,7 +509,7 @@ static int display_conference_get_property(void *state, int property, void *val,
                 return TRUE;
         }
         
-        return display_ctl_property(s->real_display, property, val, len);
+        return display_ctl_property(s->real_display.get(), property, val, len);
 }
 
 static int display_conference_reconfigure(void *state, struct video_desc desc)
@@ -584,7 +583,7 @@ static int display_conference_putf(void *state, struct video_frame *frame, int f
 static auto display_conference_needs_mainloop(void *state)
 {
         auto s = static_cast<struct state_conference *>(state)->common;
-        return display_needs_mainloop(s->real_display);
+        return display_needs_mainloop(s->real_display.get());
 }
 
 static const struct video_display_info display_conference_info = {
