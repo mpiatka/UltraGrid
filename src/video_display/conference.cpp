@@ -298,9 +298,6 @@ static constexpr unsigned int IN_QUEUE_MAX_BUFFER_LEN = 5;
 struct state_conference_common{
         state_conference_common() = default;
         ~state_conference_common(){
-                if(real_display_thread.joinable())
-                        real_display_thread.join();
-
                 display_done(real_display);
         };
 
@@ -309,7 +306,6 @@ struct state_conference_common{
 
         struct video_desc desc = {};
 
-        std::thread real_display_thread;
         struct display *real_display = {};
         struct video_desc display_desc = {};
 
@@ -342,10 +338,6 @@ static void show_help(){
         printf("Conference display\n");
         printf("Usage:\n");
         printf("\t-d conference:<display_config>#<width>:<height>:[fps]\n");
-}
-
-static void real_display_runner(struct display *disp) {
-        display_run(disp);
 }
 
 static void *display_conference_init(struct module *parent, const char *fmt, unsigned int flags)
@@ -426,8 +418,6 @@ static void *display_conference_init(struct module *parent, const char *fmt, uns
                 log_msg(LOG_LEVEL_ERROR, MOD_NAME "Unable to init real display\n");
                 return nullptr;
         }
-        s->common->real_display_thread = std::thread(real_display_runner,
-                        s->common->real_display);
 
         return s.release();
 }
@@ -453,11 +443,8 @@ static auto extract_incoming_frame(state_conference_common *s){
         return frame;
 }
 
-static void display_conference_run(void *state)
-{
+static void display_conference_worker(std::shared_ptr<state_conference_common> s){
         PROFILE_FUNC;
-        auto s = static_cast<state_conference *>(state)->common;
-
         Video_mixer mixer(s->desc.width, s->desc.height, UYVY);
 
         auto next_frame_time = clock::now();
@@ -489,6 +476,18 @@ static void display_conference_run(void *state)
         }
 
         return;
+}
+
+static void display_conference_run(void *state)
+{
+        PROFILE_FUNC;
+        auto s = static_cast<state_conference *>(state)->common;
+
+        std::thread worker = std::thread(display_conference_worker, s);
+
+        display_run_this_thread(s->real_display);
+
+        worker.join();
 }
 
 static int display_conference_get_property(void *state, int property, void *val, size_t *len)
@@ -582,6 +581,12 @@ static int display_conference_putf(void *state, struct video_frame *frame, int f
         return 0;
 }
 
+static auto display_conference_needs_mainloop(void *state)
+{
+        auto s = static_cast<struct state_conference *>(state)->common;
+        return display_needs_mainloop(s->real_display);
+}
+
 static const struct video_display_info display_conference_info = {
         [](struct device_info **available_cards, int *count, void (**deleter)(void *)) {
                 UNUSED(deleter);
@@ -597,7 +602,7 @@ static const struct video_display_info display_conference_info = {
         display_conference_get_property,
         display_conference_put_audio_frame,
         display_conference_reconfigure_audio,
-        DISPLAY_DOESNT_NEED_MAINLOOP,
+        display_conference_needs_mainloop
 };
 
 REGISTER_HIDDEN_MODULE(conference, &display_conference_info, LIBRARY_CLASS_VIDEO_DISPLAY, VIDEO_DISPLAY_ABI_VERSION);
