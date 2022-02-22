@@ -87,8 +87,13 @@ using unique_frame = std::unique_ptr<video_frame, frame_deleter>;
 
 struct Participant{
         void to_cv_frame();
+        void frame_recieved(unique_frame &&f);
+        void set_pos_keep_aspect(int x, int y, int w, int h);
+
         unique_frame frame;
         clock::time_point last_time_recieved;
+        int src_w = 0;
+        int src_h = 0;
 
         int x = 0;
         int y = 0;
@@ -98,6 +103,32 @@ struct Participant{
         cv::Mat luma;
         cv::Mat chroma;
 };
+
+void Participant::frame_recieved(unique_frame &&f){
+        frame = std::move(f);
+        last_time_recieved = clock::now();
+
+        src_w = frame->tiles[0].width;
+        src_h = frame->tiles[0].height;
+}
+
+void Participant::set_pos_keep_aspect(int x, int y, int w, int h){
+        double fx = static_cast<double>(w) / src_w;
+        double fy = static_cast<double>(h) / src_h;
+
+        if(fx > fy){
+                height = h;
+                width = src_w * fy;
+                x += (w - width) / 2;
+        } else {
+                height = src_h * fx;
+                width = w;
+                y += (h - height) / 2;
+        }
+
+        this->x = x;
+        this->y = y;
+}
 
 void Participant::to_cv_frame(){
         if(!frame)
@@ -163,6 +194,7 @@ public:
 
 private:
         void compute_layout();
+        void tiled_layout();
         int width;
         int height;
         codec_t color_space;
@@ -182,42 +214,35 @@ Video_mixer::Video_mixer(int width, int height, codec_t color_space):
         mixed_chroma.create(cv::Size(width / 2, height), CV_8UC2);
 }
 
-void Video_mixer::compute_layout(){
-        unsigned tileW;
-        unsigned tileH;
+void Video_mixer::tiled_layout(){
+        const unsigned rows = (unsigned) ceil(sqrt(participants.size()));
+        const unsigned tile_width = width / rows;
+        const unsigned tile_height = height / rows;
 
+        int pos = 0;
+        for(auto& [ssrc, t]: participants){
+                t.set_pos_keep_aspect((pos % rows) * tile_width,
+                                (pos / rows) * tile_height,
+                                tile_width, tile_height);
+
+                pos++;
+        }
+}
+
+void Video_mixer::compute_layout(){
         if(participants.size() == 1){
                 auto& t = (*participants.begin()).second;
-                t.x = 0;
-                t.y = 0;
-                t.width = width;
-                t.height = height;
+                (*participants.begin()).second.set_pos_keep_aspect(0, 0, width, height);
                 return;
         }
 
-        unsigned rows = (unsigned) ceil(sqrt(participants.size()));
-        tileW = width / rows;
-        tileH = height / rows;
-
-        unsigned i = 0;
-        int pos = 0;
-        for(auto& [ssrc, t]: participants){
-                t.x = (pos % rows) * tileW;
-                t.y = (pos / rows) * tileH;
-
-                t.width = tileW;
-                t.height = tileH;
-
-                i++;
-                pos++;
-        }
+        tiled_layout();
 }
 
 void Video_mixer::process_frame(unique_frame&& f){
         auto iter = participants.find(f->ssrc);
         auto& p = participants[f->ssrc];
-        p.frame = std::move(f);
-        p.last_time_recieved = clock::now();
+        p.frame_recieved(std::move(f));
 
         if(iter == participants.end()){
                 compute_layout();
