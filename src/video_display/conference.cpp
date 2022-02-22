@@ -92,13 +92,13 @@ struct Participant{
 
         unique_frame frame;
         clock::time_point last_time_recieved;
-        int src_w = 0;
-        int src_h = 0;
+        unsigned src_w = 0;
+        unsigned src_h = 0;
 
-        int x = 0;
-        int y = 0;
-        int width = 0;
-        int height = 0;
+        unsigned x = 0;
+        unsigned y = 0;
+        unsigned width = 0;
+        unsigned height = 0;
 
         cv::Mat luma;
         cv::Mat chroma;
@@ -195,9 +195,12 @@ public:
 private:
         void recompute_layout();
         void tiled_layout();
-        int width;
-        int height;
+        void one_big_layout();
+        unsigned width;
+        unsigned height;
         codec_t color_space;
+
+        uint32_t primary_ssrc = 0;
 
         cv::Mat mixed_luma;
         cv::Mat mixed_chroma;
@@ -229,6 +232,26 @@ void Video_mixer::tiled_layout(){
         }
 }
 
+void Video_mixer::one_big_layout(){
+        const unsigned small_height = height / 4;
+        const unsigned big_height = small_height * 3;
+        const unsigned tile_width = width / 4;
+
+        int pos = 0;
+        for(auto& [ssrc, t]: participants){
+                if(ssrc == primary_ssrc){
+                        t.set_pos_keep_aspect(0, 0, width, big_height);
+                        continue;
+                }
+
+                if(pos * tile_width > width)
+                        break;
+
+                t.set_pos_keep_aspect(pos * tile_width, big_height, tile_width, small_height);
+                pos++;
+        }
+}
+
 void Video_mixer::recompute_layout(){
         mixed_luma.setTo(16);
         mixed_chroma.setTo(128);
@@ -238,10 +261,11 @@ void Video_mixer::recompute_layout(){
                 return;
         }
 
-        tiled_layout();
+        one_big_layout();
 }
 
 void Video_mixer::process_frame(unique_frame&& f){
+        if(!primary_ssrc) primary_ssrc = f->ssrc;
         auto iter = participants.find(f->ssrc);
         auto& p = participants[f->ssrc];
         p.frame_recieved(std::move(f));
