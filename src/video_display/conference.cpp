@@ -193,7 +193,7 @@ public:
         void get_mixed(video_frame *result);
 
 private:
-        void compute_layout();
+        void recompute_layout();
         void tiled_layout();
         int width;
         int height;
@@ -229,9 +229,11 @@ void Video_mixer::tiled_layout(){
         }
 }
 
-void Video_mixer::compute_layout(){
+void Video_mixer::recompute_layout(){
+        mixed_luma.setTo(16);
+        mixed_chroma.setTo(128);
+
         if(participants.size() == 1){
-                auto& t = (*participants.begin()).second;
                 (*participants.begin()).second.set_pos_keep_aspect(0, 0, width, height);
                 return;
         }
@@ -245,9 +247,7 @@ void Video_mixer::process_frame(unique_frame&& f){
         p.frame_recieved(std::move(f));
 
         if(iter == participants.end()){
-                compute_layout();
-                mixed_luma.setTo(16);
-                mixed_chroma.setTo(128);
+                recompute_layout();
         }
 }
 
@@ -255,14 +255,21 @@ void Video_mixer::get_mixed(video_frame *result){
         PROFILE_FUNC;
 
         auto now = clock::now();
+
+        bool recompute = false;
         for(auto it = participants.begin(); it != participants.end();){
                 auto& p = it->second;
                 if(now - p.last_time_recieved > std::chrono::seconds(2)){
                         it = participants.erase(it);
-                        compute_layout();
+                        recompute = true;
                         continue;
                 }
+                it++;
+        }
+        if(recompute)
+                recompute_layout();
 
+        for(auto&& [ssrc, p] : participants){
                 p.to_cv_frame();
 
                 PROFILE_DETAIL("resize participant");
@@ -270,7 +277,6 @@ void Video_mixer::get_mixed(video_frame *result){
                 cv::Size c_size(p.width / 2, p.height);
                 cv::resize(p.luma, mixed_luma(cv::Rect(p.x, p.y, p.width, p.height)), l_size, 0, 0);
                 cv::resize(p.chroma, mixed_chroma(cv::Rect(p.x / 2, p.y, p.width / 2, p.height)), c_size, 0, 0);
-                ++it;
                 PROFILE_DETAIL("");
         }
 
