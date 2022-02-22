@@ -485,31 +485,32 @@ static void check_reconf(struct state_conference_common *s, struct video_desc de
         }
 }
 
-static auto extract_incoming_frame(state_conference_common *s){
-        std::unique_lock<std::mutex> lock(s->incoming_frames_lock);
-        s->new_incoming_frame_cv.wait(lock,
-                        [s]{ return !s->incoming_frames.empty(); });
-        auto frame = std::move(s->incoming_frames.front());
-        s->incoming_frames.pop();
-        lock.unlock();
-        s->incoming_frame_consumed.notify_one();
-
-        return frame;
-}
-
 static void display_conference_worker(std::shared_ptr<state_conference_common> s){
         PROFILE_FUNC;
         Video_mixer mixer(s->desc.width, s->desc.height, UYVY);
 
-        auto next_frame_time = clock::now();
+        auto next_frame_time = clock::now() + std::chrono::hours(1); //workaround for gcc bug 58931
+        auto last_frame_time = clock::time_point::min();
         for(;;){
-                auto frame = extract_incoming_frame(s.get());
-                if(!frame){
-                        display_put_frame(s->real_display.get(), nullptr, PUTF_BLOCKING);
-                        break;
-                }
+                unique_frame frame;
 
-                mixer.process_frame(std::move(frame));
+                auto wait_p = [s]{ return !s->incoming_frames.empty(); };
+                std::unique_lock<std::mutex> lock(s->incoming_frames_lock);
+                bool have_frame = s->new_incoming_frame_cv.wait_until(lock, next_frame_time, wait_p);
+                if(have_frame){
+                        frame = std::move(s->incoming_frames.front());
+                        s->incoming_frames.pop();
+                }
+                lock.unlock();
+
+                if(have_frame){
+                        s->incoming_frame_consumed.notify_one();
+                        if(!frame){
+                                display_put_frame(s->real_display.get(), nullptr, PUTF_BLOCKING);
+                                break;
+                        }
+                        mixer.process_frame(std::move(frame));
+                }
 
                 auto now = clock::now();
                 if(next_frame_time <= now){
@@ -520,10 +521,14 @@ static void display_conference_worker(std::shared_ptr<state_conference_common> s
 
                         display_put_frame(s->real_display.get(), disp_frame, PUTF_BLOCKING);
 
+                        last_frame_time = next_frame_time;
+                        next_frame_time = now + std::chrono::hours(1);
+                } else {
+                        if(!have_frame)
+                                log_msg(LOG_LEVEL_WARNING, MOD_NAME "Woke up without new frame and before render time. This should not happen.\n");
                         using namespace std::chrono_literals;
-                        next_frame_time += std::chrono::duration_cast<clock::duration>(1s / s->desc.fps);
-                        if(next_frame_time < now){
-                                //log_msg(LOG_LEVEL_WARNING, MOD_NAME "unable to keep up");
+                        next_frame_time = last_frame_time + std::chrono::duration_cast<clock::duration>(1s / s->desc.fps);
+                        if(next_frame_time <= now){
                                 next_frame_time = now;
                         }
                 }
