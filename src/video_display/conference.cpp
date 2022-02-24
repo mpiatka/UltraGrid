@@ -266,7 +266,7 @@ void Video_mixer::recompute_layout(){
         }
 
         if(participants.size() == 1){
-                (*participants.begin()).second.set_pos_keep_aspect(0, 0, width, height);
+                participants.begin()->second.set_pos_keep_aspect(0, 0, width, height);
                 return;
         }
 
