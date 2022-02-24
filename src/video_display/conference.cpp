@@ -261,6 +261,10 @@ void Video_mixer::recompute_layout(){
         mixed_luma.setTo(16);
         mixed_chroma.setTo(128);
 
+        if(!primary_ssrc && !participants.empty()){
+                primary_ssrc = participants.begin()->first;
+        }
+
         if(participants.size() == 1){
                 (*participants.begin()).second.set_pos_keep_aspect(0, 0, width, height);
                 return;
@@ -277,7 +281,6 @@ void Video_mixer::recompute_layout(){
 }
 
 void Video_mixer::process_frame(unique_frame&& f){
-        if(!primary_ssrc) primary_ssrc = f->ssrc;
         auto iter = participants.find(f->ssrc);
         auto& p = participants[f->ssrc];
         p.frame_recieved(std::move(f));
@@ -296,6 +299,9 @@ void Video_mixer::get_mixed(video_frame *result){
         for(auto it = participants.begin(); it != participants.end();){
                 auto& p = it->second;
                 if(now - p.last_time_recieved > std::chrono::seconds(2)){
+                        if(it->first == primary_ssrc)
+                                primary_ssrc = 0;
+
                         it = participants.erase(it);
                         recompute = true;
                         continue;
