@@ -187,7 +187,9 @@ void Participant::to_cv_frame(){
 
 class Video_mixer{
 public:
-        Video_mixer(int width, int height, codec_t color_space);
+        enum class Layout{ Tiled, One_big };
+
+        Video_mixer(int width, int height, codec_t color_space, Layout l = Layout::Tiled);
 
         void process_frame(unique_frame&& f);
         void get_mixed(video_frame *result);
@@ -196,9 +198,11 @@ private:
         void recompute_layout();
         void tiled_layout();
         void one_big_layout();
+
         unsigned width;
         unsigned height;
         codec_t color_space;
+        Layout layout;
 
         uint32_t primary_ssrc = 0;
 
@@ -208,10 +212,11 @@ private:
         std::map<uint32_t, Participant> participants;
 };
 
-Video_mixer::Video_mixer(int width, int height, codec_t color_space):
+Video_mixer::Video_mixer(int width, int height, codec_t color_space, Layout layout):
         width(width),
         height(height),
-        color_space(color_space)
+        color_space(color_space),
+        layout(layout)
 {
         mixed_luma.create(cv::Size(width, height), CV_8UC1);
         mixed_chroma.create(cv::Size(width / 2, height), CV_8UC2);
@@ -261,7 +266,14 @@ void Video_mixer::recompute_layout(){
                 return;
         }
 
-        one_big_layout();
+        switch(layout){
+        case Layout::Tiled:
+                tiled_layout();
+                break;
+        case Layout::One_big:
+                one_big_layout();
+                break;
+        }
 }
 
 void Video_mixer::process_frame(unique_frame&& f){
@@ -356,6 +368,7 @@ struct state_conference_common{
         struct module *parent = nullptr;
 
         struct video_desc desc = {};
+        Video_mixer::Layout layout = Video_mixer::Layout::Tiled;
 
         unique_disp real_display;
         struct video_desc display_desc = {};
@@ -388,7 +401,7 @@ static struct display *display_conference_fork(void *state)
 static void show_help(){
         printf("Conference display\n");
         printf("Usage:\n");
-        printf("\t-d conference:<display_config>#<width>:<height>:[fps]\n");
+        printf("\t-d conference:<display_config>#<width>:<height>:[fps]:[layout]\n");
 }
 
 static void *display_conference_init(struct module *parent, const char *fmt, unsigned int flags)
@@ -405,6 +418,8 @@ static void *display_conference_init(struct module *parent, const char *fmt, uns
         desc.interlacing = PROGRESSIVE;
         desc.tile_count = 1;
         desc.fps = 0;
+
+        auto layout = Video_mixer::Layout::Tiled;
 
         if(fmt && strlen(fmt) > 0){
                 if (isdigit(fmt[0])) { // fork
@@ -451,6 +466,11 @@ static void *display_conference_init(struct module *parent, const char *fmt, uns
                         if((item = strchr(item, ':'))){
                                 desc.fps = atoi(++item);
                         }
+                        if((item = strchr(item, ':'))){
+                                if(strncmp(++item, "one_big", strlen("one_big")) == 0){
+                                        layout = Video_mixer::Layout::One_big;
+                                }
+                        }
                         free(tmp);
                 }
         } else {
@@ -461,6 +481,7 @@ static void *display_conference_init(struct module *parent, const char *fmt, uns
         s->common = std::make_shared<state_conference_common>();
         s->common->parent = parent;
         s->common->desc = desc;
+        s->common->layout = layout;
 
         struct display *d_ptr;
         int ret = initialize_video_display(parent, requested_display, cfg,
@@ -487,7 +508,7 @@ static void check_reconf(struct state_conference_common *s, struct video_desc de
 
 static void display_conference_worker(std::shared_ptr<state_conference_common> s){
         PROFILE_FUNC;
-        Video_mixer mixer(s->desc.width, s->desc.height, UYVY);
+        Video_mixer mixer(s->desc.width, s->desc.height, UYVY, s->layout);
 
         auto next_frame_time = clock::now() + std::chrono::hours(1); //workaround for gcc bug 58931
         auto last_frame_time = clock::time_point::min();
