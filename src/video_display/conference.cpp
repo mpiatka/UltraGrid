@@ -44,6 +44,7 @@
 #include "video.h"
 #include "video_display.h"
 #include "video_codec.h"
+#include "utils/misc.h"
 
 #include <cinttypes>
 #include <condition_variable>
@@ -56,6 +57,8 @@
 #include <queue>
 #include <unordered_map>
 #include <thread>
+#include <string_view>
+#include <charconv>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-align"
@@ -202,7 +205,7 @@ private:
         unsigned width;
         unsigned height;
         codec_t color_space;
-        Layout layout;
+        Layout layout = Layout::Tiled;
 
         uint32_t primary_ssrc = 0;
 
@@ -413,84 +416,67 @@ static void show_help(){
 static void *display_conference_init(struct module *parent, const char *fmt, unsigned int flags)
 {
         auto s = std::make_unique<state_conference>();
-        char *fmt_copy = NULL;
-        const char *requested_display = "gl";
-        const char *cfg = "";
-
         log_msg(LOG_LEVEL_VERBOSE, MOD_NAME "init fmt: %s\n", fmt);
 
-        video_desc desc;
+        if(!fmt){
+                show_help();
+                return &display_init_noerr;
+        }
+
+        if (isdigit(fmt[0])){ // fork
+                struct state_conference *orig;
+                sscanf(fmt, "%p", &orig);
+                s->common = orig->common;
+                return s.release();
+        }
+
+        std::string requested_display = "gl";
+        std::string disp_conf;
+
+        s->common = std::make_shared<state_conference_common>();
+        s->common->parent = parent;
+
+        auto& desc = s->common->desc;
         desc.color_spec = UYVY;
         desc.interlacing = PROGRESSIVE;
         desc.tile_count = 1;
         desc.fps = 0;
 
-        auto layout = Video_mixer::Layout::Tiled;
+        std::string_view param = fmt;
+        auto disp_cfg = tokenize(param, '#');
+        auto conf_cfg = tokenize(param, '#');
 
-        if(fmt && strlen(fmt) > 0){
-                if (isdigit(fmt[0])) { // fork
-                        struct state_conference *orig;
-                        sscanf(fmt, "%p", &orig);
-                        s->common = orig->common;
-                        return s.release();
-                } else {
-                        char *tmp = strdup(fmt);
-                        char *save_ptr = NULL;
-                        char *item;
+        auto parseNum = [](std::string_view sv, auto& res){
+                if(sv.empty())
+                        return false;
+                return std::from_chars(sv.begin(), sv.end(), res).ec == std::errc();
+        };
 
-                        item = strtok_r(tmp, "#", &save_ptr);
-                        if(!item || strlen(item) == 0){
-                                show_help();
-                                free(tmp);
-                                return &display_init_noerr;
-                        }
-                        //Display configuration
-                        fmt_copy = strdup(item);
-                        requested_display = fmt_copy;
-                        char *delim = strchr(fmt_copy, ':');
-                        if (delim) {
-                                *delim = '\0';
-                                cfg = delim + 1;
-                        }
-                        item = strtok_r(NULL, "#", &save_ptr);
-                        //Conference configuration
-                        if(!item || strlen(item) == 0){
-                                show_help();
-                                free(fmt_copy);
-                                free(tmp);
-                                return &display_init_noerr;
-                        }
-                        desc.width = atoi(item);
-                        item = strchr(item, ':');
-                        if(!item || strlen(item + 1) == 0){
-                                show_help();
-                                free(fmt_copy);
-                                free(tmp);
-                                return &display_init_noerr;
-                        }
-                        desc.height = atoi(++item);
-                        if((item = strchr(item, ':'))){
-                                desc.fps = atoi(++item);
-                        }
-                        if((item = strchr(item, ':'))){
-                                if(strncmp(++item, "one_big", strlen("one_big")) == 0){
-                                        layout = Video_mixer::Layout::One_big;
-                                }
-                        }
-                        free(tmp);
-                }
-        } else {
-                show_help();
-                return &display_init_noerr;
+#define FAIL_IF(x) \
+        do {\
+                if(x){\
+                        show_help();\
+                        return &display_init_noerr;\
+                }\
+        } while(0)\
+
+        requested_display = tokenize(disp_cfg, ':');
+        FAIL_IF(requested_display.empty());
+        disp_conf = tokenize(disp_cfg, ':');
+        FAIL_IF(!parseNum(tokenize(conf_cfg, ':'), desc.width));
+        FAIL_IF(!parseNum(tokenize(conf_cfg, ':'), desc.height));
+
+        int fps;
+        FAIL_IF(!parseNum(tokenize(conf_cfg, ':'), fps));
+        desc.fps = fps;
+
+        auto tok = tokenize(conf_cfg, ':');
+        if(tok == "one_big"){
+                s->common->layout = Video_mixer::Layout::One_big;
         }
 
-        s->common = std::make_shared<state_conference_common>();
-        s->common->parent = parent;
-        s->common->desc = desc;
-        s->common->layout = layout;
-
         struct display *d_ptr;
-        int ret = initialize_video_display(parent, requested_display, cfg,
+        int ret = initialize_video_display(parent, requested_display.c_str(), disp_conf.c_str(),
                         flags, nullptr, &d_ptr);
 
         if(ret != 0){
