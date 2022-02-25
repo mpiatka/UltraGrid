@@ -452,22 +452,23 @@ static void *display_conference_init(struct module *parent, const char *fmt, uns
                 return std::from_chars(sv.begin(), sv.end(), res).ec == std::errc();
         };
 
-#define FAIL_IF(x) \
+#define FAIL_IF(x, msg) \
         do {\
                 if(x){\
+                        log_msg(LOG_LEVEL_ERROR, msg);\
                         show_help();\
                         return &display_init_noerr;\
                 }\
         } while(0)\
 
         requested_display = tokenize(disp_cfg, ':');
-        FAIL_IF(requested_display.empty());
+        FAIL_IF(requested_display.empty(), "Requested display cannot be empty\n");
         disp_conf = tokenize(disp_cfg, ':');
-        FAIL_IF(!parseNum(tokenize(conf_cfg, ':'), desc.width));
-        FAIL_IF(!parseNum(tokenize(conf_cfg, ':'), desc.height));
+        FAIL_IF(!parseNum(tokenize(conf_cfg, ':'), desc.width), "Failed to parse width\n");
+        FAIL_IF(!parseNum(tokenize(conf_cfg, ':'), desc.height), "Failed to parse height\n");
 
         int fps;
-        FAIL_IF(!parseNum(tokenize(conf_cfg, ':'), fps));
+        FAIL_IF(!parseNum(tokenize(conf_cfg, ':'), fps), "Failed to parse fps\n");
         desc.fps = fps;
 
         auto tok = tokenize(conf_cfg, ':');
