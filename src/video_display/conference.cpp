@@ -245,7 +245,7 @@ void Video_mixer::one_big_layout(){
                 }
 
                 if(pos * tile_width > width)
-                        break;
+                        continue;
 
                 t.set_pos_keep_aspect(pos * tile_width, big_height, tile_width, small_height);
                 pos++;
