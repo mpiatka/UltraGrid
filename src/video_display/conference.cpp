@@ -68,13 +68,6 @@
 
 #ifdef __SSSE3__
 #include "tmmintrin.h"
-// compat with older Clang compiler
-#ifndef _mm_bslli_si128
-#define _mm_bslli_si128 _mm_slli_si128
-#endif
-#ifndef _mm_bsrli_si128
-#define _mm_bsrli_si128 _mm_srli_si128
-#endif
 #endif
 
 #include "utils/profile_timer.hpp"
@@ -168,9 +161,9 @@ void Participant::to_cv_frame(){
                 __m128i y_high = _mm_shuffle_epi8(uyvy, y_shuff);
                 __m128i uv_high = _mm_shuffle_epi8(uyvy, uv_shuff);
 
-                _mm_store_si128((__m128i *)(void *) luma_dst, _mm_or_si128(y_low, _mm_slli_si128(y_high, 8)));
+                _mm_store_si128((__m128i *)(void *) luma_dst, _mm_or_si128(y_low, _mm_bslli_si128(y_high, 8)));
                 luma_dst += 16;
-                _mm_store_si128((__m128i *)(void *) chroma_dst, _mm_or_si128(uv_low, _mm_slli_si128(uv_high, 8)));
+                _mm_store_si128((__m128i *)(void *) chroma_dst, _mm_or_si128(uv_low, _mm_bslli_si128(uv_high, 8)));
                 chroma_dst += 16;
 
                 src_len -= 32;
@@ -344,8 +337,8 @@ void Video_mixer::get_mixed(video_frame *result){
                _mm_storeu_si128((__m128i *)(void *) dst, res);
                dst += 16;
 
-               luma = _mm_srli_si128(luma, 8);
-               chroma = _mm_srli_si128(chroma, 8);
+               luma = _mm_bsrli_si128(luma, 8);
+               chroma = _mm_bsrli_si128(chroma, 8);
 
                res = _mm_or_si128(_mm_shuffle_epi8(luma, y_shuff), _mm_shuffle_epi8(chroma, uv_shuff));
                _mm_storeu_si128((__m128i *)(void *) dst, res);
