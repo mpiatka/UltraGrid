@@ -1,7 +1,7 @@
 /**
  * @file   video_display/conference.cpp
  * @author Martin Pulec     <pulec@cesnet.cz>
- * @author Martin Piatka    <445597@mail.muni.cz>
+ * @author Martin Piatka    <piatka@cesnet.cz>
  */
 /*
  * Copyright (c) 2014-2022 CESNET, z. s. p. o.
@@ -55,7 +55,6 @@
 #include <memory>
 #include <mutex>
 #include <queue>
-#include <unordered_map>
 #include <thread>
 #include <string_view>
 #include <charconv>
