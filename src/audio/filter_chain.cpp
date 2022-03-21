@@ -55,6 +55,24 @@ void Filter_chain::push_back(struct audio_filter filter){
         filters.push_back(filter);
 }
 
+bool Filter_chain::emplace_new(std::string_view cfg){
+        std::string filter_name(tokenize(cfg, ':'));
+        std::string config(cfg);
+
+        struct audio_filter afilter;
+        if(audio_filter_init(get_module(),
+                                filter_name.c_str(),
+                                config.c_str(),
+                                &afilter) != AF_OK)
+        {
+                log_msg(LOG_LEVEL_ERROR, "[Filter_chain] Failed to init audio filter\n");
+                return false;
+        }
+
+        push_back(afilter);
+        return true;
+}
+
 void Filter_chain::clear(){
         for(auto& i : filters){
                 audio_filter_destroy(&i);
@@ -65,21 +83,13 @@ af_result_code Filter_chain::filter(struct audio_frame **frame){
         struct message *msg;
         while ((msg = check_message(mod.get()))) {
                 std::string_view text = ((msg_universal *) msg)->text;
-                std::string filter_name(tokenize(text, ':'));
-                std::string config(text);
 
-                struct audio_filter afilter;
-                if(audio_filter_init(get_module(),
-                                        filter_name.c_str(),
-                                        config.c_str(),
-                                        &afilter) != AF_OK)
-                {
+                if(!emplace_new(text)) {
                         log_msg(LOG_LEVEL_ERROR, "Failed to init audio filter\n");
                         free_message(msg, new_response(RESPONSE_INT_SERV_ERR, nullptr));
                         continue;
                 }
 
-                push_back(afilter);
                 free_message(msg, new_response(RESPONSE_OK, nullptr));
         }
 
