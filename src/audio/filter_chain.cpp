@@ -34,7 +34,13 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
  * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#include "config_unix.h"
+#include "config_win32.h"
+#endif /* HAVE_CONFIG_H */
 
+#include "debug.h"
 #include "audio/types.h"
 #include "filter_chain.hpp"
 
@@ -56,6 +62,27 @@ void Filter_chain::clear(){
 }
 
 af_result_code Filter_chain::filter(struct audio_frame **frame){
+        struct message *msg;
+        while ((msg = check_message(mod.get()))) {
+                std::string_view text = ((msg_universal *) msg)->text;
+                std::string filter_name(tokenize(text, ':'));
+                std::string config(text);
+
+                struct audio_filter afilter;
+                if(audio_filter_init(get_module(),
+                                        filter_name.c_str(),
+                                        config.c_str(),
+                                        &afilter) != AF_OK)
+                {
+                        log_msg(LOG_LEVEL_ERROR, "Failed to init audio filter\n");
+                        free_message(msg, new_response(RESPONSE_INT_SERV_ERR, nullptr));
+                        continue;
+                }
+
+                push_back(afilter);
+                free_message(msg, new_response(RESPONSE_OK, nullptr));
+        }
+
         auto f = *frame;
         af_result_code res = reconfigure(f->bps, f->ch_count, f->sample_rate);
         if(res != AF_OK)
@@ -84,7 +111,7 @@ af_result_code Filter_chain::reconfigure(int bps, int ch_count, int sample_rate)
 
         af_result_code res = AF_OK;
         for(auto& i : filters){
-                af_result_code r = audio_filter_configure(&i, bps, ch_count, sample_rate);
+                res = audio_filter_configure(&i, bps, ch_count, sample_rate);
                 if(res != AF_OK)
                         return res;
 
