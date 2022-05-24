@@ -7,15 +7,19 @@
 #include <QOpenGLVertexArrayObject>
 #include <QTimer>
 
-#include "shared_mem_frame.hpp"
+#include "ipc_frame.h"
+#include "ipc_frame_unix.h"
 
 class PreviewWidget : public QOpenGLWidget{
 public:
-	PreviewWidget(QWidget *parent) : QOpenGLWidget(parent) {
+	PreviewWidget(QWidget *parent) :
+		QOpenGLWidget(parent),
+		ipc_frame(ipc_frame_new())
+   	{
 		connect(&timer, SIGNAL(timeout()), this, SLOT(update()));
   	}
 
-        ~PreviewWidget();
+	~PreviewWidget();
 
 	void setKey(const char *key);
 	void start();
@@ -27,6 +31,8 @@ protected:
 	void paintGL();
 
 private:
+	bool loadFrame();
+
 	GLuint vertexBuffer = 0;
 	GLuint program = 0;
 	GLuint texture = 0;
@@ -42,7 +48,8 @@ private:
 	void setVidSize(int w, int h);
 	void calculateScale();
 
-	Shared_mem shared_mem;
+	Ipc_frame_uniq ipc_frame;
+	Ipc_frame_reader_uniq ipc_frame_reader;
 	QTimer timer;
 };
 

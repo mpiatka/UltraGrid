@@ -172,6 +172,24 @@ void PreviewWidget::setVidSize(int w, int h){
 	calculateScale();
 }
 
+bool PreviewWidget::loadFrame(){
+	auto f = getOpenGLFuncs();
+
+	f->glBindTexture(GL_TEXTURE_2D, texture);
+	if(ipc_frame_reader && ipc_frame_reader_has_frame(ipc_frame_reader.get())){
+		ipc_frame_reader_read(ipc_frame_reader.get(), ipc_frame.get());
+		assert(ipc_frame->header.color_spec == IPC_FRAME_COLOR_RGB);
+		f->glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB,
+				ipc_frame->header.width, ipc_frame->header.height,
+				0, GL_RGB, GL_UNSIGNED_BYTE, ipc_frame->data);
+		setVidSize(ipc_frame->header.width, ipc_frame->header.height);
+	} else {
+		f->glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 4, 4, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels);
+	}
+
+	return true;
+}
+
 void PreviewWidget::paintGL(){
 	auto f = getOpenGLFuncs();
 
@@ -208,17 +226,7 @@ void PreviewWidget::paintGL(){
 	loc = f->glGetUniformLocation(program, "scale_vec");
 	f->glUniform2fv(loc, 1, scaleVec);
 
-	f->glBindTexture(GL_TEXTURE_2D, texture);
-	struct Shared_mem_frame *sframe = shared_mem.get_frame_and_lock();
-	if(sframe){
-		f->glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, sframe->width, sframe->height, 0, GL_RGB, GL_UNSIGNED_BYTE, sframe->pixels);
-		setVidSize(sframe->width, sframe->height);
-		shared_mem.unlock();
-		//Detach to prevent deadlocks
-		shared_mem.detach();
-	} else {
-		f->glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 4, 4, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels);
-	}
+	loadFrame();
 
 	f->glDrawArrays(GL_TRIANGLES, 0, 6);
 
@@ -226,8 +234,9 @@ void PreviewWidget::paintGL(){
 }
 
 void PreviewWidget::setKey(const char *key){
-	shared_mem.detach();
-	shared_mem.setKey(key);
+	std::string path = "/tmp/";
+	path += key;
+	ipc_frame_reader.reset(ipc_frame_reader_new(path.c_str()));
 }
 
 void PreviewWidget::start(){
