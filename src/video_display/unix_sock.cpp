@@ -206,7 +206,7 @@ static int display_unix_sock_putf(void *state, struct video_frame *frame, int fl
         if (s->incoming_queue.size() >= IN_QUEUE_MAX_BUFFER_LEN)
                 log_msg(LOG_LEVEL_WARNING, "Named pipe: queue full!\n");
 
-        if (flags == PUTF_NONBLOCK && s->incoming_queue.size() >= IN_QUEUE_MAX_BUFFER_LEN)
+        if (s->incoming_queue.size() >= IN_QUEUE_MAX_BUFFER_LEN)
                 return 1;
 
         s->frame_consumed_cv.wait(lg, [s]{return s->incoming_queue.size() < IN_QUEUE_MAX_BUFFER_LEN;});
@@ -268,7 +268,7 @@ static int display_unix_sock_reconfigure(void *state, struct video_desc desc)
         return 1;
 }
 
-static void display_unix_sock_put_audio_frame(void *state, struct audio_frame *frame)
+static void display_unix_sock_put_audio_frame(void *state, const struct audio_frame *frame)
 {
         UNUSED(state);
         UNUSED(frame);
