@@ -73,10 +73,17 @@ static QOpenGLFunctions_3_3_Core *getOpenGLFuncs(){
 #endif
 }
 
-PreviewWidget::~PreviewWidget(){
-	auto f = getOpenGLFuncs();
+PreviewWidget::PreviewWidget(QWidget *parent) :
+	QOpenGLWidget(parent),
+	ipc_frame(ipc_frame_new())
+{
+	connect(&timer, SIGNAL(timeout()), this, SLOT(update()));
+}
 
+PreviewWidget::~PreviewWidget(){
 	makeCurrent();
+
+	auto f = getOpenGLFuncs();
 	f->glDeleteBuffers(1, &vertexBuffer);
 	f->glDeleteProgram(program);
 	f->glDeleteTextures(1, &texture);

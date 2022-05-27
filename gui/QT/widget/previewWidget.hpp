@@ -12,13 +12,7 @@
 
 class PreviewWidget : public QOpenGLWidget{
 public:
-	PreviewWidget(QWidget *parent) :
-		QOpenGLWidget(parent),
-		ipc_frame(ipc_frame_new())
-   	{
-		connect(&timer, SIGNAL(timeout()), this, SLOT(update()));
-  	}
-
+	PreviewWidget(QWidget *parent);
 	~PreviewWidget();
 
 	void setKey(const char *key);
