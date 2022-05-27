@@ -86,7 +86,7 @@ PreviewWidget::~PreviewWidget(){
 	auto f = getOpenGLFuncs();
 	f->glDeleteBuffers(1, &vertexBuffer);
 	f->glDeleteProgram(program);
-	f->glDeleteTextures(1, &texture);
+	f->glDeleteTextures(1, &frame_texture);
 	vao.destroy();
 	doneCurrent();
 }
@@ -110,10 +110,6 @@ void PreviewWidget::initializeGL(){
 	f->glDisable(GL_SCISSOR_TEST);
 	f->glDisable(GL_STENCIL_TEST);
 
-	f->glGenBuffers(1, &vertexBuffer);
-	f->glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
-	f->glBufferData(GL_ARRAY_BUFFER, sizeof(rectangle), rectangle, GL_STATIC_DRAW);
-
 	GLuint vertexShader = f->glCreateShader(GL_VERTEX_SHADER);
 	GLuint fragShader = f->glCreateShader(GL_FRAGMENT_SHADER);
 
@@ -133,11 +129,43 @@ void PreviewWidget::initializeGL(){
 	f->glDeleteShader(vertexShader);
 	f->glDeleteShader(fragShader);
 
-	f->glGenTextures(1, &texture);
-	f->glBindTexture(GL_TEXTURE_2D, texture);
+	f->glGenTextures(1, &testbars_texture);
+	f->glBindTexture(GL_TEXTURE_2D, testbars_texture);
 	f->glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 4, 4, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels);
 	f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+	f->glGenTextures(1, &frame_texture);
+	f->glBindTexture(GL_TEXTURE_2D, frame_texture);
+	f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	f->glBindTexture(GL_TEXTURE_2D, 0);
+
+	f->glGenBuffers(1, &vertexBuffer);
+	f->glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
+	f->glBufferData(GL_ARRAY_BUFFER, sizeof(rectangle), rectangle, GL_STATIC_DRAW);
+
+	f->glEnableVertexAttribArray(0);
+	f->glVertexAttribPointer(
+			0,
+			2,
+			GL_FLOAT,
+			GL_FALSE,
+			4 * sizeof(float),
+			(void*)0
+			);
+	f->glEnableVertexAttribArray(1);
+	f->glVertexAttribPointer(
+			1,
+			2,
+			GL_FLOAT,
+			GL_FALSE,
+			4 * sizeof(float),
+			(void*)(2 * sizeof(float))
+			);
+
+	f->glBindBuffer(GL_ARRAY_BUFFER, 0);
 
 	vao.release();
 
@@ -182,62 +210,47 @@ void PreviewWidget::setVidSize(int w, int h){
 bool PreviewWidget::loadFrame(){
 	auto f = getOpenGLFuncs();
 
-	f->glBindTexture(GL_TEXTURE_2D, texture);
-	if(ipc_frame_reader && ipc_frame_reader_has_frame(ipc_frame_reader.get())){
+	if(!ipc_frame_reader || !ipc_frame_reader_is_connected(ipc_frame_reader.get())){
+		selected_texture = testbars_texture;
+		return true;
+	}
+
+
+	if(ipc_frame_reader_has_frame(ipc_frame_reader.get())){
 		ipc_frame_reader_read(ipc_frame_reader.get(), ipc_frame.get());
 		assert(ipc_frame->header.color_spec == IPC_FRAME_COLOR_RGB);
+		selected_texture = frame_texture;
+		f->glBindTexture(GL_TEXTURE_2D, frame_texture);
 		f->glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB,
 				ipc_frame->header.width, ipc_frame->header.height,
 				0, GL_RGB, GL_UNSIGNED_BYTE, ipc_frame->data);
 		setVidSize(ipc_frame->header.width, ipc_frame->header.height);
-	} else {
-		f->glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 4, 4, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels);
 	}
 
 	return true;
 }
 
-void PreviewWidget::paintGL(){
+void PreviewWidget::render(){
 	auto f = getOpenGLFuncs();
-
-	if(!f)
-		return;
 
 	vao.bind();
 	f->glClear(GL_COLOR_BUFFER_BIT);
 
 	f->glUseProgram(program);
 
-	f->glEnableVertexAttribArray(0);
-	f->glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
-	f->glVertexAttribPointer(
-			0,
-			2,
-			GL_FLOAT,
-			GL_FALSE,
-			4 * sizeof(float),
-			(void*)0
-			);
-	f->glEnableVertexAttribArray(1);
-	f->glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
-	f->glVertexAttribPointer(
-			1,
-			2,
-			GL_FLOAT,
-			GL_FALSE,
-			4 * sizeof(float),
-			(void*)(2 * sizeof(float))
-			);
-
+	f->glBindTexture(GL_TEXTURE_2D, selected_texture);
 	GLuint loc;
 	loc = f->glGetUniformLocation(program, "scale_vec");
 	f->glUniform2fv(loc, 1, scaleVec);
 
-	loadFrame();
-
 	f->glDrawArrays(GL_TRIANGLES, 0, 6);
 
 	vao.release();
+}
+
+void PreviewWidget::paintGL(){
+	loadFrame();
+	render();
 }
 
 void PreviewWidget::setKey(const char *key){
