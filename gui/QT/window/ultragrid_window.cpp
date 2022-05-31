@@ -75,7 +75,7 @@ void UltragridWindow::initializeUgOpts(){
 
 	setArgs();
 
-	ui.displayPreview->setKey("ultragrid_preview_display");
+	ui.displayPreview->setKey("ug_unix");
 	ui.displayPreview->start();
 	ui.capturePreview->setKey("ultragrid_preview_capture");
 	ui.capturePreview->start();
