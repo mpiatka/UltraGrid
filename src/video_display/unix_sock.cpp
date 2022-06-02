@@ -40,9 +40,6 @@
 #include "config_win32.h"
 #include "debug.h"
 #include "lib_common.h"
-#include "video.h"
-#include "video_display.h"
-#include "video_codec.h"
 
 #include <fstream>
 #include <condition_variable>
@@ -61,6 +58,12 @@
 #include <sys/un.h>
 #include <netinet/in.h>
 
+#include "video.h"
+#include "video_display.h"
+#include "video_codec.h"
+#include "tools/ipc_frame.h"
+#include "tools/ipc_frame_ug.h"
+
 static constexpr unsigned int IN_QUEUE_MAX_BUFFER_LEN = 5;
 static constexpr int SKIP_FIRST_N_FRAMES_IN_STREAM = 5;
 
@@ -77,6 +80,8 @@ struct state_unix_sock {
 
         struct video_desc desc;
         struct video_desc display_desc;
+
+        Ipc_frame_uniq ipc_frame;
 
         int out_sock;
 
@@ -108,6 +113,7 @@ static void *display_unix_sock_init(struct module *parent, const char *fmt, unsi
 
         s->parent = parent;
         s->out_sock = data_socket;
+        s->ipc_frame.reset(ipc_frame_new());
 
 
         return s.release();
@@ -125,26 +131,15 @@ static void block_write(int fd, void *buf, size_t size){
         }
 }
 
-static void write_int(char *dst, uint32_t val){
-        auto src = reinterpret_cast<char *>(&val);
-        dst[0] = src[0];
-        dst[1] = src[1];
-        dst[2] = src[2];
-        dst[3] = src[3];
-}
-
 static void write_frame(state_unix_sock *s, video_frame *f){
-        std::array<char, 128> header;
-        header.fill(0);
+        std::array<char, IPC_FRAME_HEADER_LEN> header;
 
-        write_int(header.data() + 0, f->tiles[0].width);
-        write_int(header.data() + 4, f->tiles[0].height);
-        write_int(header.data() + 8, f->tiles[0].data_len);
-        write_int(header.data() + 12, f->color_spec);
+        ipc_frame_from_ug_frame(s->ipc_frame.get(), f, VIDEO_CODEC_NONE, 0);
+        ipc_frame_write_header(&s->ipc_frame->header, header.data());
 
         errno = 0;
         block_write(s->out_sock, header.data(), header.size());
-        block_write(s->out_sock, f->tiles[0].data, f->tiles[0].data_len);
+        block_write(s->out_sock, s->ipc_frame->data, s->ipc_frame->header.data_len);
         if(errno == EPIPE){
                 perror("Disconnect");
                 exit(1);
