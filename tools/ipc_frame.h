@@ -28,7 +28,7 @@ struct Ipc_frame{
 };
 
 bool ipc_frame_parse_header(struct Ipc_frame_header *hdr, const char *buf);
-void ipc_frame_write_header(const struct Ipc_frame_header *hdr, void *dst);
+void ipc_frame_write_header(const struct Ipc_frame_header *hdr, char *dst);
 
 Ipc_frame *ipc_frame_new();
 bool ipc_frame_reserve(struct Ipc_frame *frame, size_t size);
