@@ -48,30 +48,30 @@ bool ipc_frame_from_ug_frame(struct Ipc_frame *dst,
 		dec = vc_memcpy;
 	}
 
-	int dst_width = src->tiles[0].width;
-	int dst_width_padded = dst_width;
-	int dst_height = src->tiles[0].height;
+	dst->header.width = src->tiles[0].width;
+	dst->header.height = src->tiles[0].height;
+	dst->header.color_spec = static_cast<Ipc_frame_color_spec>(codec);
 
 	int dst_frame_to_allocate = 0;
 
 	if(scale_factor != 0){
-		dst_width /= scale_factor;
-		dst_height /= scale_factor;
-
-        //OpenGL wants the width to be divisable by 4
-        dst_width_padded = ((dst_width + 4 - 1) / 4) * 4;
+		int block_size_px = get_pf_block_pixels(src->color_spec);
+		dst->header.width = (dst->header.width / block_size_px / scale_factor) * block_size_px;
+		dst->header.height /= scale_factor;
 
 		if(dec != vc_memcpy){
 			//When both scaling and converting we need a tmp space - allocate extra
-			dst_frame_to_allocate += get_bpp(src->color_spec) * dst_width * dst_height;
+			dst_frame_to_allocate += get_bpp(src->color_spec) * dst->header.width * dst->header.height;
 		}
 	}
 
-	int dst_frame_size = get_bpp(codec) * dst_width_padded * dst_height;
+	int dst_frame_size = get_bpp(codec) * dst->header.width * dst->header.height;
 	dst_frame_to_allocate += dst_frame_size;
 
 	if(!ipc_frame_reserve(dst, dst_frame_to_allocate))
 		return false;
+
+	dst->header.data_len = dst_frame_size;
 
 	char *scale_dst = dst->data;
 	unsigned char *dec_dst = (unsigned char *) dst->data;
@@ -89,21 +89,16 @@ bool ipc_frame_from_ug_frame(struct Ipc_frame *dst,
 
 	}
 
-	dst->header.width = dst_width_padded;
-	dst->header.height = dst_height;
-	dst->header.data_len = dst_frame_size;
-	dst->header.color_spec = static_cast<Ipc_frame_color_spec>(codec);
 
 	if(dec_src == dec_dst){
 		assert(dec == vc_memcpy);
 		return true;
 	}
 
-	int dst_line_len = vc_get_linesize(dst_width, codec);
-	int dst_line_len_pad = vc_get_linesize(dst_width_padded, codec);
-	int src_line_len = vc_get_linesize(dst_width, src->color_spec);
-	for(int i = 0; i < dst_height; i++){
-		dec(dec_dst + dst_line_len_pad * i,
+	int dst_line_len = vc_get_linesize(dst->header.width, codec);
+	int src_line_len = vc_get_linesize(dst->header.width, src->color_spec);
+	for(int i = 0; i < dst->header.height; i++){
+		dec(dec_dst + dst_line_len * i,
 				dec_src + src_line_len * i,
 				dst_line_len,
 				0, 8, 16);
