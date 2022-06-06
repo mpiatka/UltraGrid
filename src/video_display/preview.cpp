@@ -43,8 +43,10 @@
 #include "lib_common.h"
 #include "video.h"
 #include "video_display.h"
-#include "shared_mem_frame.hpp"
 #include "video_codec.h"
+#include "video_codec.h"
+#include "tools/ipc_frame.h"
+#include "tools/ipc_frame_ug.h"
 
 #include <condition_variable>
 #include <chrono>
@@ -55,8 +57,11 @@
 #include <mutex>
 #include <queue>
 #include <unordered_map>
-#include <QtCore/QSharedMemory>
 #include <cmath>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <netinet/in.h>
 
 using namespace std;
 
@@ -65,10 +70,9 @@ static constexpr int SKIP_FIRST_N_FRAMES_IN_STREAM = 5;
 
 struct state_preview_display_common {
         ~state_preview_display_common() {
-
+                if(out_sock > 0)
+                        close(out_sock);
         }
-
-        struct video_desc display_desc;
 
         queue<struct video_frame *> incoming_queue;
         condition_variable in_queue_decremented_cv;
@@ -76,15 +80,11 @@ struct state_preview_display_common {
         mutex lock;
         condition_variable cv;
 
-        Shared_mem shared_mem;
-        bool reconfiguring;
-        size_t mem_size;
-        codec_t frame_fmt;
+        Ipc_frame_uniq ipc_frame;
+        int out_sock = -1;
 
         int scaledW, scaledH;
         int scaleF;
-        int scaledW_pad;
-        std::vector<unsigned char> scaled_frame;
 
         struct module *parent;
 };
@@ -121,18 +121,22 @@ static void *display_preview_init(struct module *parent, const char *fmt, unsign
         s->common = shared_ptr<state_preview_display_common>(new state_preview_display_common());
         s->common->parent = parent;
 
-        s->common->shared_mem.setKey("ultragrid_preview_display");
-        s->common->shared_mem.create();
+        sockaddr_un addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sun_family = AF_UNIX;
+        snprintf(addr.sun_path, sizeof(addr.sun_path), "/tmp/ug_preview_disp_unix");
+
+        int data_socket = socket(AF_UNIX, SOCK_STREAM, 0);
+
+        int ret = connect(data_socket, (const struct sockaddr *) &addr, sizeof(addr));
+        if(ret == -1){
+                log_msg(LOG_LEVEL_FATAL, "Unable to connect to preview socket\n");
+                exit(EXIT_FAILURE);
+        }
+
+        s->common->out_sock = data_socket;
+        s->common->ipc_frame.reset(ipc_frame_new());
         return s;
-}
-
-static void check_reconf(struct state_preview_display_common *s, struct video_desc desc)
-{
-        if (video_desc_eq(desc, s->display_desc))
-                return;
-
-        s->display_desc = desc;
-        fprintf(stderr, "RECONFIGURED\n");
 }
 
 static void display_preview_run(void *state)
@@ -160,9 +164,26 @@ static void display_preview_run(void *state)
                         continue;
                 }
 
-                check_reconf(s.get(), video_desc_from_frame(frame));
+                assert(frame->tile_count == 1);
+                const tile *tile = &frame->tiles[0];
 
-                s->shared_mem.put_frame(frame);
+                const float target_width = 960;
+                const float target_height = 540;
+                float scale = ((tile->width / target_width) + (tile->height / target_height)) / 2.f;
+                if(scale < 1)
+                        scale = 1;
+                scale = std::round(scale);
+
+                if(!ipc_frame_from_ug_frame(s->ipc_frame.get(), frame, RGB, (int) scale)){
+                        log_msg(LOG_LEVEL_WARNING, "Unable to convert\n");
+                        continue;
+                }
+
+                errno = 0;
+                if(!ipc_frame_write_to_fd(s->ipc_frame.get(), s->out_sock)){
+                        perror("Unable to send frame");
+                        exit(1);
+                }
 
                 vf_free(frame);
         }
