@@ -218,7 +218,9 @@ bool PreviewWidget::loadFrame(){
 
 
 	if(ipc_frame_reader_has_frame(ipc_frame_reader.get())){
-		ipc_frame_reader_read(ipc_frame_reader.get(), ipc_frame.get());
+		if(!ipc_frame_reader_read(ipc_frame_reader.get(), ipc_frame.get()))
+			return false;
+
 		assert(ipc_frame->header.color_spec == IPC_FRAME_COLOR_RGB);
 		selected_texture = frame_texture;
 		f->glBindTexture(GL_TEXTURE_2D, frame_texture);
