@@ -83,7 +83,7 @@ struct state_unix_sock {
 
         Ipc_frame_uniq ipc_frame;
 
-        int out_sock;
+        int out_sock = -1;
 
         struct module *parent;
 };
@@ -119,29 +119,12 @@ static void *display_unix_sock_init(struct module *parent, const char *fmt, unsi
         return s.release();
 }
 
-static void block_write(int fd, void *buf, size_t size){
-        size_t written = 0;
-        char *src = static_cast<char *>(buf);
-
-        while(written < size){
-                int ret = send(fd, src + written, size - written, MSG_NOSIGNAL);
-                if(ret == -1)
-                        return;
-                written += ret;
-        }
-}
-
 static void write_frame(state_unix_sock *s, video_frame *f){
-        std::array<char, IPC_FRAME_HEADER_LEN> header;
-
         ipc_frame_from_ug_frame(s->ipc_frame.get(), f, VIDEO_CODEC_NONE, 0);
-        ipc_frame_write_header(&s->ipc_frame->header, header.data());
 
         errno = 0;
-        block_write(s->out_sock, header.data(), header.size());
-        block_write(s->out_sock, s->ipc_frame->data, s->ipc_frame->header.data_len);
-        if(errno == EPIPE){
-                perror("Disconnect");
+        if(!ipc_frame_write_to_fd(s->ipc_frame.get(), s->out_sock)){
+                perror("Unable to send frame");
                 exit(1);
         }
 }
@@ -172,13 +155,15 @@ static void display_unix_sock_run(void *state)
                 }
 
                 write_frame(s, frame.get());
-
         }
 }
 
 static void display_unix_sock_done(void *state)
 {
         auto s = static_cast<state_unix_sock *>(state);
+        if(s->out_sock > 0)
+                close(s->out_sock);
+
         delete s;
 }
 
