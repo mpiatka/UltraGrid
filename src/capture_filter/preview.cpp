@@ -41,6 +41,12 @@
 #include "config_win32.h"
 #endif /* HAVE_CONFIG_H */
 
+#include <vector>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <thread>
+
 #include "capture_filter.h"
 
 #include "debug.h"
@@ -48,8 +54,9 @@
 #include "utils/color_out.h"
 #include "video.h"
 #include "video_codec.h"
-
-#include "shared_mem_frame.hpp"
+#include "tools/ipc_frame.h"
+#include "tools/ipc_frame_unix.h"
+#include "tools/ipc_frame_ug.h"
 
 struct module;
 
@@ -58,8 +65,47 @@ static void done(void *state);
 static struct video_frame *filter(void *state, struct video_frame *in);
 
 struct state_preview_filter{
-        Shared_mem shared_mem;
+        std::mutex mut;
+        std::condition_variable frame_submitted_cv;
+
+        std::vector<Ipc_frame_uniq> free_frames;
+        std::queue<Ipc_frame_uniq> frame_queue;
+
+        std::thread worker_thread;
 };
+
+static void worker(struct state_preview_filter *s, const char *path){
+        Ipc_frame_uniq frame;
+        Ipc_frame_writer_uniq writer;
+
+        for(;;){
+                if(!writer){
+                        writer.reset(ipc_frame_writer_new(path));
+                        if(!writer){
+                                sleep(1);
+                                continue;
+                        }
+                }
+
+                {
+                        std::unique_lock<std::mutex> lock(s->mut);
+                        s->frame_submitted_cv.wait(lock,
+                                        [=]{ return !s->frame_queue.empty(); });
+                        frame = std::move(s->frame_queue.front());
+                        s->frame_queue.pop();
+                }
+
+                if(!frame)
+                        break;
+
+                if(!ipc_frame_writer_write(writer.get(), frame.get())){;
+                        writer.reset();
+                }
+
+                std::lock_guard<std::mutex> lock(s->mut);
+                s->free_frames.push_back(std::move(frame));
+        }
+}
 
 
 static int init(struct module *parent, const char *cfg, void **state){
@@ -70,8 +116,11 @@ static int init(struct module *parent, const char *cfg, void **state){
         }
 
         struct state_preview_filter *s = new state_preview_filter();
-        s->shared_mem.setKey("ultragrid_preview_capture");
-        s->shared_mem.create();
+
+        s->free_frames.emplace_back(ipc_frame_new());
+        s->free_frames.emplace_back(ipc_frame_new());
+
+        s->worker_thread = std::thread(worker, s, "/tmp/ug_preview_cap_unix");
 
         *state = s;
 
@@ -79,14 +128,52 @@ static int init(struct module *parent, const char *cfg, void **state){
 }
 
 static void done(void *state){
-        delete (state_preview_filter *) state;
+        auto s = static_cast<state_preview_filter *> (state);
+
+        {
+                std::lock_guard<std::mutex> lock(s->mut);
+                s->frame_queue.push(nullptr);
+        }
+        s->frame_submitted_cv.notify_one();
+        s->worker_thread.join();
+
+        delete s;
 }
 
 static struct video_frame *filter(void *state, struct video_frame *in){
         struct state_preview_filter *s = (state_preview_filter *) state;
 
-        s->shared_mem.put_frame(in);
-        
+        Ipc_frame_uniq ipc_frame;
+        {
+                std::lock_guard<std::mutex> lock(s->mut);
+                if(!s->free_frames.empty()){
+                        ipc_frame = std::move(s->free_frames.back());
+                        s->free_frames.pop_back();
+                }
+        }
+
+        if(!ipc_frame)
+                return in;
+
+        assert(in->tile_count == 1);
+        const tile *tile = &in->tiles[0];
+
+        const float target_width = 960;
+        const float target_height = 540;
+        float scale = ((tile->width / target_width) + (tile->height / target_height)) / 2.f;
+        if(scale < 1)
+                scale = 1;
+        scale = std::round(scale);
+
+
+        if(ipc_frame_from_ug_frame(ipc_frame.get(), in, RGB, (int) scale)){
+                std::lock_guard<std::mutex> lock(s->mut);
+                s->frame_queue.push(std::move(ipc_frame));
+                s->frame_submitted_cv.notify_one();
+        } else {
+                log_msg(LOG_LEVEL_WARNING, "Unable to convert\n");
+        }
+
         return in;
 }
 
