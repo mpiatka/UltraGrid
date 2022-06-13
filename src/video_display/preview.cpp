@@ -47,6 +47,7 @@
 #include "video_codec.h"
 #include "tools/ipc_frame.h"
 #include "tools/ipc_frame_ug.h"
+#include "tools/ipc_frame_unix.h"
 
 #include <condition_variable>
 #include <chrono>
@@ -58,10 +59,6 @@
 #include <queue>
 #include <unordered_map>
 #include <cmath>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <netinet/in.h>
 
 using namespace std;
 
@@ -69,11 +66,6 @@ static constexpr unsigned int IN_QUEUE_MAX_BUFFER_LEN = 5;
 static constexpr int SKIP_FIRST_N_FRAMES_IN_STREAM = 5;
 
 struct state_preview_display_common {
-        ~state_preview_display_common() {
-                if(out_sock > 0)
-                        close(out_sock);
-        }
-
         queue<struct video_frame *> incoming_queue;
         condition_variable in_queue_decremented_cv;
 
@@ -81,7 +73,7 @@ struct state_preview_display_common {
         condition_variable cv;
 
         Ipc_frame_uniq ipc_frame;
-        int out_sock = -1;
+        Ipc_frame_writer_uniq frame_writer;
 
         int scaledW, scaledH;
         int scaleF;
@@ -121,21 +113,12 @@ static void *display_preview_init(struct module *parent, const char *fmt, unsign
         s->common = shared_ptr<state_preview_display_common>(new state_preview_display_common());
         s->common->parent = parent;
 
-        sockaddr_un addr;
-        memset(&addr, 0, sizeof(addr));
-        addr.sun_family = AF_UNIX;
-        snprintf(addr.sun_path, sizeof(addr.sun_path), "/tmp/ug_preview_disp_unix");
-
-        int data_socket = socket(AF_UNIX, SOCK_STREAM, 0);
-
-        int ret = connect(data_socket, (const struct sockaddr *) &addr, sizeof(addr));
-        if(ret == -1){
+        s->common->ipc_frame.reset(ipc_frame_new());
+        s->common->frame_writer.reset(ipc_frame_writer_new("/tmp/ug_preview_disp_unix"));
+        if(!s->common->frame_writer){
                 log_msg(LOG_LEVEL_FATAL, "Unable to connect to preview socket\n");
                 exit(EXIT_FAILURE);
         }
-
-        s->common->out_sock = data_socket;
-        s->common->ipc_frame.reset(ipc_frame_new());
         return s;
 }
 
@@ -180,7 +163,7 @@ static void display_preview_run(void *state)
                 }
 
                 errno = 0;
-                if(!ipc_frame_write_to_fd(s->ipc_frame.get(), s->out_sock)){
+                if(!ipc_frame_writer_write(s->frame_writer.get(), s->ipc_frame.get())){
                         perror("Unable to send frame");
                         exit(1);
                 }
