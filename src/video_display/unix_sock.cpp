@@ -53,16 +53,12 @@
 #include <unordered_map>
 #include <cmath>
 
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <netinet/in.h>
-
 #include "video.h"
 #include "video_display.h"
 #include "video_codec.h"
 #include "tools/ipc_frame.h"
 #include "tools/ipc_frame_ug.h"
+#include "tools/ipc_frame_unix.h"
 
 static constexpr unsigned int IN_QUEUE_MAX_BUFFER_LEN = 5;
 static constexpr int SKIP_FIRST_N_FRAMES_IN_STREAM = 5;
@@ -82,8 +78,7 @@ struct state_unix_sock {
         struct video_desc display_desc;
 
         Ipc_frame_uniq ipc_frame;
-
-        int out_sock = -1;
+        Ipc_frame_writer_uniq frame_writer;
 
         struct module *parent;
 };
@@ -99,22 +94,12 @@ static void *display_unix_sock_init(struct module *parent, const char *fmt, unsi
 
         auto s = std::make_unique<state_unix_sock>();
 
-        sockaddr_un addr;
-        memset(&addr, 0, sizeof(addr));
-        addr.sun_family = AF_UNIX;
-        snprintf(addr.sun_path, sizeof(addr.sun_path), "/tmp/ug_unix");
-
-        int data_socket = socket(AF_UNIX, SOCK_STREAM, 0);
-
-        int ret = connect(data_socket, (const struct sockaddr *) &addr, sizeof(addr));
-        if(ret == -1){
+        s->parent = parent;
+        s->ipc_frame.reset(ipc_frame_new());
+        s->frame_writer.reset(ipc_frame_writer_new("/tmp/ug_unix"));
+        if(!s->frame_writer){
                 exit(EXIT_FAILURE);
         }
-
-        s->parent = parent;
-        s->out_sock = data_socket;
-        s->ipc_frame.reset(ipc_frame_new());
-
 
         return s.release();
 }
@@ -123,7 +108,7 @@ static void write_frame(state_unix_sock *s, video_frame *f){
         ipc_frame_from_ug_frame(s->ipc_frame.get(), f, VIDEO_CODEC_NONE, 0);
 
         errno = 0;
-        if(!ipc_frame_write_to_fd(s->ipc_frame.get(), s->out_sock)){
+        if(!ipc_frame_writer_write(s->frame_writer.get(), s->ipc_frame.get())){
                 perror("Unable to send frame");
                 exit(1);
         }
@@ -161,8 +146,6 @@ static void display_unix_sock_run(void *state)
 static void display_unix_sock_done(void *state)
 {
         auto s = static_cast<state_unix_sock *>(state);
-        if(s->out_sock > 0)
-                close(s->out_sock);
 
         delete s;
 }
