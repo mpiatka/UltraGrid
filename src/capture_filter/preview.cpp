@@ -52,6 +52,8 @@
 #include "debug.h"
 #include "lib_common.h"
 #include "utils/color_out.h"
+#include "utils/misc.h"
+#include "utils/sv_parse_num.hpp"
 #include "video.h"
 #include "video_codec.h"
 #include "tools/ipc_frame.h"
@@ -71,16 +73,19 @@ struct state_preview_filter{
         std::vector<Ipc_frame_uniq> free_frames;
         std::queue<Ipc_frame_uniq> frame_queue;
 
+        int target_width = 960;
+        int target_height = 540;
+
         std::thread worker_thread;
 };
 
-static void worker(struct state_preview_filter *s, const char *path){
+static void worker(struct state_preview_filter *s, std::string path){
         Ipc_frame_uniq frame;
         Ipc_frame_writer_uniq writer;
 
         for(;;){
                 if(!writer){
-                        writer.reset(ipc_frame_writer_new(path));
+                        writer.reset(ipc_frame_writer_new(path.c_str()));
                         if(!writer){
                                 sleep(1);
                                 continue;
@@ -120,7 +125,18 @@ static int init(struct module *parent, const char *cfg, void **state){
         s->free_frames.emplace_back(ipc_frame_new());
         s->free_frames.emplace_back(ipc_frame_new());
 
-        s->worker_thread = std::thread(worker, s, "/tmp/ug_preview_cap_unix");
+        std::string_view cfg_sv = cfg;
+
+        std::string socket_path = "/tmp/ug_preview_cap_unix";
+
+        std::string_view tok;
+        tok = tokenize(cfg_sv, ':');
+        if(!tok.empty()) socket_path = tok;
+        tok = tokenize(cfg_sv, ':');
+        parse_num(tok, s->target_width);
+        parse_num(tok, s->target_height);
+
+        s->worker_thread = std::thread(worker, s, socket_path);
 
         *state = s;
 
@@ -158,12 +174,17 @@ static struct video_frame *filter(void *state, struct video_frame *in){
         assert(in->tile_count == 1);
         const tile *tile = &in->tiles[0];
 
-        const float target_width = 960;
-        const float target_height = 540;
-        float scale = ((tile->width / target_width) + (tile->height / target_height)) / 2.f;
-        if(scale < 1)
-                scale = 1;
-        scale = std::round(scale);
+        float scale = 0;
+        if(s->target_width != -1 && s->target_height != -1){
+                scale = (static_cast<float>(tile->width) * tile->height)
+                        / (static_cast<float>(s->target_width) * s->target_height);
+
+                if(scale < 1)
+                        scale = 1;
+                scale = std::round(scale);
+        }
+
+        log_msg(LOG_LEVEL_NOTICE, "Scale %f\n", scale);
 
 
         if(ipc_frame_from_ug_frame(ipc_frame.get(), in, RGB, (int) scale)){
