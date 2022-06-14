@@ -115,30 +115,45 @@ static void worker(struct state_preview_filter *s, std::string path){
 
 static int init(struct module *parent, const char *cfg, void **state){
         UNUSED(parent);
-        if (strlen(cfg) > 0) {
-                std::cout << RED(BOLD("preview")) << " capture filter serves as a proxy for passing frames to GUI\n";
-                return strcmp(cfg, "help") == 0 ? 1 : -1;
-        }
-
-        struct state_preview_filter *s = new state_preview_filter();
+        auto s = std::make_unique<state_preview_filter>();
 
         s->free_frames.emplace_back(ipc_frame_new());
         s->free_frames.emplace_back(ipc_frame_new());
-
-        std::string_view cfg_sv = cfg;
 
         std::string socket_path = "/tmp/ug_preview_cap_unix";
 
-        std::string_view tok;
-        tok = tokenize(cfg_sv, ':');
-        if(!tok.empty()) socket_path = tok;
-        tok = tokenize(cfg_sv, ':');
-        parse_num(tok, s->target_width);
-        parse_num(tok, s->target_height);
+        auto cmp_and_remove_prefix = [](std::string_view& str, std::string_view prefix){
+                if(str.substr(0, prefix.size()) == prefix){
+                        str.remove_prefix(prefix.size());
+                        return true;
+                }
+                return false;
+        };
 
-        s->worker_thread = std::thread(worker, s, socket_path);
+        std::string_view cfg_sv = cfg ? cfg : "";
 
-        *state = s;
+        while(!cfg_sv.empty()){
+                auto tok = tokenize(cfg_sv, ':');
+                auto key = tokenize(tok, '=');
+                auto val = tokenize(tok, '=');
+
+                if(key == "help"){
+                        std::cout << RED(BOLD("preview")) << " capture filter serves as a proxy for passing frames to GUI\n";
+                        return 1;
+                } else if(key == "path"){
+                        socket_path = val;
+                } else if(key == "target_size="){
+                        parse_num(tokenize(val, 'x'), s->target_width);
+                        parse_num(tokenize(val, 'x'), s->target_height);
+                } else {
+                        log_msg(LOG_LEVEL_ERROR, "Invalid option\n");
+                        return -1;
+                }
+        }
+
+        s->worker_thread = std::thread(worker, s.get(), socket_path);
+
+        *state = s.release();
 
         return 0;
 }
