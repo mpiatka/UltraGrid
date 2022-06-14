@@ -41,10 +41,12 @@
 #include "config_win32.h"
 #include "debug.h"
 #include "lib_common.h"
+
 #include "video.h"
 #include "video_display.h"
 #include "video_codec.h"
-#include "video_codec.h"
+#include "utils/misc.h"
+#include "utils/sv_parse_num.hpp"
 #include "tools/ipc_frame.h"
 #include "tools/ipc_frame_ug.h"
 #include "tools/ipc_frame_unix.h"
@@ -75,8 +77,8 @@ struct state_preview_display_common {
         Ipc_frame_uniq ipc_frame;
         Ipc_frame_writer_uniq frame_writer;
 
-        int scaledW, scaledH;
-        int scaleF;
+        int target_width = 960;
+        int target_height = 540;
 
         struct module *parent;
 };
@@ -94,32 +96,53 @@ static void show_help(){
 static void *display_preview_init(struct module *parent, const char *fmt, unsigned int flags)
 {
         UNUSED(flags);
-        struct state_preview_display *s;
 
-        s = new state_preview_display();
+        auto s = std::make_unique<state_preview_display>();
 
-        if (fmt && strlen(fmt) > 0) {
-                if (isdigit(fmt[0])) { // fork
-                        struct state_preview_display *orig;
-                        sscanf(fmt, "%p", &orig);
-                        s->common = orig->common;
-                        return s;
-                } else {
-                        show_help();
-                        delete s;
-                        return &display_init_noerr;
-                }
+        if (fmt && strlen(fmt) > 0 && isdigit(fmt[0])) {
+                struct state_preview_display *orig;
+                sscanf(fmt, "%p", &orig);
+                s->common = orig->common;
+                return s.release();
         }
+
+        auto cmp_and_remove_prefix = [](std::string_view& str, std::string_view prefix){
+                if(str.substr(0, prefix.size()) == prefix){
+                        str.remove_prefix(prefix.size());
+                        return true;
+                }
+                return false;
+        };
+
+
         s->common = shared_ptr<state_preview_display_common>(new state_preview_display_common());
         s->common->parent = parent;
 
+        std::string socket_path = "/tmp/ug_preview_disp_unix";
+
+        std::string_view fmt_sv = fmt ? fmt : "";
+        for(auto tok = tokenize(fmt_sv, ':'); !tok.empty(); tok = tokenize(fmt_sv, ':')){
+                if(cmp_and_remove_prefix(tok, "help")){
+                        show_help();
+                        return nullptr;
+                } else if(cmp_and_remove_prefix(tok, "path=")){
+                        socket_path = tok;
+                } else if(cmp_and_remove_prefix(tok, "target_size=")){
+                        parse_num(tokenize(tok, 'x'), s->common->target_width);
+                        parse_num(tokenize(tok, 'x'), s->common->target_height);
+                } else {
+                        log_msg(LOG_LEVEL_ERROR, "Invalid option\n");
+                        return nullptr;
+                }
+        }
+
         s->common->ipc_frame.reset(ipc_frame_new());
-        s->common->frame_writer.reset(ipc_frame_writer_new("/tmp/ug_preview_disp_unix"));
+        s->common->frame_writer.reset(ipc_frame_writer_new(socket_path.c_str()));
         if(!s->common->frame_writer){
                 log_msg(LOG_LEVEL_FATAL, "Unable to connect to preview socket\n");
-                exit(EXIT_FAILURE);
+                return nullptr;
         }
-        return s;
+        return s.release();
 }
 
 static void display_preview_run(void *state)
@@ -150,12 +173,16 @@ static void display_preview_run(void *state)
                 assert(frame->tile_count == 1);
                 const tile *tile = &frame->tiles[0];
 
-                const float target_width = 960;
-                const float target_height = 540;
-                float scale = ((tile->width / target_width) + (tile->height / target_height)) / 2.f;
-                if(scale < 1)
-                        scale = 1;
-                scale = std::round(scale);
+                float scale = 0;
+                if(s->target_width != -1 && s->target_height != -1){
+                        scale = (static_cast<float>(tile->width) / s->target_height
+                                + static_cast<float>(tile->height) / s->target_width) / 2;
+
+                        if(scale < 1)
+                                scale = 1;
+                        scale = std::round(scale);
+                }
+                log_msg(LOG_LEVEL_NOTICE, "scale=%f, %dx%d\n", scale, s->target_width, s->target_height);
 
                 if(!ipc_frame_from_ug_frame(s->ipc_frame.get(), frame, RGB, (int) scale)){
                         log_msg(LOG_LEVEL_WARNING, "Unable to convert\n");
