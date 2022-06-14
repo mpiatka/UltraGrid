@@ -26,7 +26,7 @@ void scale_frame(char *dst, char *src,
 	int block_size = get_pf_block_bytes(codec);
 	assert(block_size > 0);
 	int written = 0;
-	for(int y = 0; y < src_h; y += f){
+	for(int y = 0; y + f <= src_h; y += f){
 		for(int x = 0; x + f * block_size <= src_line_len; x += f * block_size){
 			memcpy(dst + written, src + y*src_line_len + x, block_size);
 			written += block_size;
@@ -76,7 +76,8 @@ bool ipc_frame_from_ug_frame(struct Ipc_frame *dst,
 
 	if(scale_factor != 0){
 		int block_size_px = get_pf_block_pixels(src->color_spec);
-		dst->header.width = (dst->header.width / block_size_px / scale_factor) * block_size_px;
+		int block_count = (dst->header.width + block_size_px - 1) / block_size_px;
+		dst->header.width = (block_count / scale_factor) * block_size_px;
 		dst->header.height /= scale_factor;
 
 		if(dec != vc_memcpy){
