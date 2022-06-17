@@ -29,19 +29,6 @@ void scale_frame(char *dst, char *src,
 	}
 }
 
-void block_write(int fd, void *buf, size_t size){
-        size_t written = 0;
-        char *src = static_cast<char *>(buf);
-
-        while(written < size){
-                int ret = send(fd, src + written, size - written, MSG_NOSIGNAL);
-                if(ret == -1)
-                        return;
-                written += ret;
-        }
-}
-
-
 }//anon namespace
 
 bool ipc_frame_from_ug_frame(struct Ipc_frame *dst,
@@ -121,16 +108,4 @@ bool ipc_frame_from_ug_frame(struct Ipc_frame *dst,
 	}
 
 	return true;
-}
-
-bool ipc_frame_write_to_fd(const struct Ipc_frame *f, int fd){
-	std::array<char, IPC_FRAME_HEADER_LEN> header;
-
-	ipc_frame_write_header(&f->header, header.data());
-
-	errno = 0;
-	block_write(fd, header.data(), header.size());
-	block_write(fd, f->data, f->header.data_len);
-
-	return errno == 0;
 }
