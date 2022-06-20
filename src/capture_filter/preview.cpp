@@ -199,9 +199,6 @@ static struct video_frame *filter(void *state, struct video_frame *in){
                 scale = std::round(scale);
         }
 
-        log_msg(LOG_LEVEL_NOTICE, "Scale %f\n", scale);
-
-
         if(ipc_frame_from_ug_frame(ipc_frame.get(), in, RGB, (int) scale)){
                 std::lock_guard<std::mutex> lock(s->mut);
                 s->frame_queue.push(std::move(ipc_frame));
