@@ -177,7 +177,6 @@ static void display_unix_sock_run(void *state)
                                 scale = 1;
                         scale = std::round(scale);
                 }
-                log_msg(LOG_LEVEL_NOTICE, "scale=%f, %dx%d\n", scale, s->target_width, s->target_height);
 
                 if(!ipc_frame_from_ug_frame(s->ipc_frame.get(), frame.get(),
                                         RGB, (int) scale))
