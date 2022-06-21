@@ -62,6 +62,12 @@
 
 struct module;
 
+#ifdef _WIN32
+#define PLATFORM_TMP_DIR "C:/temp/"
+#else
+#define PLATFORM_TMP_DIR "/tmp/"
+#endif
+
 static int init(struct module *parent, const char *cfg, void **state);
 static void done(void *state);
 static struct video_frame *filter(void *state, struct video_frame *in);
@@ -120,7 +126,7 @@ static int init(struct module *parent, const char *cfg, void **state){
         s->free_frames.emplace_back(ipc_frame_new());
         s->free_frames.emplace_back(ipc_frame_new());
 
-        std::string socket_path = "/tmp/ug_preview_cap_unix";
+        std::string socket_path = PLATFORM_TMP_DIR "ug_preview_cap_unix";
 
         std::string_view cfg_sv = cfg ? cfg : "";
         while(!cfg_sv.empty()){
