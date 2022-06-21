@@ -258,7 +258,7 @@ void PreviewWidget::paintGL(){
 }
 
 void PreviewWidget::setKey(const char *key){
-	std::string path = "/tmp/";
+	std::string path = PLATFORM_TMP_DIR;
 	path += key;
 	ipc_frame_reader.reset(ipc_frame_reader_new(path.c_str()));
 }
