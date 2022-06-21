@@ -60,6 +60,12 @@
 #include "tools/ipc_frame_ug.h"
 #include "tools/ipc_frame_unix.h"
 
+#ifdef _WIN32
+#define PLATFORM_TMP_DIR "C:/temp/"
+#else
+#define PLATFORM_TMP_DIR "/tmp/"
+#endif
+
 static constexpr unsigned int IN_QUEUE_MAX_BUFFER_LEN = 5;
 static constexpr int SKIP_FIRST_N_FRAMES_IN_STREAM = 5;
 
@@ -102,10 +108,10 @@ static void *display_unix_sock_init(struct module *parent,
 
         std::string_view fmt_sv = fmt ? fmt : "";
 
-        std::string socket_path = "/tmp/ug_unix";
+        std::string socket_path = PLATFORM_TMP_DIR "ug_unix";
 
         if(is_preview){
-                socket_path = "/tmp/ug_preview_disp_unix";
+                socket_path = PLATFORM_TMP_DIR "ug_preview_disp_unix";
                 s->target_width = 960;
                 s->target_height = 540;
         }
