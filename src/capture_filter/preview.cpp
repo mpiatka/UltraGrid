@@ -122,16 +122,7 @@ static int init(struct module *parent, const char *cfg, void **state){
 
         std::string socket_path = "/tmp/ug_preview_cap_unix";
 
-        auto cmp_and_remove_prefix = [](std::string_view& str, std::string_view prefix){
-                if(str.substr(0, prefix.size()) == prefix){
-                        str.remove_prefix(prefix.size());
-                        return true;
-                }
-                return false;
-        };
-
         std::string_view cfg_sv = cfg ? cfg : "";
-
         while(!cfg_sv.empty()){
                 auto tok = tokenize(cfg_sv, ':');
                 auto key = tokenize(tok, '=');
