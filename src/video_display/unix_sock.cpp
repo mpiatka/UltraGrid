@@ -60,12 +60,6 @@
 #include "tools/ipc_frame_ug.h"
 #include "tools/ipc_frame_unix.h"
 
-#ifdef _WIN32
-#define PLATFORM_TMP_DIR "C:/temp/"
-#else
-#define PLATFORM_TMP_DIR "/tmp/"
-#endif
-
 static constexpr unsigned int IN_QUEUE_MAX_BUFFER_LEN = 5;
 static constexpr int SKIP_FIRST_N_FRAMES_IN_STREAM = 5;
 

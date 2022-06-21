@@ -62,12 +62,6 @@
 
 struct module;
 
-#ifdef _WIN32
-#define PLATFORM_TMP_DIR "C:/temp/"
-#else
-#define PLATFORM_TMP_DIR "/tmp/"
-#endif
-
 static int init(struct module *parent, const char *cfg, void **state);
 static void done(void *state);
 static struct video_frame *filter(void *state, struct video_frame *in);
