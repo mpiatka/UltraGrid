@@ -175,18 +175,11 @@ static void display_unix_sock_run(void *state)
                 assert(frame->tile_count == 1);
                 const tile *tile = &frame->tiles[0];
 
-                float scale = 0;
-                if(s->target_width != -1 && s->target_height != -1){
-                        scale = (static_cast<float>(tile->width) / s->target_height
-                                + static_cast<float>(tile->height) / s->target_width) / 2;
-
-                        if(scale < 1)
-                                scale = 1;
-                        scale = std::round(scale);
-                }
+                int scale = ipc_frame_get_scale_factor(tile->width, tile->height,
+                                s->target_width, s->target_height);
 
                 if(!ipc_frame_from_ug_frame(s->ipc_frame.get(), frame.get(),
-                                        RGB, (int) scale))
+                                        RGB, scale))
                 {
                         log_msg(LOG_LEVEL_WARNING, "Unable to convert\n");
                         continue;
