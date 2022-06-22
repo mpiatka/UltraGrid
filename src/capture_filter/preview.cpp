@@ -180,17 +180,10 @@ static struct video_frame *filter(void *state, struct video_frame *in){
         assert(in->tile_count == 1);
         const tile *tile = &in->tiles[0];
 
-        float scale = 0;
-        if(s->target_width != -1 && s->target_height != -1){
-                scale = (static_cast<float>(tile->width) * tile->height)
-                        / (static_cast<float>(s->target_width) * s->target_height);
+        int scale = ipc_frame_get_scale_factor(tile->width, tile->height,
+                        s->target_width, s->target_height);
 
-                if(scale < 1)
-                        scale = 1;
-                scale = std::round(scale);
-        }
-
-        if(ipc_frame_from_ug_frame(ipc_frame.get(), in, RGB, (int) scale)){
+        if(ipc_frame_from_ug_frame(ipc_frame.get(), in, RGB, scale)){
                 std::lock_guard<std::mutex> lock(s->mut);
                 s->frame_queue.push(std::move(ipc_frame));
                 s->frame_submitted_cv.notify_one();
