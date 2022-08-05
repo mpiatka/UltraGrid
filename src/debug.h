@@ -262,6 +262,61 @@ inline Log_output& get_log_output(){
         return out;
 }
 
+//On windows the aja module is built separately with msvc, and isn't passed
+//the correct include and link flags for fmt
+#ifdef HAVE_CONFIG_H
+#include <fmt/core.h>
+
+namespace{
+#ifdef MOD_NAME
+constexpr std::string_view strip_name_decoration(std::string_view name){
+        if(name.empty())
+                return name;
+
+        if(name[0] == '[')
+                name.remove_prefix(1);
+
+        if(auto idx = name.rfind(']'); idx != name.npos){
+                name.remove_suffix(name.size() - idx);
+        }
+
+        return name;
+}
+constexpr std::string_view logger_mod_name = strip_name_decoration(MOD_NAME);
+#else
+constexpr std::string_view logger_mod_name = "";
+#endif
+
+inline void internal_log_fmt(int log_lvl, fmt::string_view format, fmt::format_args args){
+        auto& lo = get_log_output();
+        auto buf = lo.get_buffer();
+        fmt::format_to(std::back_inserter(buf.get()), "{}", lo.get_level_style(log_lvl));
+        if constexpr(!logger_mod_name.empty()){
+                fmt::format_to(std::back_inserter(buf.get()), "[{}] ", logger_mod_name);
+        }
+        fmt::vformat_to(std::back_inserter(buf.get()), format, args);
+        fmt::format_to(std::back_inserter(buf.get()), "{}", lo.get_reset_style());
+
+        buf.submit();
+}
+} //anon namespace
+
+#if FMT_VERSION > 80000
+template<typename... Args>
+inline void log_fmt(int log_lvl, fmt::format_string<Args...> msg, Args&&... args)
+#else
+template<typename S, typename... Args>
+inline void log_fmt(int log_lvl, const S& msg, Args&&... args)
+#endif
+{
+        if(log_lvl > log_level)
+                return;
+
+        internal_log_fmt(log_lvl, msg, fmt::make_format_args(args...));
+}
+
+#endif //HAVE_CONFIG_H
+
 // Log, version 0.1: a simple logging class
 class Logger
 {
