@@ -20,6 +20,7 @@ brew install imagemagick jack libnatpmp opencv openssl
 brew install ossp-uuid # for cineform
 brew install qt@5
 brew install glm
+brew install fmt
 
 sudo ln -s /usr/local/opt/qt@5 /usr/local/opt/qt
 

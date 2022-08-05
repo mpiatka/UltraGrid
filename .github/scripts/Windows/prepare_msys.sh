@@ -49,6 +49,7 @@ $PACMAN_INSTALL ${MSYS_REPO}-qt6-base ${MSYS_REPO}-qt6-tools
 $PACMAN_INSTALL ${MSYS_REPO}-imagemagick ${MSYS_REPO}-opencv
 $PACMAN_INSTALL p7zip
 $PACMAN_INSTALL libtool # PCP
+$PACMAN_INSTALL ${MSYS_REPO}-fmt
 pacman -Scc --noconfirm
 
 # Build AJA wrapper if we have SDK

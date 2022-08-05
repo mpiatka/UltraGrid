@@ -22,6 +22,7 @@ sudo apt install libsdl2-dev libsdl2-mixer-dev libsdl2-ttf-dev
 sudo apt install libspeexdsp-dev
 sudo apt install libssl-dev
 sudo apt install libasound-dev libjack-jackd2-dev libnatpmp-dev libv4l-dev portaudio19-dev
+sudo apt install libfmt-dev
 
 # updates nasm 2.13->2.14 in U18.04 (needed for rav1e)
 update_nasm() {
