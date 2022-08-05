@@ -152,7 +152,9 @@ public:
 
         void set_timestamp_mode(log_timestamp_mode val) { show_timestamps = val; }
 
-        const std::string& get_level_style(int lvl);
+        const std::string& get_level_style(int lvl) const;
+        const std::string& get_reset_style() const;
+
         bool is_interactive() const { return interactive; }
 
         Log_output(const Log_output&) = delete;
@@ -183,33 +185,33 @@ private:
         friend class Buffer;
 };
 
-inline const std::string& Log_output::get_level_style(int lvl){
-        static std::string empty = "";
-
-        if (!is_interactive()) {
-                return empty;
-        }
-
+inline const std::string& Log_output::get_level_style(int lvl) const{
         switch(lvl){
         case LOG_LEVEL_FATAL: {
-                static std::string style = TERM_BOLD TERM_FG_RED;
+                static std::string style = is_interactive() ? TERM_BOLD TERM_FG_RED : "";
                 return style;
         }
         case LOG_LEVEL_ERROR: {
-                static std::string style = TERM_FG_RED;
+                static std::string style = is_interactive() ? TERM_FG_RED : "";
                 return style;
         }
         case LOG_LEVEL_WARNING: {
-                static std::string style = TERM_FG_YELLOW;
+                static std::string style = is_interactive() ? TERM_FG_YELLOW : "";
                 return style;
         }
         case LOG_LEVEL_NOTICE: {
-                static std::string style = TERM_FG_GREEN;
+                static std::string style = is_interactive() ? TERM_FG_GREEN : "";
                 return style;
         }
         default:
+                static std::string empty = "";
                 return empty;
         }
+}
+
+inline const std::string& Log_output::get_reset_style() const{
+        static std::string style = is_interactive() ? TERM_RESET : "";
+        return style;
 }
 
 inline void Log_output::submit(){
