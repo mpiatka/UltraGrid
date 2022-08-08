@@ -114,7 +114,6 @@ bool parse_log_cfg(const char *conf_str,
 #include <sstream>
 #include <string>
 #include <mutex>
-#include <fmt/core.h>
 #include "compat/platform_time.h"
 #include "utils/color_out.h"
 
@@ -263,6 +262,10 @@ inline Log_output& get_log_output(){
         return out;
 }
 
+//On windows the aja module is built separately with msvc, and isn't passed
+//the correct include and link flags for fmt
+#ifdef HAVE_CONFIG_H
+#include <fmt/core.h>
 template<typename... Args>
 inline void log_fmt(int log_lvl, std::string_view msg, Args&&... args){
         if(log_lvl > log_level)
@@ -275,6 +278,8 @@ inline void log_fmt(int log_lvl, std::string_view msg, Args&&... args){
         fmt::format_to(std::back_inserter(buf.get()), lo.get_reset_style());
         buf.submit();
 }
+
+#endif //HAVE_CONFIG_H
 
 // Log, version 0.1: a simple logging class
 class Logger
