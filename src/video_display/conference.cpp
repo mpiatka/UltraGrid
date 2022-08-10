@@ -39,7 +39,6 @@
 #include "config.h"
 #include "config_unix.h"
 #include "config_win32.h"
-#include "debug.h"
 #include "lib_common.h"
 #include "video.h"
 #include "video_display.h"
@@ -74,6 +73,7 @@
 #include "utils/profile_timer.hpp"
 
 #define MOD_NAME "[conference] "
+#include "debug.h"
 
 namespace{
 using clock = std::chrono::steady_clock;
@@ -456,7 +456,7 @@ static void show_help(){
 static void *display_conference_init(struct module *parent, const char *fmt, unsigned int flags)
 {
         auto s = std::make_unique<state_conference>();
-        log_msg(LOG_LEVEL_VERBOSE, MOD_NAME "init fmt: %s\n", fmt);
+        log_fmt(LOG_LEVEL_VERBOSE, "init fmt: {}\n", fmt);
 
         if(!fmt){
                 show_help();
@@ -488,7 +488,7 @@ static void *display_conference_init(struct module *parent, const char *fmt, uns
 #define FAIL_IF(x, msg) \
         do {\
                 if(x){\
-                        log_msg(LOG_LEVEL_ERROR, msg);\
+                        log_fmt(LOG_LEVEL_ERROR, msg);\
                         show_help();\
                         return &display_init_noerr;\
                 }\
@@ -511,7 +511,7 @@ static void *display_conference_init(struct module *parent, const char *fmt, uns
                         flags, nullptr, &d_ptr);
 
         if(ret != 0){
-                log_msg(LOG_LEVEL_ERROR, MOD_NAME "Unable to init real display\n");
+                log_fmt(LOG_LEVEL_ERROR, "Unable to init real display\n");
                 return nullptr;
         }
 
@@ -524,7 +524,7 @@ static void check_reconf(struct state_conference_common *s, struct video_desc de
 {
         if (!video_desc_eq(desc, s->display_desc)) {
                 s->display_desc = desc;
-                log_msg(LOG_LEVEL_VERBOSE, MOD_NAME "reconfiguring real display\n");
+                log_fmt(LOG_LEVEL_VERBOSE, "reconfiguring real display\n");
                 display_reconfigure(s->real_display.get(), s->display_desc, VIDEO_NORMAL);
         }
 }
@@ -543,16 +543,16 @@ static void display_conference_worker(std::shared_ptr<state_conference_common> s
                         auto key = tokenize(msg_text, '=');
                         auto val = tokenize(msg_text, '=');
 
-                        log_msg(LOG_LEVEL_NOTICE, MOD_NAME "Received message: %s\n", msg_univ->text);
+                        log_fmt(LOG_LEVEL_NOTICE, "Received message: {}\n", msg_univ->text);
                         struct response *r;
                         if (key == "layout") {
                                 Video_mixer::Layout new_layout = layout_from_name(val);
 
                                 if(new_layout == Video_mixer::Layout::Invalid){
-                                        log_msg(LOG_LEVEL_ERROR, "Unknown layout %s\n", std::string(val).c_str());
+                                        log_fmt(LOG_LEVEL_ERROR, "Unknown layout {}\n", val);
                                         r = new_response(RESPONSE_BAD_REQUEST, "Unknown layout!");
                                 } else {
-                                        log_msg(LOG_LEVEL_NOTICE, "Setting layout to %s\n", std::string(val).c_str());
+                                        log_fmt(LOG_LEVEL_NOTICE, "Setting layout to {}\n", val);
                                         mixer.set_layout(new_layout);
                                         r = new_response(RESPONSE_OK, NULL);
                                 }
@@ -560,20 +560,20 @@ static void display_conference_worker(std::shared_ptr<state_conference_common> s
                         } else if (key == "primary_ssrc"){
                                 uint32_t parsed_ssrc = 0;
                                 if(!parse_num(val, parsed_ssrc, 16)){
-                                        log_msg(LOG_LEVEL_ERROR, "Unable to parse ssrc!\n");
+                                        log_fmt(LOG_LEVEL_ERROR, "Unable to parse ssrc!\n");
                                         r = new_response(RESPONSE_BAD_REQUEST, "Unable to parse ssrc!");
                                 } else {
-                                        log_msg(LOG_LEVEL_NOTICE, "Setting primary ssrc to %x\n", parsed_ssrc);
+                                        log_fmt(LOG_LEVEL_NOTICE, "Setting primary ssrc to {:x}\n", parsed_ssrc);
                                         mixer.set_primary_ssrc(parsed_ssrc);
                                         r = new_response(RESPONSE_OK, NULL);
                                 }
 
                         } else if (key == "info"){
                                 auto ssrcs = mixer.get_participant_ssrc_list();
-                                log_msg(LOG_LEVEL_NOTICE, "Conference layout: %s\n", layout_get_name(mixer.get_layout()));
-                                log_msg(LOG_LEVEL_NOTICE, "%ld participants \n", ssrcs.size());
+                                log_fmt(LOG_LEVEL_NOTICE, "Conference layout: {}\n", layout_get_name(mixer.get_layout()));
+                                log_fmt(LOG_LEVEL_NOTICE, "{} participants \n", ssrcs.size());
                                 for(const auto& p : ssrcs){
-                                        log_msg(LOG_LEVEL_NOTICE, "%s   %x\n", p == mixer.get_primary_ssrc() ? "*" : " ", p);
+                                        log_fmt(LOG_LEVEL_NOTICE, "{}   {:x}\n", p == mixer.get_primary_ssrc() ? "*" : " ", p);
                                 }
                                 r = new_response(RESPONSE_OK, NULL);
                         } else {
@@ -615,7 +615,7 @@ static void display_conference_worker(std::shared_ptr<state_conference_common> s
                         next_frame_time = now + std::chrono::hours(1);
                 } else {
                         if(!have_frame)
-                                log_msg(LOG_LEVEL_WARNING, MOD_NAME "Woke up without new frame and before render time. This should not happen.\n");
+                                log_fmt(LOG_LEVEL_WARNING, "Woke up without new frame and before render time. This should not happen.\n");
                         using namespace std::chrono_literals;
                         next_frame_time = last_frame_time + std::chrono::duration_cast<clock::duration>(1s / s->desc.fps);
                         if(next_frame_time <= now){
