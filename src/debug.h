@@ -265,7 +265,7 @@ inline Log_output& get_log_output(){
 //On windows the aja module is built separately with msvc, and isn't passed
 //the correct include and link flags for fmt
 #ifdef HAVE_CONFIG_H
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 namespace{
 #ifdef MOD_NAME
