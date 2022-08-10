@@ -1366,7 +1366,7 @@ int main(int argc, char *argv[])
         signal(SIGSEGV, crash_signal_handler);
 
         if ((init = common_preinit(argc, argv)) == nullptr) {
-                log_msg(LOG_LEVEL_FATAL, "common_preinit() failed!\n");
+                log_fmt(LOG_LEVEL_FATAL, "common_preinit() failed!\n");
                 EXIT(EXIT_FAILURE);
         }
 
