@@ -959,7 +959,7 @@ int main(int argc, char **argv)
                             p.addrlen = addrlen;
                             p.last_recv = t;
 
-                            log_msg(LOG_LEVEL_NOTICE, "New participant\n");
+                            log_fmt(LOG_LEVEL_NOTICE, "New participant\n");
                             std::string msg = "create-port ";
                             msg += get_sockaddr_str(reinterpret_cast<sockaddr *>(&sin));
                             if(params.conference_compression){
