@@ -266,6 +266,28 @@ inline Log_output& get_log_output(){
 //the correct include and link flags for fmt
 #ifdef HAVE_CONFIG_H
 #include <fmt/core.h>
+
+namespace{
+#ifdef MOD_NAME
+constexpr std::string_view strip_name_decoration(std::string_view name){
+        if(name.empty())
+                return name;
+
+        if(name[0] == '[')
+                name.remove_prefix(1);
+
+        if(auto idx = name.rfind(']'); idx != name.npos){
+                name.remove_suffix(name.size() - idx);
+        }
+
+        return name;
+}
+constexpr std::string_view logger_mod_name = strip_name_decoration(MOD_NAME);
+#else
+constexpr std::string_view logger_mod_name = "";
+#endif
+} //anon namespace
+
 template<typename... Args>
 inline void log_fmt(int log_lvl, std::string_view msg, Args&&... args){
         if(log_lvl > log_level)
@@ -274,6 +296,9 @@ inline void log_fmt(int log_lvl, std::string_view msg, Args&&... args){
         auto& lo = get_log_output();
         auto buf = lo.get_buffer();
         fmt::format_to(std::back_inserter(buf.get()), lo.get_level_style(log_lvl));
+        if constexpr(!logger_mod_name.empty()){
+                fmt::format_to(std::back_inserter(buf.get()), "[{}] ", logger_mod_name);
+        }
         fmt::format_to(std::back_inserter(buf.get()), msg, args...);
         fmt::format_to(std::back_inserter(buf.get()), lo.get_reset_style());
         buf.submit();
