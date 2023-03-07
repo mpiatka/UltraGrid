@@ -227,6 +227,7 @@ static int audio_play_pw_reconfigure(void *state, struct audio_desc desc){
             PW_KEY_MEDIA_CATEGORY, "Playback",
             PW_KEY_MEDIA_ROLE, "Communication",
             PW_KEY_APP_NAME, "UltraGrid",
+            PW_KEY_APP_ICON_NAME, "ultragrid",
             PW_KEY_NODE_NAME, "ug play",
             nullptr);
 
