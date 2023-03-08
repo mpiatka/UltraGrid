@@ -88,6 +88,8 @@ struct pipewire_init_guard{
 struct state_pipewire_play{
     pipewire_init_guard init_guard;
 
+    std::string target;
+
     audio_desc desc;
 
     pw_thread_loop_uniq pipewire_loop;
@@ -97,6 +99,92 @@ struct state_pipewire_play{
 
     double accumulator = 0;
 };
+
+static void on_registry_event_global(void *data, uint32_t id,
+        uint32_t permissions, const char *type, uint32_t version,
+        const struct spa_dict *props)
+{
+    std::string_view type_sv(type);
+    if(type_sv != "PipeWire:Interface:Node")
+        return;
+
+    bool is_sink = false;
+    std::string_view name;
+    std::string_view desc;
+    for(int i = 0; i < props->n_items; i++){
+        std::string_view key(props->items[i].key);
+        std::string_view val(props->items[i].value);
+        if(key == "node.description")
+            desc = val;
+        if(key == "node.nick")
+            name = val;
+        if(key == "media.class" && val == "Audio/Sink"){
+            is_sink = true;
+            break;
+        }
+    }
+
+    if(is_sink){
+        std::cout << "Sink " << id << " " << name << ": " << desc << "\n";
+    }
+
+}
+
+struct roundtrip_data{
+    int pending;
+    struct pw_main_loop *loop;
+};
+
+static void on_core_done(void *data, uint32_t id, int seq)
+{
+    auto d = static_cast<roundtrip_data *>(data);
+
+    if (id == PW_ID_CORE && seq == d->pending)
+        pw_main_loop_quit(d->loop);
+
+}
+
+static void print_devices(){
+    pipewire_init_guard init_guard;
+
+    auto loop = pw_main_loop_new(nullptr);
+    auto context = pw_context_new(pw_main_loop_get_loop(loop), nullptr, 0);
+    auto core = pw_context_connect(context, nullptr, 0);
+    auto registry = pw_core_get_registry(core, PW_VERSION_REGISTRY, 0);
+
+    spa_hook registry_listener;
+    spa_zero(registry_listener);
+
+    const static pw_registry_events registry_events = {
+        PW_VERSION_REGISTRY_EVENTS,
+        .global = on_registry_event_global
+    };
+
+    pw_registry_add_listener(registry, &registry_listener, &registry_events, nullptr);
+
+    static const struct pw_core_events core_events = {
+        PW_VERSION_CORE_EVENTS,
+        .done = on_core_done,
+    };
+
+    struct roundtrip_data d = { .loop = loop  };
+    struct spa_hook core_listener;
+
+    pw_core_add_listener(core, &core_listener, &core_events, &d);
+
+    d.pending = pw_core_sync(core, PW_ID_CORE, 0);
+
+    log_msg(LOG_LEVEL_NOTICE, "pending: %x\n", d.pending);
+
+    pw_main_loop_run(loop);
+
+    spa_hook_remove(&core_listener);
+
+    pw_proxy_destroy(reinterpret_cast<pw_proxy *>(registry));
+    pw_core_disconnect(core);
+    pw_context_destroy(context);
+    pw_main_loop_destroy(loop);
+}
 
 static void audio_play_pw_probe(struct device_info **available_devices, int *count, void (**deleter)(void *))
 {
@@ -109,6 +197,7 @@ static void audio_play_pw_probe(struct device_info **available_devices, int *cou
 
 static void audio_play_pw_help(){
     color_printf("Pipewire audio output.\n");
+    print_devices();
 }
 
 /* This function can only use realtime-safe calls (no locking, allocating, etc.)
@@ -141,12 +230,27 @@ static void on_process(void *userdata) noexcept{
 static void * audio_play_pw_init(const char *cfg){
     std::string_view cfg_sv(cfg);
 
-    if(cfg_sv == "help"){
+    std::string_view key = tokenize(cfg_sv, '=', '\"');
+    std::string_view val = tokenize(cfg_sv, '=', '\"');
+
+    std::string_view target_device;
+
+    if(key == "help"){
         audio_play_pw_help();
         return &audio_init_state_ok;
+    } else if(key == "target"){
+        target_device = val;
     }
 
     auto state = std::make_unique<state_pipewire_play>();
+
+     
+    fprintf(stdout, "Compiled with libpipewire %s\n"
+            "Linked with libpipewire %s\n",
+            pw_get_headers_version(),
+            pw_get_library_version());
+
+    state->target = std::string(target_device);
     
     state->pipewire_loop.reset(pw_thread_loop_new("Playback", nullptr));
     pw_thread_loop_start(state->pipewire_loop.get());
@@ -229,6 +333,7 @@ static int audio_play_pw_reconfigure(void *state, struct audio_desc desc){
             PW_KEY_APP_NAME, "UltraGrid",
             PW_KEY_APP_ICON_NAME, "ultragrid",
             PW_KEY_NODE_NAME, "ug play",
+            PW_KEY_NODE_TARGET, s->target.c_str(), //TODO: deprecated in newer
             nullptr);
 
     pw_properties_setf(props, PW_KEY_NODE_RATE, "1/%u", rate);
