@@ -53,11 +53,37 @@
 #include "utils/ring_buffer.h"
 #include "utils/string_view_utils.hpp"
 
-struct pipewire_thread_loop_deleter { void operator()(pw_thread_loop *l) { pw_thread_loop_destroy(l); } };
-using pw_thread_loop_uniq = std::unique_ptr<pw_thread_loop, pipewire_thread_loop_deleter>;
+template<typename T, auto delete_func>
+struct raii_deleter_helper { void operator()(T *p) { delete_func(p); } };
+template<typename T, auto delete_func>
+using raii_uniq_handle = std::unique_ptr<T, raii_deleter_helper<T, delete_func>>;
 
-struct pipewire_stream_deleter { void operator()(pw_stream *s) { pw_stream_destroy(s); } };
-using pw_stream_uniq = std::unique_ptr<pw_stream, pipewire_stream_deleter>;
+template<typename T>
+struct raii_proxy_deleter_helper { void operator()(T *p) { pw_proxy_destroy(reinterpret_cast<pw_proxy *>(p)); } };
+template<typename T>
+using raii_uniq_proxy_handle = std::unique_ptr<T, raii_proxy_deleter_helper<T>>;
+
+using pw_thread_loop_uniq = raii_uniq_handle<pw_thread_loop, pw_thread_loop_destroy>;
+using pw_main_loop_uniq = raii_uniq_handle<pw_main_loop, pw_main_loop_destroy>;
+using pw_stream_uniq = raii_uniq_handle<pw_stream, pw_stream_destroy>;
+using pw_context_uniq = raii_uniq_handle<pw_context, pw_context_destroy>;
+using pw_core_uniq = raii_uniq_handle<pw_core, pw_core_disconnect>;
+using pw_registry_uniq = raii_uniq_proxy_handle<pw_registry>;
+
+struct spa_hook_uniq{
+    spa_hook_uniq(){
+        spa_zero(hook);
+    }
+    ~spa_hook_uniq(){
+        spa_hook_remove(&hook);
+    }
+    spa_hook_uniq(spa_hook_uniq&) = delete;
+    spa_hook_uniq& operator=(spa_hook_uniq&) = delete;
+
+    spa_hook& get() { return hook; }
+
+    spa_hook hook;
+};
 
 class pipewire_thread_loop_lock_guard{
 public:
@@ -85,19 +111,66 @@ struct pipewire_init_guard{
     pipewire_init_guard& operator=(pipewire_init_guard&) = delete;
 };
 
-struct state_pipewire_play{
+struct pipewire_state_common{
     pipewire_init_guard init_guard;
+
+    pw_thread_loop_uniq pipewire_loop;
+    pw_context_uniq pipewire_context;
+    pw_core_uniq pipewire_core;
+    spa_hook_uniq core_listener;
+
+    int pw_pending_seq = 0;
+    int pw_last_seq = 0;
+};
+
+static void on_core_done(void *data, uint32_t id, int seq)
+{
+    auto s = static_cast<pipewire_state_common *>(data);
+
+    s->pw_last_seq = seq;
+    pw_thread_loop_signal(s->pipewire_loop.get(), false);
+}
+
+static void on_core_error(void *data, uint32_t id, int seq, int res, const char *message)
+{
+    log_msg(LOG_LEVEL_ERROR, "Pipewire error: id:%d seq:%x res:%d msg: %s\n", id, seq, res, message);
+}
+
+static const struct pw_core_events core_events = {
+    PW_VERSION_CORE_EVENTS,
+    .info = nullptr,
+    .done = on_core_done,
+    .ping = nullptr,
+    .error = on_core_error,
+    .remove_id = nullptr,
+    .bound_id = nullptr,
+    .add_mem = nullptr,
+    .remove_mem = nullptr,
+};
+
+static bool initialize_pw_common(pipewire_state_common& s){
+    s.pipewire_loop.reset(pw_thread_loop_new("Playback", nullptr));
+    s.pipewire_context.reset(pw_context_new(pw_thread_loop_get_loop(s.pipewire_loop.get()), nullptr, 0)); //TODO check return
+    s.pipewire_core.reset(pw_context_connect(s.pipewire_context.get(), nullptr, 0));
+
+    pw_core_add_listener(s.pipewire_core.get(), &s.core_listener.get(), &core_events, &s);
+
+    pw_thread_loop_start(s.pipewire_loop.get());
+
+    return true;
+}
+
+
+struct state_pipewire_play{
+    pipewire_state_common pw;
+
+    pw_stream_uniq stream;
+    spa_hook_uniq stream_listener;
 
     std::string target;
 
     audio_desc desc;
-
-    pw_thread_loop_uniq pipewire_loop;
-
     ring_buffer_uniq ring_buf;
-    pw_stream_uniq stream;
-
-    double accumulator = 0;
 };
 
 static void on_registry_event_global(void *data, uint32_t id,
@@ -114,6 +187,8 @@ static void on_registry_event_global(void *data, uint32_t id,
     for(int i = 0; i < props->n_items; i++){
         std::string_view key(props->items[i].key);
         std::string_view val(props->items[i].value);
+
+        std::cout << "\t" << key << "\t\t\t\t" << val << "\n";
         if(key == "node.description")
             desc = val;
         if(key == "node.nick")
@@ -130,60 +205,28 @@ static void on_registry_event_global(void *data, uint32_t id,
 
 }
 
-struct roundtrip_data{
-    int pending;
-    struct pw_main_loop *loop;
-};
-
-static void on_core_done(void *data, uint32_t id, int seq)
-{
-    auto d = static_cast<roundtrip_data *>(data);
-
-    if (id == PW_ID_CORE && seq == d->pending)
-        pw_main_loop_quit(d->loop);
-
-}
-
 static void print_devices(){
-    pipewire_init_guard init_guard;
+    pipewire_state_common s;
+    initialize_pw_common(s);
 
-    auto loop = pw_main_loop_new(nullptr);
-    auto context = pw_context_new(pw_main_loop_get_loop(loop), nullptr, 0);
-    auto core = pw_context_connect(context, nullptr, 0);
-    auto registry = pw_core_get_registry(core, PW_VERSION_REGISTRY, 0);
-
-    spa_hook registry_listener;
-    spa_zero(registry_listener);
+    pw_registry_uniq registry(pw_core_get_registry(s.pipewire_core.get(), PW_VERSION_REGISTRY, 0));
 
     const static pw_registry_events registry_events = {
         PW_VERSION_REGISTRY_EVENTS,
         .global = on_registry_event_global
     };
 
-    pw_registry_add_listener(registry, &registry_listener, &registry_events, nullptr);
+    spa_hook_uniq registry_listener;
+    pw_registry_add_listener(registry.get(), &registry_listener.get(), &registry_events, nullptr);
 
-    static const struct pw_core_events core_events = {
-        PW_VERSION_CORE_EVENTS,
-        .done = on_core_done,
-    };
+    pipewire_thread_loop_lock_guard lock(s.pipewire_loop.get());
 
-    struct roundtrip_data d = { .loop = loop  };
-    struct spa_hook core_listener;
+    s.pw_pending_seq = pw_core_sync(s.pipewire_core.get(), PW_ID_CORE, s.pw_pending_seq);
+    int wait_seq = s.pw_pending_seq;
 
-    pw_core_add_listener(core, &core_listener, &core_events, &d);
-
-    d.pending = pw_core_sync(core, PW_ID_CORE, 0);
-
-    log_msg(LOG_LEVEL_NOTICE, "pending: %x\n", d.pending);
-
-    pw_main_loop_run(loop);
-
-    spa_hook_remove(&core_listener);
-
-    pw_proxy_destroy(reinterpret_cast<pw_proxy *>(registry));
-    pw_core_disconnect(core);
-    pw_context_destroy(context);
-    pw_main_loop_destroy(loop);
+    do{
+        pw_thread_loop_wait(s.pipewire_loop.get());
+    } while(s.pw_last_seq < wait_seq);
 }
 
 static void audio_play_pw_probe(struct device_info **available_devices, int *count, void (**deleter)(void *))
@@ -242,7 +285,7 @@ static void * audio_play_pw_init(const char *cfg){
         target_device = val;
     }
 
-    auto state = std::make_unique<state_pipewire_play>();
+    auto s = std::make_unique<state_pipewire_play>();
 
      
     fprintf(stdout, "Compiled with libpipewire %s\n"
@@ -250,12 +293,11 @@ static void * audio_play_pw_init(const char *cfg){
             pw_get_headers_version(),
             pw_get_library_version());
 
-    state->target = std::string(target_device);
+    s->target = std::string(target_device);
     
-    state->pipewire_loop.reset(pw_thread_loop_new("Playback", nullptr));
-    pw_thread_loop_start(state->pipewire_loop.get());
+    initialize_pw_common(s->pw);
 
-    return state.release();
+    return s.release();
 }
 
 static void audio_play_pw_put_frame(void *state, const struct audio_frame *frame){
@@ -355,14 +397,18 @@ static int audio_play_pw_reconfigure(void *state, struct audio_desc desc){
     /*
      * Pipewire thread loop lock
      */
-    pipewire_thread_loop_lock_guard lock(s->pipewire_loop.get());
+    pipewire_thread_loop_lock_guard lock(s->pw.pipewire_loop.get());
 
-    s->stream.reset(pw_stream_new_simple(
-                pw_thread_loop_get_loop(s->pipewire_loop.get()),
+    s->stream.reset(pw_stream_new(
+                s->pw.pipewire_core.get(),
                 "UltraGrid playback",
-                props,
-                &stream_events,
-                s));
+                props));
+
+    pw_stream_add_listener(
+            s->stream.get(),
+            &s->stream_listener.get(),
+            &stream_events,
+            s);
 
     int buf_len_ms = 50;
     int ring_size = desc.bps * desc.ch_count * (desc.sample_rate * buf_len_ms / 1000);
@@ -383,7 +429,7 @@ static int audio_play_pw_reconfigure(void *state, struct audio_desc desc){
 static void audio_play_pw_done(void *state){
     auto s = static_cast<state_pipewire_play *>(state);
 
-    pw_thread_loop_stop(s->pipewire_loop.get());
+    pw_thread_loop_stop(s->pw.pipewire_loop.get());
     delete s;
 }
 
