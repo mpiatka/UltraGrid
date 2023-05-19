@@ -170,7 +170,7 @@ static void * audio_play_pw_init(const char *cfg){
 
     if(key == "help"){
         audio_play_pw_help();
-        return &audio_init_state_ok;
+        return INIT_NOERR;
     } else if(key == "target"){
         target_device = val;
     }
