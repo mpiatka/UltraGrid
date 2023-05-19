@@ -27,7 +27,10 @@ struct spa_hook_uniq{
         spa_zero(hook);
     }
     ~spa_hook_uniq(){
-        spa_hook_remove(&hook);
+        /*Check if hook is initialized.
+         * Needed only for old pw versions before commit 2394413e */
+        if(!!hook.link.prev)
+            spa_hook_remove(&hook);
     }
     spa_hook_uniq(spa_hook_uniq&) = delete;
     spa_hook_uniq& operator=(spa_hook_uniq&) = delete;
