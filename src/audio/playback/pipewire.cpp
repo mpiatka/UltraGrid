@@ -204,10 +204,10 @@ static void audio_play_pw_put_frame(void *state, const struct audio_frame *frame
 
 static bool is_format_supported(void *data, size_t *len){
     struct audio_desc desc;
-    if (*len < sizeof desc) {
+    if (*len < sizeof(desc)) {
         return false;
     } else {
-        memcpy(&desc, data, sizeof desc);
+        memcpy(&desc, data, sizeof(desc));
     }
 
     return desc.codec == AC_PCM && desc.bps >= 1 && desc.bps <= 4;
