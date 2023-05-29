@@ -239,10 +239,10 @@ static void on_param_changed(void *state, uint32_t id, const struct spa_pod *par
     if(!param || id != SPA_PARAM_Format)
         return;
 
-    //TODO check return
     spa_audio_info audio_params;
-    spa_format_parse(param, &audio_params.media_type, &audio_params.media_subtype);
-    if(audio_params.media_type != SPA_MEDIA_TYPE_audio
+    int res = spa_format_parse(param, &audio_params.media_type, &audio_params.media_subtype);
+    if(res < 0
+            || audio_params.media_type != SPA_MEDIA_TYPE_audio
             || audio_params.media_subtype != SPA_MEDIA_SUBTYPE_raw)
     {
         return;
