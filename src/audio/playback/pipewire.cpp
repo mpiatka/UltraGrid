@@ -210,7 +210,9 @@ static void on_param_changed(void *state, uint32_t id, const struct spa_pod *par
 
     spa_format_audio_raw_parse(param, &audio_params.info.raw);
 
-    //TODO check if format is same as s->desc
+    assert(audio_params.info.raw.rate == s->decs.sample_rate);
+    assert(audio_params.info.raw.channels == s->decs.ch_count);
+    assert(audio_params.info.raw.format == get_pw_format_from_bps(s->decs.bps));
 
     log_msg(LOG_LEVEL_NOTICE, "Format change: %u %u %u\n",
             audio_params.info.raw.format,
