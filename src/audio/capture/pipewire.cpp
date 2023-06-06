@@ -65,6 +65,11 @@ struct state_pipewire_cap{
 
     struct audio_frame frame;
     std::vector<char> frame_data;
+
+    int ch_count = 1;
+    int sample_rate = 48000;
+    int quant = 128;
+    int bps = 2;
 };
 
 /*
@@ -91,14 +96,15 @@ static void on_process(void *state){
 }
 
 static void on_param_changed(void *state, uint32_t id, const struct spa_pod *param){
+    auto s = static_cast<state_pipewire_cap *>(state);
     spa_audio_info audio_params;
 
     if(!param || id != SPA_PARAM_Format)
         return;
 
-    //TODO check return
-    spa_format_parse(param, &audio_params.media_type, &audio_params.media_subtype);
-    if(audio_params.media_type != SPA_MEDIA_TYPE_audio
+    int res = spa_format_parse(param, &audio_params.media_type, &audio_params.media_subtype);
+    if(res < 0
+            || audio_params.media_type != SPA_MEDIA_TYPE_audio
             || audio_params.media_subtype != SPA_MEDIA_SUBTYPE_raw)
     {
         return;
@@ -111,7 +117,10 @@ static void on_param_changed(void *state, uint32_t id, const struct spa_pod *par
             audio_params.info.raw.rate,
             audio_params.info.raw.channels);
 
-    //TODO: Actually handle format changes
+    //TODO thread safety
+    s->sample_rate = audio_params.info.raw.rate;
+    s->ch_count = audio_params.info.raw.channels;
+    s->bps = get_bps_from_pw_format(audio_params.info.raw.format);
 }
 
 const static pw_stream_events stream_events = { 
@@ -137,17 +146,25 @@ static void audio_cap_pw_help(){
 static void *audio_cap_pipewire_init(struct module *parent, const char *cfg){
     std::string_view cfg_sv(cfg);
 
-    std::string_view key = tokenize(cfg_sv, '=', '\"');
-    std::string_view val = tokenize(cfg_sv, '=', '\"');
-
     std::string_view target_device;
+    unsigned ch_count = 1;
 
-    if(key == "help"){
-        audio_cap_pw_help();
-        return INIT_NOERR;
-    } else if(key == "target"){
-        target_device = val;
+    while(!cfg_sv.empty()){
+        auto tok = tokenize(cfg_sv, ':', '"');
+
+        auto key = tokenize(tok, '=');
+        auto val = tokenize(tok, '=');
+
+        if(key == "help"){
+            audio_cap_pw_help();
+            return INIT_NOERR;
+        } else if(key == "target"){
+            target_device = val;
+        } else if(key == "channels"){
+            parse_num(val, ch_count);
+        }
     }
+
 
     auto s = std::make_unique<state_pipewire_cap>();
      
@@ -157,6 +174,7 @@ static void *audio_cap_pipewire_init(struct module *parent, const char *cfg){
             pw_get_library_version());
 
     s->target = std::string(target_device);
+    s->ch_count = ch_count;
     
     initialize_pw_common(s->pw);
 
@@ -167,33 +185,30 @@ static void *audio_cap_pipewire_init(struct module *parent, const char *cfg){
             PW_KEY_APP_NAME, "UltraGrid",
             PW_KEY_APP_ICON_NAME, "ultragrid",
             PW_KEY_NODE_NAME, "ug capture",
-            PW_KEY_NODE_TARGET, s->target.c_str(), //TODO: deprecated in newer
+            STREAM_TARGET_PROPERTY_KEY, s->target.c_str(),
             nullptr);
 
-    //TODO: Don't hardcode these
-    unsigned rate = 48000;
-    unsigned quant = 128;
-    spa_audio_format format = SPA_AUDIO_FORMAT_S16;
-    unsigned ch_count = 1;
+    spa_audio_format format = get_pw_format_from_bps(s->bps);
 
-    s->frame.ch_count = ch_count;
-    s->frame.bps = 2;
-    s->frame.sample_rate = rate;
+    s->frame.ch_count = s->ch_count;
+    s->frame.bps = s->bps;
+    s->frame.sample_rate = s->sample_rate;
     s->frame.max_size = s->frame.ch_count * s->frame.bps * s->frame.sample_rate;
     s->frame_data.resize(s->frame.max_size);
     s->frame.data = s->frame_data.data();
 
-    pw_properties_setf(props, PW_KEY_NODE_RATE, "1/%u", rate);
-    pw_properties_setf(props, PW_KEY_NODE_LATENCY, "%u/%u", quant, rate);
+    pw_properties_setf(props, PW_KEY_NODE_RATE, "1/%u", s->sample_rate);
+    pw_properties_setf(props, PW_KEY_NODE_LATENCY, "%u/%u", s->quant, s->sample_rate);
 
     std::byte buffer[1024];
     auto pod_builder = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
 
     auto audio_info = SPA_AUDIO_INFO_RAW_INIT(
                 .format = format,
-                .rate = rate,
-                .channels = ch_count,
+                .rate = s->sample_rate,
+                .channels = s->ch_count,
                 );
+
     const spa_pod *params = spa_format_audio_raw_build(&pod_builder, SPA_PARAM_EnumFormat,
             &audio_info);
 
@@ -214,7 +229,8 @@ static void *audio_cap_pipewire_init(struct module *parent, const char *cfg){
             s.get());
 
     int buf_len_ms = 50;
-    int ring_size = /*desc.bps TODO*/ 2 * ch_count * (rate * buf_len_ms / 1000);
+    //TODO
+    int ring_size = s->bps * s->ch_count * (s->sample_rate * buf_len_ms / 1000);
     s->ring_buf.reset(ring_buffer_init(ring_size));
 
     pw_stream_connect(s->stream.get(),
