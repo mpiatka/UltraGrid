@@ -112,12 +112,9 @@ static void on_process(void *userdata) noexcept{
 }
 
 static void * audio_play_pw_init(const char *cfg){
+    auto s = std::make_unique<state_pipewire_play>();
+
     std::string_view cfg_sv(cfg);
-
-    std::string_view target_device;
-    unsigned buffer_len = 0;
-    unsigned quant = 0;
-
     while(!cfg_sv.empty()){
         auto tok = tokenize(cfg_sv, ':', '"');
         auto key = tokenize(tok, '=');
@@ -127,29 +124,21 @@ static void * audio_play_pw_init(const char *cfg){
             audio_play_pw_help();
             return INIT_NOERR;
         } else if(key == "target"){
-            target_device = val;
+            s->target = val;
         } else if(key == "buffer-len"){
-            parse_num(val, buffer_len);
+            parse_num(val, s->buf_len_ms);
         } else if(key == "quant"){
-            parse_num(val, quant);
+            parse_num(val, s->quant);
         }
     }
 
-
-    auto s = std::make_unique<state_pipewire_play>();
+    initialize_pw_common(s->pw);
      
     fprintf(stdout, "Compiled with libpipewire %s\n"
             "Linked with libpipewire %s\n",
             pw_get_headers_version(),
             pw_get_library_version());
 
-    s->target = std::string(target_device);
-    if(buffer_len)
-        s->buf_len_ms = buffer_len;
-    if(quant)
-        s->quant = quant;
-    
-    initialize_pw_common(s->pw);
 
     return s.release();
 }
