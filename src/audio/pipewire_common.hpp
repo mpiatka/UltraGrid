@@ -58,15 +58,29 @@ private:
     pw_thread_loop *l;
 };
 
-struct pipewire_init_guard{
-    pipewire_init_guard(){
-        pw_init(nullptr, nullptr);
-    }
-    ~pipewire_init_guard(){
-        pw_deinit();
-    }
+class pipewire_init_guard{
+public:
+    pipewire_init_guard() = default;
     pipewire_init_guard(pipewire_init_guard&) = delete;
     pipewire_init_guard& operator=(pipewire_init_guard&) = delete;
+    pipewire_init_guard(pipewire_init_guard&& o) { std::swap(initialized, o.initialized);}
+    pipewire_init_guard& operator=(pipewire_init_guard&& o) {
+            std::swap(initialized, o.initialized);
+            return *this;
+    }
+
+    ~pipewire_init_guard(){
+            if(initialized)
+                    pw_deinit();
+    }
+
+    void init(){
+            pw_init(nullptr, nullptr);
+            initialized = true;
+    }
+
+private:
+    bool initialized = false;
 };
 
 struct pipewire_state_common{

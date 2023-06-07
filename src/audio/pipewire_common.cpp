@@ -34,6 +34,7 @@ static const struct pw_core_events core_events = {
 };
 
 bool initialize_pw_common(pipewire_state_common& s){
+        s.init_guard.init();
     s.pipewire_loop.reset(pw_thread_loop_new("Playback", nullptr));
     s.pipewire_context.reset(pw_context_new(pw_thread_loop_get_loop(s.pipewire_loop.get()), nullptr, 0)); //TODO check return
     s.pipewire_core.reset(pw_context_connect(s.pipewire_context.get(), nullptr, 0));
