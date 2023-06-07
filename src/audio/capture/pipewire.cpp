@@ -144,11 +144,9 @@ static void audio_cap_pw_help(){
 }
 
 static void *audio_cap_pipewire_init(struct module *parent, const char *cfg){
+    auto s = std::make_unique<state_pipewire_cap>();
+
     std::string_view cfg_sv(cfg);
-
-    std::string_view target_device;
-    unsigned ch_count = 1;
-
     while(!cfg_sv.empty()){
         auto tok = tokenize(cfg_sv, ':', '"');
 
@@ -159,24 +157,18 @@ static void *audio_cap_pipewire_init(struct module *parent, const char *cfg){
             audio_cap_pw_help();
             return INIT_NOERR;
         } else if(key == "target"){
-            target_device = val;
+            s->target = val;
         } else if(key == "channels"){
-            parse_num(val, ch_count);
+            parse_num(val, s->ch_count);
         }
     }
 
-
-    auto s = std::make_unique<state_pipewire_cap>();
+    initialize_pw_common(s->pw);
      
     fprintf(stdout, "Compiled with libpipewire %s\n"
             "Linked with libpipewire %s\n",
             pw_get_headers_version(),
             pw_get_library_version());
-
-    s->target = std::string(target_device);
-    s->ch_count = ch_count;
-    
-    initialize_pw_common(s->pw);
 
     auto props = pw_properties_new(
             PW_KEY_MEDIA_TYPE, "Audio",
