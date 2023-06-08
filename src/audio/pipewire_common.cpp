@@ -56,7 +56,7 @@ static void on_registry_event_global(void *data, uint32_t /*id*/,
                 return;
 
         Pipewire_device dev;
-        for(int i = 0; i < props->n_items; i++){
+        for(unsigned i = 0; i < props->n_items; i++){
                 std::string_view key(props->items[i].key);
                 std::string_view val(props->items[i].value);
 
