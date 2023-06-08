@@ -83,7 +83,8 @@ std::vector<Pipewire_device> get_pw_device_list(){
 
         const static pw_registry_events registry_events = {
                 PW_VERSION_REGISTRY_EVENTS,
-                .global = on_registry_event_global
+                .global = on_registry_event_global,
+                .global_remove = nullptr
         };
 
         std::vector<Pipewire_device> result;
