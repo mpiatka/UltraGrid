@@ -66,10 +66,10 @@ struct state_pipewire_cap{
     struct audio_frame frame;
     std::vector<char> frame_data;
 
-    int ch_count = 1;
-    int sample_rate = 48000;
-    int quant = 128;
-    int bps = 2;
+    unsigned ch_count = 1;
+    unsigned sample_rate = 48000;
+    unsigned quant = 128;
+    unsigned bps = 2;
 };
 
 /*
@@ -144,6 +144,7 @@ static void audio_cap_pw_help(){
 }
 
 static void *audio_cap_pipewire_init(struct module *parent, const char *cfg){
+    UNUSED(parent);
     auto s = std::make_unique<state_pipewire_cap>();
 
     std::string_view cfg_sv(cfg);
