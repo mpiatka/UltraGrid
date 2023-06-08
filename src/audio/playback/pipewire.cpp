@@ -174,7 +174,7 @@ static bool audio_play_pw_ctl(void *state, int request, void *data, size_t *len)
     }
 }
 
-static void on_state_changed(void *state, enum pw_stream_state old, enum pw_stream_state new_state, const char *error)
+static void on_state_changed(void * /*state*/, enum pw_stream_state old, enum pw_stream_state new_state, const char *error)
 {
     log_msg(LOG_LEVEL_NOTICE, "PW stream state change: %s -> %s (%s)\n",
             pw_stream_state_as_string(old),
@@ -199,8 +199,8 @@ static void on_param_changed(void *state, uint32_t id, const struct spa_pod *par
 
     spa_format_audio_raw_parse(param, &audio_params.info.raw);
 
-    assert(audio_params.info.raw.rate == s->desc.sample_rate);
-    assert(audio_params.info.raw.channels == s->desc.ch_count);
+    assert(audio_params.info.raw.rate == (unsigned) s->desc.sample_rate);
+    assert(audio_params.info.raw.channels == (unsigned) s->desc.ch_count);
     assert(audio_params.info.raw.format == get_pw_format_from_bps(s->desc.bps));
 
     log_msg(LOG_LEVEL_NOTICE, "Format change: %u %u %u\n",
