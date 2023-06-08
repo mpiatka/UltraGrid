@@ -8,7 +8,7 @@
 
 #include "pipewire_common.hpp"
 
-static void on_core_done(void *data, uint32_t id, int seq)
+static void on_core_done(void *data, uint32_t /*id*/, int seq)
 {
     auto s = static_cast<pipewire_state_common *>(data);
 
@@ -16,7 +16,7 @@ static void on_core_done(void *data, uint32_t id, int seq)
     pw_thread_loop_signal(s->pipewire_loop.get(), false);
 }
 
-static void on_core_error(void *data, uint32_t id, int seq, int res, const char *message)
+static void on_core_error(void * /*data*/, uint32_t id, int seq, int res, const char *message)
 {
     log_msg(LOG_LEVEL_ERROR, "Pipewire error: id:%d seq:%x res:%d msg: %s\n", id, seq, res, message);
 }
@@ -46,8 +46,8 @@ bool initialize_pw_common(pipewire_state_common& s){
     return true;
 }
 
-static void on_registry_event_global(void *data, uint32_t id,
-                uint32_t permissions, const char *type, uint32_t version,
+static void on_registry_event_global(void *data, uint32_t /*id*/,
+                uint32_t /*permissions*/, const char *type, uint32_t /*version*/,
                 const struct spa_dict *props)
 {
         auto result = static_cast<std::vector<Pipewire_device> *>(data);
