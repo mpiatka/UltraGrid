@@ -213,11 +213,6 @@ static void on_param_changed(void *state, uint32_t id, const struct spa_pod *par
     assert(audio_params.info.raw.channels == (unsigned) s->desc.ch_count);
     assert(audio_params.info.raw.format == get_pw_format_from_bps(s->desc.bps));
 
-    log_msg(LOG_LEVEL_NOTICE, "Format change: %u %u %u\n",
-            audio_params.info.raw.format,
-            audio_params.info.raw.rate,
-            audio_params.info.raw.channels);
-
     std::byte buffer[1024];
     auto pod_builder = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
 
