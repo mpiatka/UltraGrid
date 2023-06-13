@@ -52,6 +52,8 @@
 #include "utils/ring_buffer.h"
 #include "utils/string_view_utils.hpp"
 
+#define MOD_NAME "[PW cap.] "
+
 struct state_pipewire_cap{
     pipewire_state_common pw;
 
@@ -70,6 +72,7 @@ struct state_pipewire_cap{
     unsigned sample_rate = 48000;
     unsigned quant = 128;
     unsigned bps = 2;
+    unsigned buf_len_ms = 100;
 };
 
 /*
@@ -117,10 +120,32 @@ static void on_param_changed(void *state, uint32_t id, const struct spa_pod *par
             audio_params.info.raw.rate,
             audio_params.info.raw.channels);
 
-    //TODO thread safety
-    s->sample_rate = audio_params.info.raw.rate;
-    s->ch_count = audio_params.info.raw.channels;
-    s->bps = get_bps_from_pw_format(audio_params.info.raw.format);
+    assert(audio_params.info.raw.rate == (unsigned) s->sample_rate);
+    assert(audio_params.info.raw.channels == (unsigned) s->ch_count);
+    assert(audio_params.info.raw.format == get_pw_format_from_bps(s->bps));
+
+    std::byte buffer[1024];
+    auto pod_builder = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
+
+    unsigned buffer_size = (s->buf_len_ms * s->sample_rate / 1000) * s->ch_count * s->bps;
+
+    log_msg(LOG_LEVEL_VERBOSE, MOD_NAME "Requesting buffer size %u\n", buffer_size);
+
+    spa_pod *new_params = (spa_pod *) spa_pod_builder_add_object(&pod_builder,
+            SPA_TYPE_OBJECT_ParamBuffers, SPA_PARAM_Buffers,
+            SPA_PARAM_BUFFERS_blocks, SPA_POD_Int(1),
+            SPA_PARAM_BUFFERS_size, SPA_POD_CHOICE_RANGE_Int(buffer_size, 0, INT32_MAX),
+            SPA_PARAM_BUFFERS_stride, SPA_POD_Int(s->ch_count * s->bps));
+
+    if(!new_params){
+        log_msg(LOG_LEVEL_ERROR, MOD_NAME "Failed to build pw buffer params pod\n");
+        return;
+    }
+
+    if (pw_stream_update_params(s->stream.get(), const_cast<const spa_pod **>(&new_params), 1) < 0) {
+        log_msg(LOG_LEVEL_ERROR, MOD_NAME "Failed to set stream params\n");
+    }
+
 }
 
 const static pw_stream_events stream_events = { 
@@ -161,15 +186,17 @@ static void *audio_cap_pipewire_init(struct module *parent, const char *cfg){
             s->target = val;
         } else if(key == "channels"){
             parse_num(val, s->ch_count);
+        } else if(key == "buffer-len"){
+            parse_num(val, s->buf_len_ms);
+        } else if(key == "sample-rate"){
+            parse_num(val, s->sample_rate);
         }
     }
 
     initialize_pw_common(s->pw);
      
-    fprintf(stdout, "Compiled with libpipewire %s\n"
-            "Linked with libpipewire %s\n",
-            pw_get_headers_version(),
-            pw_get_library_version());
+    log_msg(LOG_LEVEL_INFO, MOD_NAME "Compiled with libpipewire %s\n", pw_get_headers_version());
+    log_msg(LOG_LEVEL_INFO, MOD_NAME "Linked with libpipewire %s\n", pw_get_library_version());
 
     auto props = pw_properties_new(
             PW_KEY_MEDIA_TYPE, "Audio",
@@ -221,9 +248,7 @@ static void *audio_cap_pipewire_init(struct module *parent, const char *cfg){
             &stream_events,
             s.get());
 
-    int buf_len_ms = 50;
-    //TODO
-    int ring_size = s->bps * s->ch_count * (s->sample_rate * buf_len_ms / 1000);
+    int ring_size = s->bps * s->ch_count * (s->sample_rate * s->buf_len_ms * 2 / 1000);
     s->ring_buf.reset(ring_buffer_init(ring_size));
 
     pw_stream_connect(s->stream.get(),
