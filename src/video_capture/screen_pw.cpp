@@ -310,30 +310,26 @@ static void on_stream_state_changed(void *session_ptr, enum pw_stream_state old,
 
 static void on_stream_param_changed(void *session_ptr, uint32_t id, const struct spa_pod *param) {
         auto &session = *static_cast<screen_cast_session*>(session_ptr);
-        (void) id;
         LOG(LOG_LEVEL_VERBOSE) << MOD_NAME "param changed:\n";
-        spa_debug_format(2, nullptr, param);
 
-        if(id == SPA_PARAM_Invalid)
-        {
-                assert(false && "invalid params");
-        }
-
-        // from example code, not sure what this is
         if (param == nullptr || id != SPA_PARAM_Format)
                 return;
 
         int parse_format_ret = spa_format_parse(param, &session.pw.format.media_type, &session.pw.format.media_subtype);
         assert(parse_format_ret > 0);
 
-        assert(session.pw.format.media_type == SPA_MEDIA_TYPE_video);
-        assert(session.pw.format.media_subtype == SPA_MEDIA_SUBTYPE_raw);
+        if(session.pw.format.media_type != SPA_MEDIA_TYPE_video
+                        || session.pw.format.media_subtype != SPA_MEDIA_SUBTYPE_raw)
+        {
+                log_msg(LOG_LEVEL_ERROR, MOD_NAME "Format not video/raw!\n");
+                return;
+        }
 
         auto& raw_format = session.pw.format.info.raw;
         spa_format_video_raw_parse(param, &raw_format);
         LOG(LOG_LEVEL_VERBOSE) << MOD_NAME "size: " << session.pw.width() << " x " << session.pw.height() << "\n";
 
-        int linesize = vc_get_linesize(session.pw.width(), RGBA);
+        int linesize = vc_get_linesize(session.pw.width(), RGB);
         int32_t size = linesize * session.pw.height();
 
         uint8_t params_buffer[1024];
@@ -376,7 +372,7 @@ static void on_stream_param_changed(void *session_ptr, uint32_t id, const struct
         session.desc.interlacing = PROGRESSIVE;
         session.desc.tile_count = 1;
 
-        session.init_error.set_value("");
+        //session.init_error.set_value("");
 }
 
 
@@ -407,7 +403,7 @@ static void copy_frame_impl_cropped(bool swap_red_blue, char *dest, char *src,
 static void copy_frame_impl(bool swap_red_blue, char *dest, char *src, int width, int height)
 {
         PROFILE_FUNC;
-        int linesize = vc_get_linesize(width, RGBA);
+        int linesize = vc_get_linesize(width, RGB);
         if (swap_red_blue) {
                 for (int line_offset = 0; line_offset < height * linesize; line_offset += linesize) {
                         for(int x = 0; x < linesize; x += 4) {
@@ -445,7 +441,7 @@ static void copy_frame(spa_video_format video_format, spa_buffer *buffer, video_
                 tile->height = session_height;
         }
 
-        tile->data_len = vc_get_linesize(tile->width, RGBA) * tile->height;
+        tile->data_len = vc_get_linesize(tile->width, RGB) * tile->height;
 }
 
 static void on_process(void *session_ptr) {
@@ -573,9 +569,10 @@ static int start_pipewire(screen_cast_session &session)
                         SPA_FORMAT_mediaType, SPA_POD_Id(SPA_MEDIA_TYPE_video),
                         SPA_FORMAT_mediaSubtype, SPA_POD_Id(SPA_MEDIA_SUBTYPE_raw),
                         SPA_FORMAT_VIDEO_format,
-                        SPA_POD_CHOICE_ENUM_Id(4, 
+                        SPA_POD_CHOICE_ENUM_Id(5, 
                                 SPA_VIDEO_FORMAT_BGRA, SPA_VIDEO_FORMAT_BGRx,
-			        SPA_VIDEO_FORMAT_RGBA, SPA_VIDEO_FORMAT_RGBx),
+			        SPA_VIDEO_FORMAT_RGBA, SPA_VIDEO_FORMAT_RGBx,
+                                SPA_VIDEO_FORMAT_RGB),
                         SPA_FORMAT_VIDEO_size,
                         SPA_POD_CHOICE_RANGE_Rectangle(
                                         &size_rect_def,
@@ -601,6 +598,7 @@ static int start_pipewire(screen_cast_session &session)
                 return -1;
         }
 
+        pw_stream_set_active(session.pw.stream, true);
         pw_thread_loop_unlock(session.pw.loop);
         return 0;
 }
