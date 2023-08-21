@@ -27,6 +27,7 @@
 #include "utils/profile_timer.hpp"
 #include "video.h"
 #include "video_capture.h"
+#include "pipewire_common.hpp"
 
 #define MOD_NAME "[screen_pw] "
 
@@ -269,14 +270,6 @@ struct screen_cast_session {
 
                 struct spa_video_info format = {};
 
-                int width() {
-                        return static_cast<int>(format.info.raw.size.width);
-                }
-                
-                int height() {
-                        return static_cast<int>(format.info.raw.size.height);
-                }
-
                 spa_video_format video_format() {
                         return format.info.raw.format;
                 }
@@ -327,10 +320,23 @@ static void on_stream_param_changed(void *session_ptr, uint32_t id, const struct
 
         auto& raw_format = session.pw.format.info.raw;
         spa_format_video_raw_parse(param, &raw_format);
-        LOG(LOG_LEVEL_VERBOSE) << MOD_NAME "size: " << session.pw.width() << " x " << session.pw.height() << "\n";
 
-        int linesize = vc_get_linesize(session.pw.width(), RGB);
-        int32_t size = linesize * session.pw.height();
+        session.desc.width = raw_format.size.width;
+        session.desc.height = raw_format.size.height;
+        if(raw_format.framerate.num != 0)
+                session.desc.fps = static_cast<double>(raw_format.framerate.num) / raw_format.framerate.denom;
+        else{
+                //Variable framerate
+                session.desc.fps = static_cast<double>(raw_format.max_framerate.num) / raw_format.max_framerate.denom;
+        }
+        session.desc.color_spec = uv_codec_from_pw_fmt(raw_format.format);
+        session.desc.interlacing = PROGRESSIVE;
+        session.desc.tile_count = 1;
+
+        log_msg(LOG_LEVEL_VERBOSE, MOD_NAME "size: %dx%d\n", session.desc.width, session.desc.height);
+
+        int linesize = vc_get_linesize(session.desc.width, session.desc.color_spec);
+        int32_t size = linesize * session.desc.height;
 
         uint8_t params_buffer[1024];
 
@@ -359,18 +365,6 @@ static void on_stream_param_changed(void *session_ptr, uint32_t id, const struct
         }
         
         pw_stream_update_params(session.pw.stream, params, n_params);
-
-        session.desc.width = raw_format.size.width;
-        session.desc.height = raw_format.size.height;
-        if(raw_format.framerate.num != 0)
-                session.desc.fps = static_cast<double>(raw_format.framerate.num) / raw_format.framerate.denom;
-        else{
-                //Variable framerate
-                session.desc.fps = static_cast<double>(raw_format.max_framerate.num) / raw_format.max_framerate.denom;
-        }
-        session.desc.color_spec = RGBA; //TODO
-        session.desc.interlacing = PROGRESSIVE;
-        session.desc.tile_count = 1;
 
         //session.init_error.set_value("");
 }
@@ -416,6 +410,19 @@ static void copy_frame_impl(bool swap_red_blue, char *dest, char *src, int width
                 }
         } else {
                 memcpy(dest, src, height * linesize);
+        }
+}
+
+static void pw_frame_to_uv_frame(video_frame *dst, spa_buffer *src, spa_video_format fmt, spa_rectangle size){
+        bool swap_red_blue = fmt == SPA_VIDEO_FORMAT_BGRA || fmt == SPA_VIDEO_FORMAT_BGRx;
+
+        //TODO crop
+
+        auto linesize = vc_get_linesize(size.width, dst->color_spec);
+        for(unsigned i = 0; i < size.height; i++){
+                char *src_p = static_cast<char *>(src->datas[0].data) + linesize * i;
+                char *dst_p = static_cast<char *>(dst->tiles[0].data) + linesize * i;
+                memcpy(dst_p, src_p, linesize);
         }
 }
 
@@ -484,7 +491,10 @@ static void on_process(void *session_ptr) {
                            crop_region = &meta_crop_region->region;
                 }
 
-                copy_frame(session.pw.video_format(), buffer->buffer, next_frame.get(), session.pw.width(), session.pw.height(), crop_region);
+                auto& raw_format = session.pw.format.info.raw;
+
+                //copy_frame(session.pw.video_format(), buffer->buffer, next_frame.get(), session.desc.width, session.desc.height, crop_region);
+                pw_frame_to_uv_frame(next_frame.get(), buffer->buffer, raw_format.format, raw_format.size);
                 session.sending_frames.push(std::move(next_frame));
                 pw_stream_queue_buffer(session.pw.stream, buffer);
         }
@@ -569,10 +579,13 @@ static int start_pipewire(screen_cast_session &session)
                         SPA_FORMAT_mediaType, SPA_POD_Id(SPA_MEDIA_TYPE_video),
                         SPA_FORMAT_mediaSubtype, SPA_POD_Id(SPA_MEDIA_SUBTYPE_raw),
                         SPA_FORMAT_VIDEO_format,
-                        SPA_POD_CHOICE_ENUM_Id(5, 
+                        SPA_POD_CHOICE_ENUM_Id(7, 
                                 SPA_VIDEO_FORMAT_BGRA, SPA_VIDEO_FORMAT_BGRx,
 			        SPA_VIDEO_FORMAT_RGBA, SPA_VIDEO_FORMAT_RGBx,
-                                SPA_VIDEO_FORMAT_RGB),
+                                SPA_VIDEO_FORMAT_RGB,
+                                SPA_VIDEO_FORMAT_UYVY,
+                                SPA_VIDEO_FORMAT_YUY2
+                                ),
                         SPA_FORMAT_VIDEO_size,
                         SPA_POD_CHOICE_RANGE_Rectangle(
                                         &size_rect_def,
@@ -847,6 +860,9 @@ static int vidcap_screen_pw_init(struct vidcap_params *params, void **state)
         if(params_ok != VIDCAP_INIT_OK)
                 return params_ok;
 
+        for(int i = 0; i < QUEUE_SIZE; i++)
+                session.blank_frames.emplace_back(vf_alloc(1));
+
         std::future<std::string> future_error = session.init_error.get_future();
         std::thread dbus_thread(run_screencast, &session);
         future_error.wait();
@@ -859,9 +875,6 @@ static int vidcap_screen_pw_init(struct vidcap_params *params, void **state)
         }
 
         dbus_thread.detach();
-
-        for(int i = 0; i < QUEUE_SIZE; i++)
-                session.blank_frames.push({});
 
         LOG(LOG_LEVEL_DEBUG) << MOD_NAME "init ok\n";
         return VIDCAP_INIT_OK;
