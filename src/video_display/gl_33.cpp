@@ -1301,15 +1301,16 @@ static void glfw_mouse_callback(GLFWwindow *win, double /* x */, double /* y */)
 
 static bool display_gl_check_gl_version() {
         auto version = (const char *) glGetString(GL_VERSION);
+        const double required_version = 3.3;
         if (!version) {
                 log_msg(LOG_LEVEL_ERROR, MOD_NAME "Unable to get OpenGL version!\n");
                 return false;
         }
-        if (atof(version) < 2.0) {
-                log_msg(LOG_LEVEL_ERROR, MOD_NAME "ERROR: OpenGL 2.0 is not supported, try updating your drivers...\n");
+        if (atof(version) < required_version) {
+                log_msg(LOG_LEVEL_ERROR, MOD_NAME "ERROR: OpenGL %f.2 is not supported, try updating your drivers...\n", required_version);
                 return false;
         }
-        log_msg(LOG_LEVEL_INFO, MOD_NAME "OpenGL 2.0 is supported...\n");
+        log_msg(LOG_LEVEL_INFO, MOD_NAME "Got OpenGL context of version %s\n", version);
         return true;
 }
 
