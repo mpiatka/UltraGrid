@@ -1513,6 +1513,11 @@ static bool display_gl_init_opengl(struct state_gl *s)
                 height = mode->height;
                 glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
         }
+
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
         glfwWindowHint(GLFW_VISIBLE, s->hide_window ? GLFW_FALSE : GLFW_TRUE);
         display_gl_set_user_window_hints();
         if ((s->window = glfwCreateWindow(width, height, IF_NOT_NULL_ELSE(get_commandline_param("window-title"), DEFAULT_WIN_NAME), nullptr, nullptr)) == nullptr) {
