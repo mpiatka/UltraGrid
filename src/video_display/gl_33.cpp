@@ -888,6 +888,7 @@ static void gl_reconfigure_screen(struct state_gl *s, struct video_desc desc)
 
         gl_check_error();
 
+#if 0
         if(desc.color_spec == DXT1 || desc.color_spec == DXT1_YUV) {
                 if (desc.color_spec == DXT1) {
                         glActiveTexture(GL_TEXTURE0 + 0);
@@ -1031,9 +1032,10 @@ static void gl_reconfigure_screen(struct state_gl *s, struct video_desc desc)
                 glfw_resize_window(s->window, s->fs, desc.height, s->aspect, desc.fps, s->window_size_factor);
                 //gl_resize(s->window, desc.width, desc.height);
         }
+#endif
         int width, height;
         glfwGetFramebufferSize(s->window, &width, &height);
-        gl_change_aspect(s, width, height);
+        //gl_change_aspect(s, width, height);
 
         gl_check_error();
 
@@ -1082,6 +1084,7 @@ static void gl_process_frames(struct state_gl *s)
 {
         struct video_frame *frame;
 
+        gl_check_error();
         struct message *msg;
         while ((msg = check_message(&s->mod))) {
                 auto msg_univ = reinterpret_cast<struct msg_universal *>(msg);
@@ -1118,6 +1121,8 @@ static void gl_process_frames(struct state_gl *s)
                 }
         }
 
+        gl_check_error();
+
         {
                 unique_lock<mutex> lk(s->lock);
                 double timeout = min(2.0 / s->current_display_desc.fps, 0.1);
@@ -1147,16 +1152,19 @@ static void gl_process_frames(struct state_gl *s)
                 s->current_frame = frame;
         }
 
+        gl_check_error();
+
         if (!video_desc_eq(video_desc_from_frame(frame), s->current_display_desc)) {
                 gl_reconfigure_screen(s, video_desc_from_frame(frame));
         }
-        glBindTexture(GL_TEXTURE_2D, s->texture_display);
+        //glBindTexture(GL_TEXTURE_2D, s->texture_display);
 
-        gl_render(s, frame->tiles[0].data);
+        //gl_render(s, frame->tiles[0].data);
         if (s->deinterlace == state_gl::deint::force || (s->deinterlace == state_gl::deint::on && s->current_display_desc.interlacing == INTERLACED_MERGED)) {
-                glUseProgram(s->PHandle_deint);
+                //TODO
+                //glUseProgram(s->PHandle_deint);
         }
-        gl_draw(s->aspect, (s->dxt_height - s->current_display_desc.height) / (float) s->dxt_height * 2, s->vsync != SINGLE_BUF);
+        //gl_draw(s->aspect, (s->dxt_height - s->current_display_desc.height) / (float) s->dxt_height * 2, s->vsync != SINGLE_BUF);
         glUseProgram(0);
 
         // publish to Syphon/Spout
@@ -1333,7 +1341,7 @@ static void display_gl_render_last(GLFWwindow *win) {
                 return;
         }
         // redraw last frame
-        display_gl_putf(s, f, PUTF_NONBLOCK);
+        //display_gl_putf(s, f, PUTF_NONBLOCK);
 }
 
 #if defined HAVE_LINUX || defined WIN32
@@ -1451,6 +1459,19 @@ static void set_gamma(struct state_gl *s) {
         }
 }
 
+bool check_extension_present(const char *ext){
+        int count = 0;
+        glGetIntegerv(GL_NUM_EXTENSIONS, &count);
+
+        for(int i = 0; i < count; i++){
+                const char *item = (const char *) glGetStringi(GL_EXTENSIONS, i);
+                if(strcmp(item, ext) == 0)
+                        return true;
+        }
+
+        return false;
+}
+
 static bool
 vdp_interop_supported()
 {
@@ -1459,13 +1480,12 @@ vdp_interop_supported()
         if (hwacc_param != nullptr && strcmp(hwacc_param, "vdpau-copy") == 0) {
                 return false;
         }
-        if (strstr((const char *) glGetString(GL_EXTENSIONS),
-                   "GL_NV_vdpau_interop") != nullptr) {
+        if(check_extension_present("GL_NV_vdpau_interop"))
                 return true;
-        }
+
         log_msg(hwacc_param == nullptr ? LOG_LEVEL_VERBOSE : LOG_LEVEL_WARNING,
                 MOD_NAME "VDPAU interop NOT supported!\n");
-        MSG(DEBUG, "Available extensions:%s\n", glGetString(GL_EXTENSIONS));
+        //MSG(DEBUG, "Available extensions:%s\n", glGetString(GL_EXTENSIONS));
 #endif
         return false;
 }
@@ -1561,6 +1581,34 @@ static bool display_gl_init_opengl(struct state_gl *s)
 
         glClearColor( 0.0f, 0.0f, 0.0f, 1.0f );
 
+        const char *vert_src = R"END(
+#version 330 core
+layout(location = 0) in vec2 vert_pos;
+layout(location = 1) in vec2 vert_uv;
+
+uniform vec2 scale_vec;
+
+out vec2 UV;
+
+void main(){
+        gl_Position = vec4(vert_pos * scale_vec, 0.0f, 1.0f);
+        UV = vert_uv;
+}
+)END";
+
+        const char *frag_src = R"END(
+#version 330 core
+in vec2 UV;
+out vec3 color;
+uniform sampler2D tex;
+void main(){
+        color = texture(tex, UV).rgb;
+}
+)END";
+
+        s->program = GlProgram(vert_src, frag_src);
+        s->quad = Model::get_quad();
+
         glGenTextures(1, &s->texture_display);
         glBindTexture(GL_TEXTURE_2D, s->texture_display);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -1575,6 +1623,7 @@ static bool display_gl_init_opengl(struct state_gl *s)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
+#if 0
         for (auto &it : glsl_programs) {
                 GLuint prog = gl_substitute_compile_link(vert, it.second);
                 if (prog == 0U) {
@@ -1589,19 +1638,21 @@ static bool display_gl_init_opengl(struct state_gl *s)
                 log_msg(LOG_LEVEL_ERROR, MOD_NAME "Unable to compile deinterlace program!\n");
                 handle_error(1);
         }
+#endif
 
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // set row alignment to 1 byte instead of default
                                                // 4 bytes which won't work on row-unaligned RGB
 
         // Create fbo
-        glGenFramebuffersEXT(1, &s->fbo_id);
+        glGenFramebuffers(1, &s->fbo_id);
 
-        glGenBuffersARB(1, &s->pbo_id);
+        glGenBuffers(1, &s->pbo_id);
 
         s->vdp_interop = vdp_interop_supported();
 
         glfwMakeContextCurrent(nullptr);
 
+        gl_check_error();
         return true;
 }
 
@@ -1634,6 +1685,7 @@ static void display_gl_run(void *arg)
                 (struct state_gl *) arg;
 
         glfwMakeContextCurrent(s->window);
+        gl_check_error();
         while (!glfwWindowShouldClose(s->window)) {
                 glfwPollEvents();
                 gl_process_frames(s);
@@ -1667,10 +1719,10 @@ static void gl_resize(GLFWwindow *win, int width, int height)
         auto *s = (struct state_gl *) glfwGetWindowUserPointer(win);
         debug_msg("Resized to: %dx%d\n", width, height);
 
-        gl_change_aspect(s, width, height);
+        //gl_change_aspect(s, width, height);
 
         if (s->vsync == SINGLE_BUF) {
-                glDrawBuffer(GL_FRONT);
+                //glDrawBuffer(GL_FRONT);
                 /* Clear the screen */
                 glClear(GL_COLOR_BUFFER_BIT);
         }
