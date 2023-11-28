@@ -1560,7 +1560,6 @@ static bool display_gl_init_opengl(struct state_gl *s)
         display_gl_print_depth();
 
         glClearColor( 0.0f, 0.0f, 0.0f, 1.0f );
-        glEnable( GL_TEXTURE_2D );
 
         glGenTextures(1, &s->texture_display);
         glBindTexture(GL_TEXTURE_2D, s->texture_display);
