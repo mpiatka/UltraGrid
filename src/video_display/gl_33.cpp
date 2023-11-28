@@ -1542,6 +1542,7 @@ static bool display_gl_init_opengl(struct state_gl *s)
         glfwSetWindowRefreshCallback(s->window, display_gl_render_last);
 
 #if defined HAVE_LINUX || defined WIN32
+        glewExperimental = GL_TRUE;
         if (GLenum err = glewInit()) {
                 log_msg(LOG_LEVEL_ERROR, MOD_NAME "GLEW Error: %s (err %d)\n", glewGetError(err), err);
                 if (err != GLEW_ERROR_NO_GLX_DISPLAY) { // do not fail on error 4 (on Wayland), which can be suppressed
