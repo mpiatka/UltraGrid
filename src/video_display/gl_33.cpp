@@ -1315,11 +1315,12 @@ static bool display_gl_check_gl_version() {
 }
 
 static void display_gl_print_depth() {
-        array<int, 3> bits = {};
-        glGetIntegerv(GL_RED_BITS, &bits[0]);
-        glGetIntegerv(GL_GREEN_BITS, &bits[1]);
-        glGetIntegerv(GL_BLUE_BITS, &bits[2]);
-        LOG(LOG_LEVEL_INFO) << MOD_NAME << "Buffer depth - R: " << bits[0] << "b, G: " << bits[1] << "b, B: " << bits[2] << "b\n";
+        int r, g, b;
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_FRONT_LEFT, GL_FRAMEBUFFER_ATTACHMENT_RED_SIZE, &r);
+        glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_FRONT_LEFT, GL_FRAMEBUFFER_ATTACHMENT_GREEN_SIZE, &g);
+        glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_FRONT_LEFT, GL_FRAMEBUFFER_ATTACHMENT_BLUE_SIZE, &b);
+        LOG(LOG_LEVEL_INFO) << MOD_NAME << "Buffer depth - R: " << r << "b, G: " << g << "b, B: " << b << "b\n";
 }
 
 static void display_gl_render_last(GLFWwindow *win) {
