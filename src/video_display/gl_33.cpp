@@ -1035,7 +1035,7 @@ static void gl_reconfigure_screen(struct state_gl *s, struct video_desc desc)
 #endif
         int width, height;
         glfwGetFramebufferSize(s->window, &width, &height);
-        //gl_change_aspect(s, width, height);
+        gl_change_aspect(s, width, height);
 
         gl_check_error();
 
@@ -1160,6 +1160,21 @@ static void gl_process_frames(struct state_gl *s)
         //glBindTexture(GL_TEXTURE_2D, s->texture_display);
 
         //gl_render(s, frame->tiles[0].data);
+
+        bool double_buf = s->vsync != SINGLE_BUF;
+        glDrawBuffer(double_buf ? GL_BACK : GL_FRONT);
+        if (double_buf) {
+                glClear(GL_COLOR_BUFFER_BIT);
+        }
+
+        glBindTexture(GL_TEXTURE_2D, s->frame_tex.get());
+        s->frame_tex.put_frame(frame, false);
+
+        glUseProgram(s->program.get());
+
+        glBindTexture(GL_TEXTURE_2D, s->frame_tex.get());
+        s->quad.render();
+
         if (s->deinterlace == state_gl::deint::force || (s->deinterlace == state_gl::deint::on && s->current_display_desc.interlacing == INTERLACED_MERGED)) {
                 //TODO
                 //glUseProgram(s->PHandle_deint);
@@ -1177,7 +1192,7 @@ static void gl_process_frames(struct state_gl *s)
 #endif // HAVE_SPOUT
         }
 
-        if (s->vsync == SINGLE_BUF) {
+        if (!double_buf) {
                 glFlush();
         } else {
                 glfwSwapBuffers(s->window);
@@ -1696,22 +1711,22 @@ static void display_gl_run(void *arg)
 static void gl_change_aspect(struct state_gl *s, int width, int height)
 {
         double x = 1.0,
-               y = 1.0;
+               y = -1.0;
 
         glViewport( 0, 0, ( GLint )width, ( GLint )height );
-
-        glMatrixMode( GL_PROJECTION );
-        glLoadIdentity( );
 
         double screen_ratio = (double) width / height;
         if(screen_ratio > s->aspect) {
                 x = (double) height * s->aspect / width;
         } else {
-                y = (double) width / (height * s->aspect);
+                y = (double) -width / (height * s->aspect);
         }
-        glScalef(x, y, 1);
 
-        glOrtho(-1,1,-1/s->aspect,1/s->aspect,10,-10);
+        glUseProgram(s->program.get());
+
+        GLuint pvLoc;
+        pvLoc = glGetUniformLocation(s->program.get(), "scale_vec");
+        glUniform2f(pvLoc, x, y);
 }
 
 static void gl_resize(GLFWwindow *win, int width, int height)
@@ -1719,10 +1734,10 @@ static void gl_resize(GLFWwindow *win, int width, int height)
         auto *s = (struct state_gl *) glfwGetWindowUserPointer(win);
         debug_msg("Resized to: %dx%d\n", width, height);
 
-        //gl_change_aspect(s, width, height);
+        gl_change_aspect(s, width, height);
 
         if (s->vsync == SINGLE_BUF) {
-                //glDrawBuffer(GL_FRONT);
+                glDrawBuffer(GL_FRONT);
                 /* Clear the screen */
                 glClear(GL_COLOR_BUFFER_BIT);
         }
