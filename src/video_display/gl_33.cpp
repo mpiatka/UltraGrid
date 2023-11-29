@@ -339,9 +339,7 @@ static bool check_rpi_pbo_quirks();
 static void set_gamma(struct state_gl *s);
 
 struct state_gl {
-        Model quad;
-        GlProgram program;
-        FrameTexture frame_tex;
+        FlatVideoScene scene;
 
         unordered_map<codec_t, GLuint> PHandles;
         GLuint          PHandle_deint = 0;
@@ -1167,13 +1165,8 @@ static void gl_process_frames(struct state_gl *s)
                 glClear(GL_COLOR_BUFFER_BIT);
         }
 
-        glBindTexture(GL_TEXTURE_2D, s->frame_tex.get());
-        s->frame_tex.put_frame(frame, false);
-
-        glUseProgram(s->program.get());
-
-        glBindTexture(GL_TEXTURE_2D, s->frame_tex.get());
-        s->quad.render();
+        s->scene.put_frame(frame);
+        s->scene.render();
 
         if (s->deinterlace == state_gl::deint::force || (s->deinterlace == state_gl::deint::on && s->current_display_desc.interlacing == INTERLACED_MERGED)) {
                 //TODO
@@ -1596,33 +1589,7 @@ static bool display_gl_init_opengl(struct state_gl *s)
 
         glClearColor( 0.0f, 0.0f, 0.0f, 1.0f );
 
-        const char *vert_src = R"END(
-#version 330 core
-layout(location = 0) in vec2 vert_pos;
-layout(location = 1) in vec2 vert_uv;
-
-uniform vec2 scale_vec;
-
-out vec2 UV;
-
-void main(){
-        gl_Position = vec4(vert_pos * scale_vec, 0.0f, 1.0f);
-        UV = vert_uv;
-}
-)END";
-
-        const char *frag_src = R"END(
-#version 330 core
-in vec2 UV;
-out vec3 color;
-uniform sampler2D tex;
-void main(){
-        color = texture(tex, UV).rgb;
-}
-)END";
-
-        s->program = GlProgram(vert_src, frag_src);
-        s->quad = Model::get_quad();
+        s->scene.init();
 
         glGenTextures(1, &s->texture_display);
         glBindTexture(GL_TEXTURE_2D, s->texture_display);
@@ -1710,23 +1677,7 @@ static void display_gl_run(void *arg)
 
 static void gl_change_aspect(struct state_gl *s, int width, int height)
 {
-        double x = 1.0,
-               y = -1.0;
-
-        glViewport( 0, 0, ( GLint )width, ( GLint )height );
-
-        double screen_ratio = (double) width / height;
-        if(screen_ratio > s->aspect) {
-                x = (double) height * s->aspect / width;
-        } else {
-                y = (double) -width / (height * s->aspect);
-        }
-
-        glUseProgram(s->program.get());
-
-        GLuint pvLoc;
-        pvLoc = glGetUniformLocation(s->program.get(), "scale_vec");
-        glUniform2f(pvLoc, x, y);
+        s->scene.resize(width, height);
 }
 
 static void gl_resize(GLFWwindow *win, int width, int height)
