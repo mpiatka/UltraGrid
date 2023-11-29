@@ -1922,7 +1922,7 @@ display_gl_get_property(void *state, int property, void *val, size_t *len)
                                         }
                                         return true;
                                 };
-                                copy_if(gl_supp_codecs.begin(), gl_supp_codecs.end(), (codec_t *) val, filter_codecs);
+                                copy_if(gl_supp_codecs.begin(), gl_supp_codecs.end(), (codec_t *) val, [](codec_t) { return true; });
                         } else {
                                 return false;
                         }
