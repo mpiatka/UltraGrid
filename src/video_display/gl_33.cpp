@@ -320,7 +320,6 @@ static bool display_gl_init_opengl(struct state_gl *s);
 static bool display_gl_putf(void *state, struct video_frame *frame, long long timeout);
 static bool display_gl_process_key(struct state_gl *s, long long int key);
 static bool display_gl_reconfigure(void *state, struct video_desc desc);
-static void gl_draw(double ratio, double bottom_offset, bool double_buf);
 static void gl_change_aspect(struct state_gl *s, int width, int height);
 static void gl_resize(GLFWwindow *win, int width, int height);
 static void gl_render_glsl(struct state_gl *s, char *data);
@@ -333,8 +332,6 @@ static void glfw_print_error(int error_code, const char* description);
 static void glfw_print_video_mode(struct state_gl *s);
 static void display_gl_set_sync_on_vblank(int value);
 static void screenshot(struct video_frame *frame);
-static void upload_compressed_texture(struct state_gl *s, char *data);
-static void upload_texture(struct state_gl *s, char *data);
 static bool check_rpi_pbo_quirks();
 static void set_gamma(struct state_gl *s);
 
@@ -886,151 +883,11 @@ static void gl_reconfigure_screen(struct state_gl *s, struct video_desc desc)
 
         gl_check_error();
 
-#if 0
-        if(desc.color_spec == DXT1 || desc.color_spec == DXT1_YUV) {
-                if (desc.color_spec == DXT1) {
-                        glActiveTexture(GL_TEXTURE0 + 0);
-                        glBindTexture(GL_TEXTURE_2D,s->texture_display);
-                } else {
-                        glActiveTexture(GL_TEXTURE0 + 2);
-                        glBindTexture(GL_TEXTURE_2D,s->texture_raw);
-                }
-                size_t data_len = ((desc.width + 3) / 4 * 4* s->dxt_height)/2;
-                char *buffer = (char *) malloc(data_len);
-                glCompressedTexImage2D(GL_TEXTURE_2D, 0,
-                                GL_COMPRESSED_RGBA_S3TC_DXT1_EXT,
-                                (desc.width + 3) / 4 * 4, s->dxt_height, 0, data_len,
-                                /* passing NULL here isn't allowed and some rigid implementations
-                                 * will crash here. We just pass some egliable buffer to fulfil
-                                 * this requirement. glCompressedSubTexImage2D works as expected.
-                                 */
-                                buffer);
-                free(buffer);
-                if(desc.color_spec == DXT1_YUV) {
-                        glActiveTexture(GL_TEXTURE0 + 0);
-                        glBindTexture(GL_TEXTURE_2D,s->texture_display);
-                        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
-                                        desc.width, desc.height, 0,
-                                        GL_RGBA, GL_UNSIGNED_BYTE,
-                                        NULL);
-                        s->current_program = s->PHandles.at(DXT1_YUV);
-                }
-        } else if (desc.color_spec == UYVY) {
-                glActiveTexture(GL_TEXTURE0 + 2);
-                glBindTexture(GL_TEXTURE_2D,s->texture_raw);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
-                                (desc.width + 1) / 2, desc.height, 0,
-                                GL_RGBA, GL_UNSIGNED_BYTE,
-                                NULL);
-                glActiveTexture(GL_TEXTURE0 + 0);
-                glBindTexture(GL_TEXTURE_2D,s->texture_display);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
-                                desc.width, desc.height, 0,
-                                GL_RGBA, GL_UNSIGNED_BYTE,
-                                NULL);
-                s->current_program = s->PHandles.at(UYVY);
-        } else if (desc.color_spec == v210) {
-                glActiveTexture(GL_TEXTURE0 + 2);
-                glBindTexture(GL_TEXTURE_2D,s->texture_raw);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB10_A2,
-                                vc_get_linesize(desc.width, v210) / 4, desc.height, 0,
-                                GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV,
-                                NULL);
-                glActiveTexture(GL_TEXTURE0 + 0);
-                glBindTexture(GL_TEXTURE_2D,s->texture_display);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
-                                desc.width, desc.height, 0,
-                                GL_RGBA, GL_UNSIGNED_SHORT,
-                                NULL);
-                s->current_program = s->PHandles.at(v210);
-        } else if (desc.color_spec == Y416) {
-                s->current_program = s->PHandles.at(Y416);
-                glActiveTexture(GL_TEXTURE0 + 2);
-                glBindTexture(GL_TEXTURE_2D,s->texture_raw);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
-                                desc.width, desc.height, 0,
-                                GL_RGBA, GL_UNSIGNED_SHORT,
-                                NULL);
-                glActiveTexture(GL_TEXTURE0 + 0);
-                glBindTexture(GL_TEXTURE_2D,s->texture_display);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
-                                desc.width, desc.height, 0,
-                                GL_RGBA, GL_UNSIGNED_SHORT,
-                                NULL);
-        } else if (desc.color_spec == RGBA) {
-                glBindTexture(GL_TEXTURE_2D,s->texture_display);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
-                                desc.width, desc.height, 0,
-                                GL_RGBA, GL_UNSIGNED_BYTE,
-                                NULL);
-        } else if (desc.color_spec == RGB) {
-                glBindTexture(GL_TEXTURE_2D,s->texture_display);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB,
-                                desc.width, desc.height, 0,
-                                GL_RGB, GL_UNSIGNED_BYTE,
-                                NULL);
-        } else if (desc.color_spec == R10k) {
-                glBindTexture(GL_TEXTURE_2D,s->texture_display);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB10_A2,
-                                desc.width, desc.height, 0,
-                                GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV,
-                                nullptr);
-        } else if (desc.color_spec == RG48) {
-                glBindTexture(GL_TEXTURE_2D,s->texture_display);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB,
-                                desc.width, desc.height, 0,
-                                GL_RGB, GL_UNSIGNED_SHORT,
-                                nullptr);
-        } else if (desc.color_spec == DXT5) {
-                glActiveTexture(GL_TEXTURE0 + 2);
-                glBindTexture(GL_TEXTURE_2D,s->texture_raw);
-                glCompressedTexImage2D(GL_TEXTURE_2D, 0,
-                                GL_COMPRESSED_RGBA_S3TC_DXT5_EXT,
-                                (desc.width + 3) / 4 * 4, s->dxt_height, 0,
-                                (desc.width + 3) / 4 * 4 * s->dxt_height,
-                                NULL);
-                glActiveTexture(GL_TEXTURE0 + 0);
-                glBindTexture(GL_TEXTURE_2D,s->texture_display);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
-                                desc.width, desc.height, 0,
-                                GL_RGBA, GL_UNSIGNED_BYTE,
-                                NULL);
-                s->current_program = s->PHandles.at(DXT5);
-        }
-#ifdef HWACC_VDPAU
-        else if (desc.color_spec == HW_VDPAU) {
-                s->vdp.init();
-        }
-#endif
-        if (s->current_program) {
-                glUseProgram(s->current_program);
-                if (GLint l = glGetUniformLocation(s->current_program, "image"); l != -1) {
-                        glUniform1i(l, 2);
-                }
-                if (GLint l = glGetUniformLocation(s->current_program, "imageWidth"); l != -1) {
-                        glUniform1f(l, (GLfloat) desc.width);
-                }
-                glUseProgram(0);
-        }
-        if (s->PHandle_deint) {
-                glUseProgram(s->PHandle_deint);
-                glUniform1i(glGetUniformLocation(s->PHandle_deint, "image"), 0);
-                glUniform1f(glGetUniformLocation(s->PHandle_deint, "lineOff"), 1.0f / desc.height);
-                glUseProgram(0);
-        }
-        gl_check_error();
-
-        glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, s->pbo_id);
-        glBufferDataARB(GL_PIXEL_UNPACK_BUFFER_ARB, vc_get_linesize(desc.width, desc.color_spec) * desc.height, 0, GL_STREAM_DRAW_ARB);
-        glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
-
-        gl_check_error();
-
         if (!s->fixed_size) {
                 glfw_resize_window(s->window, s->fs, desc.height, s->aspect, desc.fps, s->window_size_factor);
-                //gl_resize(s->window, desc.width, desc.height);
+                gl_resize(s->window, desc.width, desc.height);
         }
-#endif
+
         int width, height;
         glfwGetFramebufferSize(s->window, &width, &height);
         gl_change_aspect(s, width, height);
@@ -1055,19 +912,6 @@ static void gl_reconfigure_screen(struct state_gl *s, struct video_desc desc)
 
         s->scratchpad.resize(desc.width * desc.height * 8);
         s->current_display_desc = desc;
-}
-
-static void gl_render(struct state_gl *s, char *data)
-{
-        gl_check_error();
-
-        if (s->current_program) {
-                gl_render_glsl(s, data);
-        } else {
-                upload_texture(s, data);
-        }
-
-        gl_check_error();
 }
 
 /// @note lk will be unlocked!
@@ -1605,23 +1449,6 @@ static bool display_gl_init_opengl(struct state_gl *s)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-#if 0
-        for (auto &it : glsl_programs) {
-                GLuint prog = gl_substitute_compile_link(vert, it.second);
-                if (prog == 0U) {
-                        log_msg(LOG_LEVEL_ERROR, MOD_NAME "Unable to link program for %s!\n", get_codec_name(it.first));
-                        handle_error(1);
-                        continue;
-                }
-                s->PHandles[it.first] = prog;
-        }
-
-        if ((s->PHandle_deint = gl_substitute_compile_link(vert, deinterlace_fp)) == 0) {
-                log_msg(LOG_LEVEL_ERROR, MOD_NAME "Unable to compile deinterlace program!\n");
-                handle_error(1);
-        }
-#endif
-
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // set row alignment to 1 byte instead of default
                                                // 4 bytes which won't work on row-unaligned RGB
 
@@ -1694,98 +1521,6 @@ static void gl_resize(GLFWwindow *win, int width, int height)
         }
 }
 
-static void upload_compressed_texture(struct state_gl *s, char *data) {
-        switch (s->current_display_desc.color_spec) {
-                case DXT1:
-                        glCompressedTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
-                                        (s->current_display_desc.width + 3) / 4 * 4, s->dxt_height,
-                                        GL_COMPRESSED_RGBA_S3TC_DXT1_EXT,
-                                        ((s->current_display_desc.width + 3) / 4 * 4 * s->dxt_height)/2,
-                                        data);
-                        break;
-                case DXT1_YUV:
-                        glCompressedTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
-                                        s->current_display_desc.width, s->current_display_desc.height,
-                                        GL_COMPRESSED_RGBA_S3TC_DXT1_EXT,
-                                        (s->current_display_desc.width * s->current_display_desc.height/16)*8,
-                                        data);
-                        break;
-                case DXT5:
-                        glCompressedTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
-                                        (s->current_display_desc.width + 3) / 4 * 4, s->dxt_height,
-                                        GL_COMPRESSED_RGBA_S3TC_DXT5_EXT,
-                                        (s->current_display_desc.width + 3) / 4 * 4 * s->dxt_height,
-                                        data);
-                        break;
-                default:
-                        abort();
-        }
-}
-
-static void upload_texture(struct state_gl *s, char *data)
-{
-#ifdef HWACC_VDPAU
-        if (s->current_display_desc.color_spec == HW_VDPAU) {
-                s->vdp.loadFrame(reinterpret_cast<hw_vdpau_frame *>(data));
-                return;
-        }
-#endif
-        if (s->current_display_desc.color_spec == DXT1 || s->current_display_desc.color_spec == DXT1_YUV || s->current_display_desc.color_spec == DXT5) {
-                upload_compressed_texture(s, data);
-                return;
-        }
-        GLuint format = s->current_display_desc.color_spec == RGB || s->current_display_desc.color_spec == RG48 ? GL_RGB : GL_RGBA;
-        GLenum type = GL_UNSIGNED_BYTE;
-        if (s->current_display_desc.color_spec == R10k || s->current_display_desc.color_spec == v210) {
-                type = GL_UNSIGNED_INT_2_10_10_10_REV;
-        } else if (s->current_display_desc.color_spec == Y416 || s->current_display_desc.color_spec == RG48) {
-                type = GL_UNSIGNED_SHORT;
-        }
-        GLint width = s->current_display_desc.width;
-        if (s->current_display_desc.color_spec == UYVY || s->current_display_desc.color_spec == v210) {
-                width = vc_get_linesize(width, s->current_display_desc.color_spec) / 4;
-        }
-        /// swaps bytes and removes 256B padding
-        auto process_r10k = [](uint32_t * __restrict out, const uint32_t *__restrict in, long width, long height) {
-                DEBUG_TIMER_START(process_r10k);
-                long line_padding_b = vc_get_linesize(width, R10k) - 4 * width;
-                for (long i = 0; i < height; i += 1) {
-                        OPTIMIZED_FOR (long j = 0; j < width; j += 1) {
-                                uint32_t x = *in++;
-                                *out++ = /* output is x2b8g8r8 little-endian */
-                                        (x & 0xFFU) << 2U | (x & 0xC0'00U) >> 14U | // R
-                                        (x & 0x3F'00U) << 6U | (x & 0xF0'00'00) >> 10U | // G
-                                        (x & 0x0F'00'00U) << 10U | (x & 0xFC'00'00'00U) >> 6U; // B
-                        }
-                        in += line_padding_b / sizeof(uint32_t);
-                }
-                DEBUG_TIMER_STOP(process_r10k);
-        };
-        int data_size = vc_get_linesize(s->current_display_desc.width, s->current_display_desc.color_spec) * s->current_display_desc.height;
-        if (s->use_pbo) {
-                glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, s->pbo_id); // current pbo
-                glBufferDataARB(GL_PIXEL_UNPACK_BUFFER_ARB, data_size, 0, GL_STREAM_DRAW_ARB);
-                if (void *ptr = glMapBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, GL_WRITE_ONLY_ARB)) {
-                        // update data directly on the mapped buffer
-                        if (s->current_display_desc.color_spec == R10k) { // perform byte swap
-                                process_r10k(static_cast<uint32_t *>(ptr), reinterpret_cast<uint32_t *>(data), s->current_display_desc.width, s->current_display_desc.height);
-                        } else {
-                                memcpy(ptr, data, data_size);
-                        }
-                        glUnmapBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB); // release pointer to mapping buffer
-                }
-                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, s->current_display_desc.height, format, type, nullptr);
-
-                glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
-        } else {
-                if (s->current_display_desc.color_spec == R10k) { // perform byte swap
-                        process_r10k(reinterpret_cast<uint32_t *>(s->scratchpad.data()), reinterpret_cast<uint32_t *>(data), s->current_display_desc.width, s->current_display_desc.height);
-                        data = s->scratchpad.data();
-                }
-                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, s->current_display_desc.height, format, type, data);
-        }
-}
-
 static bool check_rpi_pbo_quirks()
 {
 #if ! defined __linux__
@@ -1805,93 +1540,6 @@ static bool check_rpi_pbo_quirks()
 
         return detected_rpi || detected_bcm2835;
 #endif
-}
-
-static void gl_render_glsl(struct state_gl *s, char *data)
-{
-        int status;
-        glBindTexture(GL_TEXTURE_2D, 0);
-        glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, s->fbo_id);
-        gl_check_error();
-        glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_TEXTURE_2D, s->texture_display, 0);
-        status = glCheckFramebufferStatusEXT(GL_FRAMEBUFFER_EXT);
-        assert(status == GL_FRAMEBUFFER_COMPLETE_EXT);
-        glActiveTexture(GL_TEXTURE0 + 2);
-        glBindTexture(GL_TEXTURE_2D, s->texture_raw);
-
-        glMatrixMode( GL_PROJECTION );
-        glPushMatrix();
-        glLoadIdentity( );
-
-        glMatrixMode( GL_MODELVIEW );
-        glPushMatrix();
-        glLoadIdentity( );
-
-        glPushAttrib(GL_VIEWPORT_BIT);
-
-        glViewport( 0, 0, s->current_display_desc.width, s->current_display_desc.height);
-
-        upload_texture(s, data);
-        gl_check_error();
-
-        glUseProgram(s->current_program);
-
-        glDrawBuffer(GL_COLOR_ATTACHMENT0_EXT);
-        gl_check_error();
-
-        glBegin(GL_QUADS);
-        glTexCoord2f(0.0, 0.0); glVertex2f(-1.0, -1.0);
-        glTexCoord2f(1.0, 0.0); glVertex2f(1.0, -1.0);
-        glTexCoord2f(1.0, 1.0); glVertex2f(1.0, 1.0);
-        glTexCoord2f(0.0, 1.0); glVertex2f(-1.0, 1.0);
-        glEnd();
-
-        glPopAttrib();
-
-        glMatrixMode( GL_PROJECTION );
-        glPopMatrix();
-        glMatrixMode( GL_MODELVIEW );
-        glPopMatrix();
-
-        glUseProgram(0);
-        glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0);
-        glActiveTexture(GL_TEXTURE0 + 0);
-        glBindTexture(GL_TEXTURE_2D, s->texture_display);
-}    
-
-static void gl_draw(double ratio, double bottom_offset, bool double_buf)
-{
-        float bottom;
-        gl_check_error();
-
-        glDrawBuffer(double_buf ? GL_BACK : GL_FRONT);
-        if (double_buf) {
-                glClear(GL_COLOR_BUFFER_BIT);
-        }
-
-        glMatrixMode( GL_MODELVIEW );
-        glLoadIdentity( );
-        glTranslatef( 0.0f, 0.0f, -1.35f );
-
-        /* Reflect that we may have higher texture than actual data
-         * if we use DXT and source height was not divisible by 4 
-         * In normal case, there would be 1.0 */
-        bottom = 1.0f - bottom_offset;
-
-        gl_check_error();
-        glBegin(GL_QUADS);
-        /* Front Face */
-        /* Bottom Left Of The Texture and Quad */
-        glTexCoord2f( 0.0f, bottom ); glVertex2f( -1.0f, -1/ratio);
-        /* Bottom Right Of The Texture and Quad */
-        glTexCoord2f( 1.0f, bottom ); glVertex2f(  1.0f, -1/ratio);
-        /* Top Right Of The Texture and Quad */
-        glTexCoord2f( 1.0f, 0.0f ); glVertex2f(  1.0f,  1/ratio);
-        /* Top Left Of The Texture and Quad */
-        glTexCoord2f( 0.0f, 0.0f ); glVertex2f( -1.0f,  1/ratio);
-        glEnd( );
-
-        gl_check_error();
 }
 
 static void glfw_close_callback(GLFWwindow *win)
