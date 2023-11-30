@@ -828,8 +828,10 @@ static void glfw_resize_window(GLFWwindow *win, bool fs, int height, double aspe
 }
 
 /*
- * Please note, that setting the value of 0 to GLX function is invalid according to
- * documentation. However. reportedly NVidia driver does unset VSync.
+ * Please note, that setting the value of 0 could have no effect on some glfw
+ * backends, particularily X11 using the SGI_swap_control extension (however
+ * the newer EXT_swap_control supports this and by now is probably available
+ * almost everywhere).
  */
 static void display_gl_set_sync_on_vblank(int value) {
         if (value == SYSTEM_VSYNC) {
