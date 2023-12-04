@@ -1024,10 +1024,9 @@ static void gl_process_frames(struct state_gl *s)
         // publish to Syphon/Spout
         if (s->syphon_spout) {
 #ifdef HAVE_SYPHON
-                syphon_server_publish(s->syphon_spout, frame->tiles[0].width, frame->tiles[0].height, s->texture_display);
+                syphon_server_publish(s->syphon_spout, frame->tiles[0].width, frame->tiles[0].height, s->scene.get_texture());
 #elif defined HAVE_SPOUT
-                spout_sender_sendframe(s->syphon_spout, frame->tiles[0].width, frame->tiles[0].height, s->texture_display);
-                glBindTexture(GL_TEXTURE_2D, s->texture_display);
+                spout_sender_sendframe(s->syphon_spout, frame->tiles[0].width, frame->tiles[0].height, s->scene.get_texture());
 #endif // HAVE_SPOUT
         }
 
