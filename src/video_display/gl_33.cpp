@@ -269,14 +269,6 @@ void main(void) {
 }
 )raw";
 
-static const char * vert = R"raw(
-#version 110
-void main() {
-        gl_TexCoord[0] = gl_MultiTexCoord0;
-        gl_Position = ftransform();
-}
-)raw";
-
 static const char fp_display_dxt5ycocg[] = R"raw(
 #version 110
 uniform sampler2D image;
@@ -322,7 +314,6 @@ static bool display_gl_process_key(struct state_gl *s, long long int key);
 static bool display_gl_reconfigure(void *state, struct video_desc desc);
 static void gl_change_aspect(struct state_gl *s, int width, int height);
 static void gl_resize(GLFWwindow *win, int width, int height);
-static void gl_render_glsl(struct state_gl *s, char *data);
 static void gl_reconfigure_screen(struct state_gl *s, struct video_desc desc);
 static void gl_process_frames(struct state_gl *s);
 static void glfw_key_callback(GLFWwindow* win, int key, int scancode, int action, int mods);
@@ -337,16 +328,6 @@ static void set_gamma(struct state_gl *s);
 
 struct state_gl {
         FlatVideoScene scene;
-
-        unordered_map<codec_t, GLuint> PHandles;
-        GLuint          PHandle_deint = 0;
-        GLuint          current_program = 0;
-
-        // Framebuffer
-        GLuint fbo_id = 0;
-        GLuint texture_display = 0;
-        GLuint texture_raw = 0;
-        GLuint pbo_id = 0;
 
         /* For debugging... */
         uint32_t        magic = MAGIC_GL;
@@ -881,8 +862,6 @@ static void gl_reconfigure_screen(struct state_gl *s, struct video_desc desc)
         log_msg(LOG_LEVEL_INFO, "Setting GL size %dx%d (%dx%d).\n", (int) round(s->aspect * desc.height),
                         desc.height, desc.width, desc.height);
 
-        s->current_program = 0;
-
         gl_check_error();
 
         if (!s->fixed_size) {
@@ -1001,9 +980,6 @@ static void gl_process_frames(struct state_gl *s)
         if (!video_desc_eq(video_desc_from_frame(frame), s->current_display_desc)) {
                 gl_reconfigure_screen(s, video_desc_from_frame(frame));
         }
-        //glBindTexture(GL_TEXTURE_2D, s->texture_display);
-
-        //gl_render(s, frame->tiles[0].data);
 
         bool double_buf = s->vsync != SINGLE_BUF;
         glDrawBuffer(double_buf ? GL_BACK : GL_FRONT);
@@ -1018,8 +994,6 @@ static void gl_process_frames(struct state_gl *s)
                 //TODO
                 //glUseProgram(s->PHandle_deint);
         }
-        //gl_draw(s->aspect, (s->dxt_height - s->current_display_desc.height) / (float) s->dxt_height * 2, s->vsync != SINGLE_BUF);
-        glUseProgram(0);
 
         // publish to Syphon/Spout
         if (s->syphon_spout) {
@@ -1404,27 +1378,10 @@ static bool display_gl_init_opengl(struct state_gl *s)
 
         s->scene.init();
 
-        glGenTextures(1, &s->texture_display);
-        glBindTexture(GL_TEXTURE_2D, s->texture_display);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-        glGenTextures(1, &s->texture_raw);
-        glBindTexture(GL_TEXTURE_2D, s->texture_raw);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // set row alignment to 1 byte instead of default
                                                // 4 bytes which won't work on row-unaligned RGB
 
-        // Create fbo
-        glGenFramebuffers(1, &s->fbo_id);
-
-        glGenBuffers(1, &s->pbo_id);
+        //glGenBuffers(1, &s->pbo_id);
 
         s->vdp_interop = vdp_interop_supported();
 
@@ -1439,13 +1396,7 @@ static bool display_gl_init_opengl(struct state_gl *s)
 static void display_gl_cleanup_opengl(struct state_gl *s){
         glfwMakeContextCurrent(s->window);
 
-        for (auto &it : s->PHandles) {
-                glDeleteProgram(it.second);
-        }
-        glDeleteTextures(1, &s->texture_display);
-        glDeleteTextures(1, &s->texture_raw);
-        glDeleteFramebuffersEXT(1, &s->fbo_id);
-        glDeleteBuffersARB(1, &s->pbo_id);
+        //glDeleteBuffersARB(1, &s->pbo_id);
         glfwDestroyWindow(s->window);
 
         if (s->syphon_spout) {
@@ -1531,15 +1482,12 @@ display_gl_get_property(void *state, int property, void *val, size_t *len)
                                         if (get_bits_per_component(c) > 8 && commandline_params.find(GL_DISABLE_10B_OPT_PARAM_NAME) != commandline_params.end()) { // option to disable 10-bit processing
                                                 return false;
                                         }
-                                        if (glsl_programs.find(c) != glsl_programs.end() && s->PHandles.find(c) == s->PHandles.end()) { // GLSL shader needed but compilation failed
-                                                return false;
-                                        }
                                         if (c == HW_VDPAU && !s->vdp_interop) {
                                                 return false;
                                         }
                                         return true;
                                 };
-                                copy_if(gl_supp_codecs.begin(), gl_supp_codecs.end(), (codec_t *) val, [](codec_t) { return true; });
+                                copy_if(gl_supp_codecs.begin(), gl_supp_codecs.end(), (codec_t *) val, filter_codecs);
                         } else {
                                 return false;
                         }
