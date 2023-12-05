@@ -1385,9 +1385,10 @@ static bool display_gl_init_opengl(struct state_gl *s)
 
         s->vdp_interop = vdp_interop_supported();
 
+        gl_check_error();
+
         glfwMakeContextCurrent(nullptr);
 
-        gl_check_error();
         return true;
 }
 
