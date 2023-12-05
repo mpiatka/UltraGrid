@@ -907,7 +907,6 @@ static void gl_process_frames(struct state_gl *s)
 {
         struct video_frame *frame;
 
-        gl_check_error();
         struct message *msg;
         while ((msg = check_message(&s->mod))) {
                 auto msg_univ = reinterpret_cast<struct msg_universal *>(msg);
@@ -944,8 +943,6 @@ static void gl_process_frames(struct state_gl *s)
                 }
         }
 
-        gl_check_error();
-
         {
                 unique_lock<mutex> lk(s->lock);
                 double timeout = min(2.0 / s->current_display_desc.fps, 0.1);
@@ -974,8 +971,6 @@ static void gl_process_frames(struct state_gl *s)
                 }
                 s->current_frame = frame;
         }
-
-        gl_check_error();
 
         if (!video_desc_eq(video_desc_from_frame(frame), s->current_display_desc)) {
                 gl_reconfigure_screen(s, video_desc_from_frame(frame));
