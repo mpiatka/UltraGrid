@@ -94,20 +94,6 @@
 using namespace std;
 using namespace std::chrono_literals;
 
-static const char * deinterlace_fp = R"raw(
-#version 110
-uniform sampler2D image;
-uniform float lineOff;
-void main()
-{
-        vec4 pix;
-        vec4 pix_down;
-        pix = texture2D(image, gl_TexCoord[0].xy);
-        pix_down = texture2D(image, vec2(gl_TexCoord[0].x, gl_TexCoord[0].y + lineOff));
-        gl_FragColor = (pix + pix_down) / 2.0;
-}
-)raw";
-
 static const char * uyvy_to_rgb_fp = R"raw(
 #version 110
 uniform sampler2D image;
@@ -982,13 +968,10 @@ static void gl_process_frames(struct state_gl *s)
                 glClear(GL_COLOR_BUFFER_BIT);
         }
 
+        s->scene.enableDeinterlacing(s->deinterlace == state_gl::deint::force || (s->deinterlace == state_gl::deint::on && s->current_display_desc.interlacing == INTERLACED_MERGED));
+
         s->scene.put_frame(frame);
         s->scene.render();
-
-        if (s->deinterlace == state_gl::deint::force || (s->deinterlace == state_gl::deint::on && s->current_display_desc.interlacing == INTERLACED_MERGED)) {
-                //TODO
-                //glUseProgram(s->PHandle_deint);
-        }
 
         // publish to Syphon/Spout
         if (s->syphon_spout) {
