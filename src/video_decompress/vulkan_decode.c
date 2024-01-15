@@ -23,10 +23,12 @@ struct state_vulkan_decompress
 
 static void * vulkan_decompress_init(void)
 {
+	printf("vulkan_decode test\n");
 	struct state_vulkan_decompress *s = calloc(1, sizeof(struct state_vulkan_decompress));
 	if (!s) return NULL;
 
 	s->test = 13;
+	debug_msg("[vulkan_decode] Vulkan_decompress_done initialized with state '%d'\n", s->test);
 
 	return s;
 }
@@ -42,6 +44,8 @@ static void vulkan_decompress_done(void *state)
 static int vulkan_decompress_reconfigure(void *state, struct video_desc desc,
 											 int rshift, int gshift, int bshift, int pitch, codec_t out_codec)
 {
+	printf("vulkan_decode test - reconfigure\n");
+	debug_msg("[vulkan_decode] test123\n");
 	UNUSED(state);
 	UNUSED(desc);
 	UNUSED(rshift);
@@ -70,8 +74,8 @@ static int vulkan_decompress_get_priority(codec_t compression, struct pixfmt_des
 	UNUSED(compression);
 	UNUSED(internal);
 	UNUSED(ugc);
-	//TODO
-	return -1;
+	
+	return 3; //TODO magic value
 }
 
 static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsigned char *src,
