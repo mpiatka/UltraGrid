@@ -407,6 +407,9 @@ public:
         void enableDeinterlacing(bool enable);
 
         GLuint get_texture() { return texture.get(); }
+
+        std::vector<codec_t> get_codecs() { return uploader.get_supported_codecs(); }
+
 private:
         GlProgram program;
         Model quad;

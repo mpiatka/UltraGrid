@@ -734,7 +734,7 @@ display_gl_reconfigure(void *state, struct video_desc desc)
 {
         struct state_gl	*s = (struct state_gl *) state;
 
-        assert (find(gl_supp_codecs.begin(), gl_supp_codecs.end(), desc.color_spec) != gl_supp_codecs.end());
+        //assert (find(gl_supp_codecs.begin(), gl_supp_codecs.end(), desc.color_spec) != gl_supp_codecs.end());
         if (get_bits_per_component(desc.color_spec) > 8) {
                 LOG(LOG_LEVEL_WARNING) << MOD_NAME "Displaying 10+ bits - performance degradation may occur, consider '--param " GL_DISABLE_10B_OPT_PARAM_NAME "'\n";
         }
@@ -1455,24 +1455,25 @@ display_gl_get_property(void *state, int property, void *val, size_t *len)
         int rgb_shift[] = {0, 8, 16};
 
         switch (property) {
-                case DISPLAY_PROPERTY_CODECS:
-                        if (sizeof gl_supp_codecs <= *len) {
-                                auto filter_codecs = [s](codec_t c) {
-                                        if (get_bits_per_component(c) > 8 && commandline_params.find(GL_DISABLE_10B_OPT_PARAM_NAME) != commandline_params.end()) { // option to disable 10-bit processing
-                                                return false;
-                                        }
-                                        if (c == HW_VDPAU && !s->vdp_interop) {
-                                                return false;
-                                        }
-                                        return true;
-                                };
-                                copy_if(gl_supp_codecs.begin(), gl_supp_codecs.end(), (codec_t *) val, filter_codecs);
+                case DISPLAY_PROPERTY_CODECS: {
+                        auto codecs = s->scene.get_codecs();
+                        auto newend = std::remove_if(codecs.begin(), codecs.end(),
+                                        [](codec_t c){
+                                                //Filter out 10-bit codecs if disabled
+                                                return get_bits_per_component(c) > 8
+                                                                && commandline_params.find(GL_DISABLE_10B_OPT_PARAM_NAME) != commandline_params.end();
+                                        });
+                        codecs.erase(newend, codecs.end());
+                        size_t codecs_size = codecs.size() * sizeof(codec_t);
+                        if (codecs_size <= *len) {
+                                copy(codecs.begin(), codecs.end(), (codec_t *) val);
                         } else {
                                 return false;
                         }
 
-                        *len = sizeof gl_supp_codecs;
+                        *len = codecs_size;
                         break;
+                }
                 case DISPLAY_PROPERTY_RGB_SHIFT:
                         if(sizeof(rgb_shift) > *len) {
                                 return false;
