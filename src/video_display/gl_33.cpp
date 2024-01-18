@@ -1232,19 +1232,6 @@ static void set_gamma(struct state_gl *s) {
         }
 }
 
-bool check_extension_present(const char *ext){
-        int count = 0;
-        glGetIntegerv(GL_NUM_EXTENSIONS, &count);
-
-        for(int i = 0; i < count; i++){
-                const char *item = (const char *) glGetStringi(GL_EXTENSIONS, i);
-                if(strcmp(item, ext) == 0)
-                        return true;
-        }
-
-        return false;
-}
-
 static bool
 vdp_interop_supported()
 {
@@ -1253,7 +1240,7 @@ vdp_interop_supported()
         if (hwacc_param != nullptr && strcmp(hwacc_param, "vdpau-copy") == 0) {
                 return false;
         }
-        if(check_extension_present("GL_NV_vdpau_interop"))
+        if(check_gl_extension_present("GL_NV_vdpau_interop"))
                 return true;
 
         log_msg(hwacc_param == nullptr ? LOG_LEVEL_VERBOSE : LOG_LEVEL_WARNING,
