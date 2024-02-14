@@ -1815,7 +1815,7 @@ then
                         HW_ACC_OBJ="${HW_ACC_OBJ} src/video_display/gl_vdpau.o"
                 fi
                 COMMON_FLAGS="$COMMON_FLAGS $GLFW_CFLAGS"
-                add_module display_gl "$GL_COMMON_OBJ $HW_ACC_OBJ src/video_display/gl.o" "$GL_LIB $LAVC_HWACC_LIBS"
+                add_module display_gl "$GL_COMMON_OBJ $HW_ACC_OBJ src/video_display/gl_33.o src/video_display/opengl_utils.o src/video_display/opengl_conversions.o" "$GL_LIB $LAVC_HWACC_LIBS"
         fi
 fi
 
