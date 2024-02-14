@@ -208,22 +208,6 @@ struct state_gl {
         }
 };
 
-static constexpr array gl_supp_codecs = {
-#ifdef HWACC_VDPAU
-        HW_VDPAU,
-#endif
-        UYVY,
-        v210,
-        R10k,
-        RGBA,
-        RGB,
-        RG48,
-        Y416,
-        DXT1,
-        DXT1_YUV,
-        DXT5
-};
-
 static void gl_print_monitors(bool fullhelp) {
         if (ref_count_init_once<int>()(glfwInit, glfw_init_count).value_or(GLFW_TRUE) == GLFW_FALSE) {
                 LOG(LOG_LEVEL_ERROR) << "Cannot initialize GLFW!\n";
