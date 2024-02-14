@@ -150,8 +150,6 @@ struct state_gl {
         double          video_aspect = 0.0;
         double          gamma = 0.0;
 
-        int             dxt_height = 0;
-
         int             vsync = 1;
         bool            paused = false;
         enum show_cursor_t { SC_TRUE, SC_FALSE, SC_AUTOHIDE } show_cursor = SC_AUTOHIDE;
@@ -174,9 +172,6 @@ struct state_gl {
         enum modeset_t { MODESET = -2, MODESET_SIZE_ONLY = GLFW_DONT_CARE, NOMODESET = 0 } modeset = NOMODESET; ///< positive vals force framerate
         bool nodecorate = false;
         int use_pbo = -1;
-#ifdef HWACC_VDPAU
-        struct state_vdpau vdp;
-#endif
         bool         vdp_interop = false;
         vector<char> scratchpad; ///< scratchpad sized WxHx8
 
@@ -635,9 +630,6 @@ static void screenshot(struct video_frame *frame)
 static void gl_reconfigure_screen(struct state_gl *s, struct video_desc desc)
 {
         assert(s->magic == MAGIC_GL);
-
-        s->dxt_height = desc.color_spec == DXT1 || desc.color_spec == DXT1_YUV || desc.color_spec == DXT5 ?
-                (desc.height + 3) / 4 * 4 : desc.height;
 
         s->aspect = s->video_aspect ? s->video_aspect : (double) desc.width / desc.height;
 
