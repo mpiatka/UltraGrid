@@ -23,20 +23,27 @@ struct state_vulkan_decompress
 
 static void * vulkan_decompress_init(void)
 {
-	printf("vulkan_decode test\n");
+	//validation layers, queue, nvidia examples
+	printf("vulkan_decode - init123\n");
 	struct state_vulkan_decompress *s = calloc(1, sizeof(struct state_vulkan_decompress));
 	if (!s) return NULL;
 
 	s->test = 13;
-	debug_msg("[vulkan_decode] Vulkan_decompress_done initialized with state '%d'\n", s->test);
+	printf("[vulkan_decode] Vulkan_decompress_done initialized with state '%d'\n", s->test);
+
+	
 
 	return s;
 }
 
 static void vulkan_decompress_done(void *state)
 {
+	printf("vulkan_decode - done\n");
 	struct state_vulkan_decompress *s = (struct state_vulkan_decompress *)state;
-	if (s) debug_msg("[vulkan_decode] Vulkan_decompress_done freeing state '%d'\n", s->test);
+	if (s)
+	{
+		printf("[vulkan_decode] Vulkan_decompress_done freeing state '%d'\n", s->test);
+	}
 	
 	free(s);
 }
@@ -44,8 +51,7 @@ static void vulkan_decompress_done(void *state)
 static int vulkan_decompress_reconfigure(void *state, struct video_desc desc,
 											 int rshift, int gshift, int bshift, int pitch, codec_t out_codec)
 {
-	printf("vulkan_decode test - reconfigure\n");
-	debug_msg("[vulkan_decode] test123\n");
+	printf("vulkan_decode - reconfigure\n");
 	UNUSED(state);
 	UNUSED(desc);
 	UNUSED(rshift);
@@ -54,11 +60,12 @@ static int vulkan_decompress_reconfigure(void *state, struct video_desc desc,
 	UNUSED(pitch);
 	UNUSED(out_codec);
 	//TODO
-	return 0;
+	return true;
 }
 
 static int vulkan_decompress_get_property(void *state, int property, void *val, size_t *len)
 {
+	printf("vulkan_decode - get_property\n");
 	UNUSED(property);
 	UNUSED(val);
 	UNUSED(len);
@@ -71,6 +78,7 @@ static int vulkan_decompress_get_property(void *state, int property, void *val, 
 
 static int vulkan_decompress_get_priority(codec_t compression, struct pixfmt_desc internal, codec_t ugc)
 {
+	printf("vulkan_decode - get_priority\n");
 	UNUSED(compression);
 	UNUSED(internal);
 	UNUSED(ugc);
@@ -82,6 +90,7 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
                 unsigned int src_len, int frame_seq, struct video_frame_callbacks *callbacks,
                 struct pixfmt_desc *internal_prop)
 {
+	printf("vulkan_decode - decompress\n");
 	UNUSED(dst);
 	UNUSED(src);
 	UNUSED(src_len);

@@ -1282,6 +1282,7 @@ ENSURE_FEATURE_PRESENT([$sdl_req], [$sdl], [SDL requested but found any version]
 # Vulkan
 # ------------------------------------------------------------------------------
 vulkan=no
+vulkan_decode=no
 
 AC_ARG_ENABLE(vulkan,
 [  --disable-vulkan            disable sdl2_vulkan display (default is auto)]
@@ -1307,15 +1308,15 @@ if test "$vulkan_req" != no; then
 					VULKAN_OBJ="src/video_display/vulkan/vulkan_sdl2.o src/video_display/vulkan/vulkan_display.o src/video_display/vulkan/vulkan_context.o src/video_display/vulkan/vulkan_transfer_image.o src/video_display/vulkan/vulkan_pipelines.o"
 					VULKAN_LIBS="$VULKAN_LIBS $SDL_LIBS"
 					add_module display_vulkan_sdl2 "$VULKAN_OBJ" "$VULKAN_LIBS"
+					VULKAN=vulkanEnabled
+					AC_SUBST(VULKAN)
+					vulkan=yes
 			fi
 			
 			VULKAN_DECODE_OBJ="src/video_decompress/vulkan_decode.o"
 			VULKAN_DECODE_LIBS="" #TODO check
 			add_module vdecompress_vulkan_decode "$VULKAN_DECODE_OBJ" "$VULKAN_DECODE_LIBS"
-			
-			VULKAN=vulkanEnabled
-			AC_SUBST(VULKAN)
-			vulkan=yes
+			vulkan_decode=yes
         fi
 fi
 
@@ -3513,6 +3514,7 @@ RESULT=`add_column "$RESULT" "SW video mix" $swmix $?`
 RESULT=`add_column "$RESULT" "V4L2" $v4l2 $?`
 RESULT=`add_column "$RESULT" "VULKAN_SDL2" $vulkan $?`
 RESULT=`add_column "$RESULT" "VULKAN_DECODE" $vulkan_decode $?`
+RESULT=`add_column "$RESULT" "found_vulkan" $found_vulkan $?` #TODO delete this
 RESULT=`add_column "$RESULT" "XIMEA" $ximea $?`
 RESULT=`end_section "$RESULT"`
 
