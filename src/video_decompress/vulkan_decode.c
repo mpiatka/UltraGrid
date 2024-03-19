@@ -17,22 +17,52 @@
 
 //#include <windows.h> //LoadLibrary
 
+#ifndef VK_NO_PROTOTYPES
+#define VK_NO_PROTOTYPES
+#endif
 #include "vulkan/vulkan.h"
 //#include "vk_video/vulkan_video_codecs_common.h" //?
 
+static PFN_vkDestroyInstance vkDestroyInstance = NULL;
+static PFN_vkDestroyDevice vkDestroyDevice = NULL;
+
+static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader, VkInstance instance)
+{
+	vkDestroyInstance = (PFN_vkDestroyInstance)loader(instance, "vkDestroyInstance");
+	vkDestroyDevice = (PFN_vkDestroyDevice)loader(instance, "vkDestroyDevice");
+
+	return vkDestroyInstance && vkDestroyDevice; 
+}
+
 struct state_vulkan_decompress
 {
-	HMODULE vulkanLib;
-	VkInstance instance;
+	HMODULE vulkanLib;					// needs to be destroyed if valid
+	VkInstance instance; 				// needs to be destroyed if valid
 	PFN_vkGetInstanceProcAddr loader;
 	VkPhysicalDevice physicalDevice;
-	VkDevice device;
+	VkDevice device;					// needs to be destroyed if valid
+	VkQueue queue;
+
+	// UltraGrid
+	//video_desc desc;
+	int rshift;
+	int gshift;
+	int bshift;
+	int pitch;
+	codec_t out_codec;
 };
 
 static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s,
-										VkPhysicalDevice *devices, uint32_t devices_count)
+										VkPhysicalDevice devices[], uint32_t devices_count,
+										uint32_t *queue_family_idx, VkQueueFamilyProperties2 *queue_family)
 {
+	// chooses the preferred physical device from array of given devices (of length atleast 1)
+	// if queue_family and queue_family_idx pointers are non-NULL it will fill it with queue family properties
+	// of preferred queue of the chosen device and the family index
+	// returns VK_NULL_HANDLE and does not set queue_family if no suitable physical device found
 	assert(devices_count > 0);
+	assert((queue_family && queue_family_idx) || (!queue_family && !queue_family_idx)); //both must be NULL or both non-NULL
+
 	PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties =
 					(PFN_vkGetPhysicalDeviceProperties)s->loader(s->instance, "vkGetPhysicalDeviceProperties");
 	assert(vkGetPhysicalDeviceProperties != NULL);
@@ -47,11 +77,9 @@ static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s
 
 	for (uint32_t i = 0; i < devices_count; ++i)
 	{
-		int hasDecode = 0;
-
 		VkPhysicalDeviceProperties deviceProperties;
 		vkGetPhysicalDeviceProperties(devices[i], &deviceProperties);
-		printf("device %d: '%s'\n", deviceProperties.deviceID, deviceProperties.deviceName);
+		printf("Device %d: '%s'\n", deviceProperties.deviceID, deviceProperties.deviceName);
 
 		//TODO deviceFeatures
 		//VkPhysicalDeviceFeatures deviceFeatures;
@@ -59,6 +87,12 @@ static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s
 
 		uint32_t queues_count = 0;
 		vkGetPhysicalDeviceQueueFamilyProperties2(devices[i], &queues_count, NULL);
+
+		if (queues_count == 0)
+		{
+			printf("\t No queue families found for this device.\n");
+			continue;
+		}
 		
 		VkQueueFamilyProperties2 *properties = (VkQueueFamilyProperties2*)calloc(queues_count, sizeof(VkQueueFamilyProperties2));
 		VkQueueFamilyVideoPropertiesKHR *video_properties = (VkQueueFamilyVideoPropertiesKHR*)calloc(queues_count, sizeof(VkQueueFamilyVideoPropertiesKHR));
@@ -80,6 +114,8 @@ static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s
 
 		vkGetPhysicalDeviceQueueFamilyProperties2(devices[i], &queues_count, properties);
 
+		int hasDecode = 0;
+		uint32_t preferred_queue_family = 0;
 		for (uint32_t j = 0; j < queues_count; ++j)
 		{
 			VkQueueFlags flags = properties[j].queueFamilyProperties.queueFlags;
@@ -87,6 +123,7 @@ static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s
 			int decode = flags & VK_QUEUE_VIDEO_DECODE_BIT_KHR ? 1 : 0;
 			printf("\tflags: %d, encode: %d, decode: %d\n", flags, encode, decode);
 
+			if (decode) preferred_queue_family = j;
 			hasDecode = hasDecode || decode;
 		}
 
@@ -103,7 +140,15 @@ static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s
 		
 		free(properties);
 		free(video_properties);
-		if (hasDecode) chosen = devices[i];
+		if (hasDecode)
+		{
+			chosen = devices[i];
+			if (queue_family != NULL && queue_family_idx != NULL)
+			{
+				*queue_family_idx = preferred_queue_family;
+				*queue_family = properties[preferred_queue_family];
+			}
+		}
 	}
 
 	return chosen;
@@ -114,6 +159,7 @@ static void * vulkan_decompress_init(void)
 	//validation layers, queue, nvidia examples
 	printf("vulkan_decode - init\n");
 
+	// ---Allocation of the vulkan_decompress state---
 	struct state_vulkan_decompress *s = calloc(1, sizeof(struct state_vulkan_decompress));
 	if (!s)
 	{
@@ -121,7 +167,8 @@ static void * vulkan_decompress_init(void)
 		return NULL;
 	}
 
-	const char vulkan_lib_filename[] = "vulkan-1.dll";
+	// ---Dynamic loading of the vulkan loader library---
+	const char vulkan_lib_filename[] = "vulkan-1.dll"; //TODO .so
     HMODULE vulkanLib = LoadLibrary(vulkan_lib_filename);
 	if (vulkanLib == NULL)
 	{
@@ -132,6 +179,7 @@ static void * vulkan_decompress_init(void)
 	//printf("[vulkan_decode] Vulkan file '%s' loaded.\n", vulkan_lib_filename);
 	s->vulkanLib = vulkanLib;
 
+	// ---Getting the loader function---
 	const char vulkan_proc_name[] = "vkGetInstanceProcAddr";
 	PFN_vkGetInstanceProcAddr getInstanceProcAddr = (PFN_vkGetInstanceProcAddr)GetProcAddress(vulkanLib, vulkan_proc_name);
     if (getInstanceProcAddr == NULL) {
@@ -142,21 +190,18 @@ static void * vulkan_decompress_init(void)
         return NULL;
     }
 	s->loader = getInstanceProcAddr;
-
-	VkApplicationInfo appInfo = { 0 };
-    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName = "UltraGrid vulkan_decode";
-    appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.pEngineName = "No Engine";
-    appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.apiVersion = VK_API_VERSION_1_0;
-
-	VkInstanceCreateInfo createInfo = { 0 };
-	createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-	createInfo.pApplicationInfo = &appInfo;
-	createInfo.enabledExtensionCount = 0,
-	//createInfo.ppEnabledExtensionNames = 
-	createInfo.enabledLayerCount = 0;
+	
+	// ---Creating the vulkan instance---
+	VkApplicationInfo appInfo = { .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+								  .pApplicationName = "UltraGrid vulkan_decode",
+								  .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
+								  .pEngineName = "No Engine",
+								  .engineVersion = VK_MAKE_VERSION(1, 0, 0),
+								  .apiVersion = VK_API_VERSION_1_0 };
+	VkInstanceCreateInfo createInfo = { .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+										.pApplicationInfo = &appInfo,
+										.enabledExtensionCount = 0,
+										.enabledLayerCount = 0 };
 
 	PFN_vkCreateInstance vkCreateInstance = (PFN_vkCreateInstance)getInstanceProcAddr(NULL, "vkCreateInstance");
 	assert(vkCreateInstance != NULL);
@@ -169,7 +214,16 @@ static void * vulkan_decompress_init(void)
 		return NULL;
 	}
 
-	// checking for extensions
+	if (!load_vulkan_functions_with_instance(getInstanceProcAddr, s->instance))
+	{
+		printf("[vulkan_decode] Failed to load all vulkan functions!\n");
+		if (vkDestroyInstance != NULL) vkDestroyInstance(s->instance, NULL);
+		FreeLibrary(vulkanLib);
+		free(s);
+        return NULL;
+	}
+
+	// ---Checking for extensions---
 	PFN_vkEnumerateInstanceExtensionProperties vkEnumerateInstanceExtensionProperties =
 					(PFN_vkEnumerateInstanceExtensionProperties)getInstanceProcAddr(s->instance, "vkEnumerateInstanceExtensionProperties");
 	assert(vkEnumerateInstanceExtensionProperties != NULL);
@@ -195,6 +249,7 @@ static void * vulkan_decompress_init(void)
 	}
 	free(extensions);
 
+	// ---Choosing of physical device---
 	PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices =
 						(PFN_vkEnumeratePhysicalDevices)getInstanceProcAddr(s->instance, "vkEnumeratePhysicalDevices");
 	assert(vkEnumeratePhysicalDevices != NULL);
@@ -211,40 +266,65 @@ static void * vulkan_decompress_init(void)
 	if (devices == NULL)
 	{
 		printf("[vulkan_decode] Failed to allocate array for devices!\n");
-		s->physicalDevice = VK_NULL_HANDLE;
+		vkDestroyInstance(s->instance, NULL);
+        FreeLibrary(vulkanLib);
+		free(s);
+		return NULL;
 	}
-	else
-	{
-		vkEnumeratePhysicalDevices(s->instance, &phys_devices_count, devices);
-		s->physicalDevice = choose_physical_device(s, devices, phys_devices_count);
 
-		VkPhysicalDeviceProperties deviceProperties;
-		vkGetPhysicalDeviceProperties(s->physicalDevice, &deviceProperties);
-		printf("Chosen physical device is: '%s'\n", deviceProperties.deviceName);
-	}
+	vkEnumeratePhysicalDevices(s->instance, &phys_devices_count, devices);
+	uint32_t chosen_queue_family_idx = 0;
+	VkQueueFamilyProperties2 chosen_queue_family; //TODO use this
+	s->physicalDevice = choose_physical_device(s, devices, phys_devices_count, &chosen_queue_family_idx, &chosen_queue_family);
 	free(devices);
-
 	if (s->physicalDevice == VK_NULL_HANDLE)
 	{
-		//TODO destroy instace, device
+		printf("[vulkan_decode] Failed to choose a appropriate physical device!\n");
+		vkDestroyInstance(s->instance, NULL);
         FreeLibrary(vulkanLib);
 		free(s);
 		return NULL;
 	}
+	assert(chosen_queue_family.pNext != NULL &&
+		   ((VkQueueFamilyVideoPropertiesKHR*)chosen_queue_family.pNext)->sType == VK_STRUCTURE_TYPE_QUEUE_FAMILY_VIDEO_PROPERTIES_KHR);
 
+	VkPhysicalDeviceProperties deviceProperties;
+	vkGetPhysicalDeviceProperties(s->physicalDevice, &deviceProperties);
+	printf("Chosen physical device is: '%s' and chosen queue family index is: %d\n", 
+				deviceProperties.deviceName, chosen_queue_family_idx);
+
+	// ---Creating a logical device---
 	PFN_vkCreateDevice vkCreateDevice = (PFN_vkCreateDevice)getInstanceProcAddr(s->instance, "vkCreateDevice");
-	VkDeviceCreateInfo createDeviceInfo = { .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .pNext = NULL,
-											.queueCreateInfoCount = 0, .enabledLayerCount = 0, .enabledExtensionCount = 0 };
+	assert(vkCreateDevice != NULL);
+
+	float queue_priorities = 1.0f;
+	VkDeviceQueueCreateInfo queueCreateInfo = { .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+												.queueFamilyIndex = chosen_queue_family_idx,
+												.queueCount = 1,
+												.pQueuePriorities = &queue_priorities };
+	VkPhysicalDeviceFeatures deviceFeatures = { 0 }; //TODO deviceFeatures
+	VkDeviceCreateInfo createDeviceInfo = { .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+											.queueCreateInfoCount = 1,
+											.pQueueCreateInfos = &queueCreateInfo,
+											.pEnabledFeatures = &deviceFeatures,
+											.enabledLayerCount = 0, .enabledExtensionCount = 0 };
+	
 	result = vkCreateDevice(s->physicalDevice, &createDeviceInfo, NULL, &s->device);
-	printf("vkCreateDevice result: %d\n", result);
 	if (result != VK_SUCCESS)
 	{
-		//TODO destroy instace, device
+		printf("[vulkan_decode] Failed to create a appropriate vulkan device!\n");
+		vkDestroyInstance(s->instance, NULL);
 		free(s);
         FreeLibrary(vulkanLib);
 		return NULL;
 	}
 
+	PFN_vkGetDeviceQueue vkGetDeviceQueue = (PFN_vkGetDeviceQueue)getInstanceProcAddr(s->instance, "vkGetDeviceQueue");
+	assert(vkGetDeviceQueue != NULL);
+
+	vkGetDeviceQueue(s->device, queueCreateInfo.queueFamilyIndex, 0, &s->queue);
+
+	printf("[vulkan_decode] Initialization finished successfully.\n");
 	return s;
 }
 
@@ -254,47 +334,74 @@ static void vulkan_decompress_done(void *state)
 	struct state_vulkan_decompress *s = (struct state_vulkan_decompress *)state;
 	if (!s) return;
 
-	PFN_vkDestroyDevice vkDestroyDevice = (PFN_vkDestroyDevice)s->loader(s->instance, "vkDestroyDevice");
-	if (vkDestroyDevice == NULL) printf("[vulkan_decode] vkDestroyDevice function not found! Couldn't destroy the vulkan device properly.\n");
-	else vkDestroyDevice(s->device, NULL);
+	if (vkDestroyDevice != NULL) vkDestroyDevice(s->device, NULL);
 
-	PFN_vkDestroyInstance vkDestroyInstance = (PFN_vkDestroyInstance)s->loader(s->instance, "vkDestroyInstance");
-	if (vkDestroyInstance == NULL) printf("[vulkan_decode] vkDestroyInstance function not found! Couldn't destroy the vulkan instance properly.\n");
-	else vkDestroyInstance(s->instance, NULL);
+	if (vkDestroyInstance != NULL) vkDestroyInstance(s->instance, NULL);
 
 	FreeLibrary(s->vulkanLib);
+
 	free(s);
+}
+
+static bool configure_with(struct state_vulkan_decompress *s, struct video_desc desc)
+{
+	printf("vulkan_decode - configure_with\n");
+	UNUSED(s);
+	UNUSED(desc);
+	//TODO
+	return true;
 }
 
 static int vulkan_decompress_reconfigure(void *state, struct video_desc desc,
 											 int rshift, int gshift, int bshift, int pitch, codec_t out_codec)
 {
 	printf("vulkan_decode - reconfigure\n");
-	UNUSED(state);
 	UNUSED(desc);
 	UNUSED(rshift);
 	UNUSED(gshift);
 	UNUSED(bshift);
 	UNUSED(pitch);
 	UNUSED(out_codec);
+	struct state_vulkan_decompress *s = (struct state_vulkan_decompress *)state;
+	if (!s) return false;
+
 	//TODO
 	const char *spec_name = get_codec_name(desc.color_spec);
 	const char *out_name = get_codec_name(out_codec);
 	printf("\tcodec color_spec: '%s', out_codec: '%s'\n", spec_name, out_name);
-	return true;
+
+	//s->desc = desc;
+	s->rshift = rshift;
+	s->gshift = gshift;
+	s->bshift = bshift;
+	s->pitch = pitch;
+	s->out_codec = out_codec;
+
+	return configure_with(s, desc);
 }
 
 static int vulkan_decompress_get_property(void *state, int property, void *val, size_t *len)
 {
 	printf("vulkan_decode - get_property\n");
-	UNUSED(property);
-	UNUSED(val);
-	UNUSED(len);
 	struct state_vulkan_decompress *s = (struct state_vulkan_decompress *)state;
     UNUSED(s);
-	//TODO
-	printf("\tproperty index: %d, val: %p, len: %p\n", property, val, len);
-	return 0;
+	//printf("\tproperty index: %d, val: %p, len: %p\n", property, val, len);
+	
+	int ret = FALSE;
+	switch(property) {
+		case DECOMPRESS_PROPERTY_ACCEPTS_CORRUPTED_FRAME:
+			if(*len >= sizeof(int))
+			{
+				*(int *) val = FALSE;
+				*len = sizeof(int);
+				ret = TRUE;
+			}
+			break;
+		default:
+				ret = FALSE;
+	}
+
+	return ret;
 }
 
 

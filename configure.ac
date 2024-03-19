@@ -1303,7 +1303,12 @@ if test "$vulkan_req" != no; then
         fi
         AC_CHECK_HEADERS([vulkan/vulkan.h], [], [found_vulkan=no])
 
-        if test test $found_vulkan = yes; then
+        if test $found_vulkan = yes; then
+                VULKAN_DECODE_OBJ="src/video_decompress/vulkan_decode.o"
+                VULAKN_DECODE_LIBS="$VULKAN_LIBS"
+                add_module vdecompress_vulkan_decode "$VULKAN_DECODE_OBJ" "$VULKAN_DECODE_LIBS"
+                vulkan_decode=yes
+
                 if test $sdl = yes && test $sdl_version = 2; then
                                 VULKAN_OBJ="src/video_display/vulkan/vulkan_sdl2.o src/video_display/vulkan/vulkan_display.o src/video_display/vulkan/vulkan_context.o src/video_display/vulkan/vulkan_transfer_image.o src/video_display/vulkan/vulkan_pipelines.o"
                                 VULKAN_LIBS="$VULKAN_LIBS $SDL_LIBS"
@@ -1312,22 +1317,10 @@ if test "$vulkan_req" != no; then
                                 AC_SUBST(VULKAN)
                                 vulkan=yes
                 fi
-                
-                #VULKAN_DECODE_OBJ="src/video_decompress/vulkan_decode.o"
-                #VULKAN_DECODE_LIBS="" #TODO check
-                #add_module vdecompress_vulkan_decode "$VULKAN_DECODE_OBJ" "$VULKAN_DECODE_LIBS"
-                #vulkan_decode=yes
         fi
 fi
 
 ENSURE_FEATURE_PRESENT([$vulkan_req], [$vulkan], [Vulkan dependencies were not found (Vulkan ver 1.1.101 or SDL2)!])
-
-#TODO test
-vulkan_decode=no
-VULKAN_DECODE_OBJ="src/video_decompress/vulkan_decode.o"
-VULKAN_DECODE_LIBS=""
-add_module vdecompress_vulkan_decode "$VULKAN_DECODE_OBJ" "$VULKAN_DECODE_LIBS"
-vulkan_decode=yes
 
 # ------------------------------------------------------------------------------
 # GLM (OpenGL math library)
