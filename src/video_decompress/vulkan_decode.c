@@ -41,7 +41,9 @@ struct state_vulkan_decompress
 	PFN_vkGetInstanceProcAddr loader;
 	VkPhysicalDevice physicalDevice;
 	VkDevice device;					// needs to be destroyed if valid
-	VkQueue queue;
+	VkQueue decode_queue;
+	VkVideoCodecOperationFlagsKHR queueVideoFlags;
+	VkVideoCodecOperationFlagsKHR codecOperation;
 
 	// UltraGrid
 	//video_desc desc;
@@ -54,11 +56,13 @@ struct state_vulkan_decompress
 
 static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s,
 										VkPhysicalDevice devices[], uint32_t devices_count,
-										uint32_t *queue_family_idx, VkQueueFamilyProperties2 *queue_family)
+										VkQueueFlags requestedQueueFamilyFlags,
+										uint32_t *queue_family_idx, VkQueueFamilyProperties2 *queue_family,
+										VkQueueFamilyVideoPropertiesKHR *queue_video_props)
 {
 	// chooses the preferred physical device from array of given devices (of length atleast 1)
-	// if queue_family and queue_family_idx pointers are non-NULL it will fill it with queue family properties
-	// of preferred queue of the chosen device and the family index
+	// queue_family_idx and if queue_family and queue_video_props pointers are non-NULL it will fill
+	// them with queue family properties and video properties of preferred queue of the chosen device and the family index
 	// returns VK_NULL_HANDLE and does not set queue_family if no suitable physical device found
 	assert(devices_count > 0);
 	assert((queue_family && queue_family_idx) || (!queue_family && !queue_family_idx)); //both must be NULL or both non-NULL
@@ -94,6 +98,7 @@ static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s
 			continue;
 		}
 		
+		//IDEA maybe we can use MAX_QUEUE_FAMILIES (6?) instead of dynamic allocation
 		VkQueueFamilyProperties2 *properties = (VkQueueFamilyProperties2*)calloc(queues_count, sizeof(VkQueueFamilyProperties2));
 		VkQueueFamilyVideoPropertiesKHR *video_properties = (VkQueueFamilyVideoPropertiesKHR*)calloc(queues_count, sizeof(VkQueueFamilyVideoPropertiesKHR));
 		if (properties == NULL || video_properties == NULL) //TODO probably return error?
@@ -114,41 +119,55 @@ static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s
 
 		vkGetPhysicalDeviceQueueFamilyProperties2(devices[i], &queues_count, properties);
 
-		int hasDecode = 0;
+		//the only important queue flags for us
+		const VkQueueFlags queueFlagsFilter = (VK_QUEUE_GRAPHICS_BIT |
+                                               VK_QUEUE_COMPUTE_BIT |
+                                               VK_QUEUE_TRANSFER_BIT |
+                                               VK_QUEUE_VIDEO_DECODE_BIT_KHR |
+                                               VK_QUEUE_VIDEO_ENCODE_BIT_KHR);
+		bool approved = false;
 		uint32_t preferred_queue_family = 0;
 		for (uint32_t j = 0; j < queues_count; ++j)
 		{
-			VkQueueFlags flags = properties[j].queueFamilyProperties.queueFlags;
+			VkQueueFlags flags = properties[j].queueFamilyProperties.queueFlags & queueFlagsFilter;
 			int encode = flags & VK_QUEUE_VIDEO_ENCODE_BIT_KHR ? 1 : 0;
 			int decode = flags & VK_QUEUE_VIDEO_DECODE_BIT_KHR ? 1 : 0;
-			printf("\tflags: %d, encode: %d, decode: %d\n", flags, encode, decode);
+			int compute = flags & VK_QUEUE_COMPUTE_BIT ? 1 : 0;
+			int transfer = flags & VK_QUEUE_TRANSFER_BIT ? 1 : 0;
+			int graphics = flags & VK_QUEUE_GRAPHICS_BIT ? 1 : 0;
+			printf("\tflags: %d, encode: %d, decode: %d, compute: %d, transfer: %d, graphics: %d\n",
+					  flags, encode, decode, compute, transfer, graphics);
 
-			if (decode) preferred_queue_family = j;
-			hasDecode = hasDecode || decode;
-		}
+			VkVideoCodecOperationFlagsKHR videoFlags = video_properties[j].videoCodecOperations;
+			int h264_en = videoFlags & VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR ? 1 : 0;
+			int h265_en = videoFlags & VK_VIDEO_CODEC_OPERATION_ENCODE_H265_BIT_KHR ? 1 : 0;
+			int h264_de = videoFlags & VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR ? 1 : 0;
+			int h265_de = videoFlags & VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR ? 1 : 0;
+			//int av1_de = videoFlags & VK_VIDEO_CODEC_OPERATION_DECODE_AV1_BIT_KHR ? 1 : 0;
+			printf("\tvideo flags: %d, h264: %d %d, h265: %d %d\n",
+					  videoFlags, h264_en, h264_de, h265_en, h265_de);
 
-		for (uint32_t j = 0; j < queues_count; ++j)
-		{
-			VkVideoCodecOperationFlagsKHR flags = video_properties[j].videoCodecOperations;
-			int h264_en = flags & VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR ? 1 : 0;
-			int h265_en = flags & VK_VIDEO_CODEC_OPERATION_ENCODE_H265_BIT_KHR ? 1 : 0;
-			int h264_de = flags & VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR ? 1 : 0;
-			int h265_de = flags & VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR ? 1 : 0;
-			//int av1_de = flags & VK_VIDEO_CODEC_OPERATION_DECODE_AV1_BIT_KHR ? 1 : 0;
-			printf("\tvideo flags: %d, h264: %d %d, h265: %d %d\n", flags, h264_en, h264_de, h265_en, h265_de);
-		}
-		
-		free(properties);
-		free(video_properties);
-		if (hasDecode)
-		{
-			chosen = devices[i];
-			if (queue_family != NULL && queue_family_idx != NULL)
+			if (requestedQueueFamilyFlags == (flags & requestedQueueFamilyFlags) && videoFlags)
 			{
-				*queue_family_idx = preferred_queue_family;
-				*queue_family = properties[preferred_queue_family];
+				preferred_queue_family = j;
+				approved = true;
 			}
 		}
+		
+		if (approved)
+		{
+			chosen = devices[i];
+			if (queue_family_idx) *queue_family_idx = preferred_queue_family;
+			if (queue_family)
+			{
+				*queue_family = properties[preferred_queue_family];
+				queue_family->pNext = NULL;
+			}
+			if (queue_video_props) *queue_video_props = video_properties[preferred_queue_family];	
+		}
+
+		free(properties);
+		free(video_properties);
 	}
 
 	return chosen;
@@ -156,7 +175,6 @@ static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s
 
 static void * vulkan_decompress_init(void)
 {
-	//validation layers, queue, nvidia examples
 	printf("vulkan_decode - init\n");
 
 	// ---Allocation of the vulkan_decompress state---
@@ -192,6 +210,7 @@ static void * vulkan_decompress_init(void)
 	s->loader = getInstanceProcAddr;
 	
 	// ---Creating the vulkan instance---
+	//TODO InitDebugReport form NVidia example
 	VkApplicationInfo appInfo = { .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
 								  .pApplicationName = "UltraGrid vulkan_decode",
 								  .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
@@ -256,6 +275,7 @@ static void * vulkan_decompress_init(void)
 	PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties =
 						(PFN_vkGetPhysicalDeviceProperties)getInstanceProcAddr(s->instance, "vkGetPhysicalDeviceProperties");
 	assert(vkGetPhysicalDeviceProperties != NULL);
+	VkQueueFlags requestedFamilyQueueFlags = VK_QUEUE_VIDEO_DECODE_BIT_KHR | VK_QUEUE_TRANSFER_BIT;
 	uint32_t phys_devices_count = 0;
 	//TODO count == 0
 
@@ -274,8 +294,10 @@ static void * vulkan_decompress_init(void)
 
 	vkEnumeratePhysicalDevices(s->instance, &phys_devices_count, devices);
 	uint32_t chosen_queue_family_idx = 0;
-	VkQueueFamilyProperties2 chosen_queue_family; //TODO use this
-	s->physicalDevice = choose_physical_device(s, devices, phys_devices_count, &chosen_queue_family_idx, &chosen_queue_family);
+	VkQueueFamilyProperties2 chosen_queue_family; //TODO use this?
+	VkQueueFamilyVideoPropertiesKHR chosen_queue_video_props; //TODO use this more?
+	s->physicalDevice = choose_physical_device(s, devices, phys_devices_count, requestedFamilyQueueFlags,
+											   &chosen_queue_family_idx, &chosen_queue_family, &chosen_queue_video_props);
 	free(devices);
 	if (s->physicalDevice == VK_NULL_HANDLE)
 	{
@@ -285,8 +307,10 @@ static void * vulkan_decompress_init(void)
 		free(s);
 		return NULL;
 	}
-	assert(chosen_queue_family.pNext != NULL &&
-		   ((VkQueueFamilyVideoPropertiesKHR*)chosen_queue_family.pNext)->sType == VK_STRUCTURE_TYPE_QUEUE_FAMILY_VIDEO_PROPERTIES_KHR);
+
+	s->queueVideoFlags = chosen_queue_video_props.videoCodecOperations;
+	assert(chosen_queue_family.pNext == NULL && chosen_queue_video_props.pNext == NULL);
+	assert(s->queueVideoFlags != 0);
 
 	VkPhysicalDeviceProperties deviceProperties;
 	vkGetPhysicalDeviceProperties(s->physicalDevice, &deviceProperties);
@@ -302,12 +326,13 @@ static void * vulkan_decompress_init(void)
 												.queueFamilyIndex = chosen_queue_family_idx,
 												.queueCount = 1,
 												.pQueuePriorities = &queue_priorities };
-	VkPhysicalDeviceFeatures deviceFeatures = { 0 }; //TODO deviceFeatures
+	VkPhysicalDeviceFeatures deviceFeatures = { 0 };
 	VkDeviceCreateInfo createDeviceInfo = { .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
 											.queueCreateInfoCount = 1,
 											.pQueueCreateInfos = &queueCreateInfo,
 											.pEnabledFeatures = &deviceFeatures,
-											.enabledLayerCount = 0, .enabledExtensionCount = 0 };
+											.enabledLayerCount = 0,
+											.enabledExtensionCount = 0 };
 	
 	result = vkCreateDevice(s->physicalDevice, &createDeviceInfo, NULL, &s->device);
 	if (result != VK_SUCCESS)
@@ -322,7 +347,7 @@ static void * vulkan_decompress_init(void)
 	PFN_vkGetDeviceQueue vkGetDeviceQueue = (PFN_vkGetDeviceQueue)getInstanceProcAddr(s->instance, "vkGetDeviceQueue");
 	assert(vkGetDeviceQueue != NULL);
 
-	vkGetDeviceQueue(s->device, queueCreateInfo.queueFamilyIndex, 0, &s->queue);
+	vkGetDeviceQueue(s->device, queueCreateInfo.queueFamilyIndex, 0, &s->decode_queue);
 
 	printf("[vulkan_decode] Initialization finished successfully.\n");
 	return s;
@@ -343,12 +368,34 @@ static void vulkan_decompress_done(void *state)
 	free(s);
 }
 
+static VkVideoCodecOperationFlagsKHR codec_to_vulkan_flags(codec_t codec)
+{
+	switch(codec)
+	{
+		case H264: return VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
+		case H265: return VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR;
+		//case AV1: return VK_VIDEO_CODEC_OPERATION_DECODE_AV1_BIT_KHR;
+		default: return VK_VIDEO_CODEC_OPERATION_NONE_KHR;
+	}
+}
+
 static bool configure_with(struct state_vulkan_decompress *s, struct video_desc desc)
 {
 	printf("vulkan_decode - configure_with\n");
-	UNUSED(s);
-	UNUSED(desc);
-	//TODO
+	const char *spec_name = get_codec_name(desc.color_spec);
+	printf("\tw: %u, h: %u, color_spec: '%s', fps: %f, tile_count: %u\n",
+			desc.width, desc.height, spec_name, desc.fps, desc.tile_count);
+
+	s->codecOperation = VK_VIDEO_CODEC_OPERATION_NONE_KHR;
+	VkVideoCodecOperationFlagsKHR videoCodecOperation = codec_to_vulkan_flags(desc.color_spec);
+
+	if (!(s->queueVideoFlags & videoCodecOperation))
+	{
+		printf("[vulkan_decode] Wanted color spec: '%s' is not supported by chosen vulkan queue family!\n", spec_name);
+		return false;
+	}
+
+	s->codecOperation = videoCodecOperation;
 	return true;
 }
 
@@ -356,16 +403,9 @@ static int vulkan_decompress_reconfigure(void *state, struct video_desc desc,
 											 int rshift, int gshift, int bshift, int pitch, codec_t out_codec)
 {
 	printf("vulkan_decode - reconfigure\n");
-	UNUSED(desc);
-	UNUSED(rshift);
-	UNUSED(gshift);
-	UNUSED(bshift);
-	UNUSED(pitch);
-	UNUSED(out_codec);
 	struct state_vulkan_decompress *s = (struct state_vulkan_decompress *)state;
 	if (!s) return false;
 
-	//TODO
 	const char *spec_name = get_codec_name(desc.color_spec);
 	const char *out_name = get_codec_name(out_codec);
 	printf("\tcodec color_spec: '%s', out_codec: '%s'\n", spec_name, out_name);
@@ -430,8 +470,15 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	UNUSED(callbacks);
 	UNUSED(internal_prop);
 	struct state_vulkan_decompress *s = (struct state_vulkan_decompress *)state;
-    UNUSED(s);
     //TODO
+
+	VkVideoProfileInfoKHR videoProfile = { .sType = VK_STRUCTURE_TYPE_VIDEO_PROFILE_INFO_KHR,
+										   .videoCodecOperation = s->codecOperation, 
+										   .chromaSubsampling = VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR, //?
+										   .lumaBitDepth = VK_VIDEO_COMPONENT_BIT_DEPTH_INVALID_KHR,	 //TODO - should be same asi .chromaBitDepth
+										   .chromaBitDepth = VK_VIDEO_COMPONENT_BIT_DEPTH_INVALID_KHR }; //TODO
+	UNUSED(videoProfile);
+
     decompress_status res = DECODER_NO_FRAME;
     
     return res;
