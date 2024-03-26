@@ -25,16 +25,20 @@
 
 static PFN_vkDestroyInstance vkDestroyInstance = NULL;
 static PFN_vkDestroyDevice vkDestroyDevice = NULL;
+static PFN_vkEnumerateInstanceExtensionProperties vkEnumerateInstanceExtensionProperties = NULL;
 static PFN_vkGetPhysicalDeviceVideoCapabilitiesKHR vkGetPhysicalDeviceVideoCapabilitiesKHR = NULL;
 
 static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader, VkInstance instance)
 {
 	vkDestroyInstance = (PFN_vkDestroyInstance)loader(instance, "vkDestroyInstance");
 	vkDestroyDevice = (PFN_vkDestroyDevice)loader(instance, "vkDestroyDevice");
+	vkEnumerateInstanceExtensionProperties = (PFN_vkEnumerateInstanceExtensionProperties)
+												loader(instance, "vkEnumerateInstanceExtensionProperties");
 	vkGetPhysicalDeviceVideoCapabilitiesKHR = (PFN_vkGetPhysicalDeviceVideoCapabilitiesKHR)
 												loader(instance, "vkGetPhysicalDeviceVideoCapabilitiesKHR");
 
-	return vkDestroyInstance && vkDestroyDevice && vkGetPhysicalDeviceVideoCapabilitiesKHR;
+	return vkDestroyInstance && vkDestroyDevice &&
+			vkEnumerateInstanceExtensionProperties && vkGetPhysicalDeviceVideoCapabilitiesKHR;
 }
 
 struct state_vulkan_decompress
@@ -55,6 +59,99 @@ struct state_vulkan_decompress
 	int pitch;
 	codec_t out_codec;
 };
+
+static VkResult check_for_extentions()
+{
+	/*const char* const requiredInstanceLayerExtensions[] = {
+								"VK_LAYER_KHRONOS_validation",
+								NULL };
+
+    const char* const requiredWsiInstanceExtensions[] = {
+								// Required generic WSI extensions
+								VK_KHR_SURFACE_EXTENSION_NAME,
+								NULL };*/
+	
+	/*const char* const requiredWsiDeviceExtension[] = {
+							// Add the WSI required device extensions
+							VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+							NULL };
+
+    static const char* const optinalDeviceExtension[] = {
+								VK_EXT_YCBCR_2PLANE_444_FORMATS_EXTENSION_NAME,
+								VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME,
+								VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
+								VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
+								NULL };*/
+
+	const char* const requiredInstanceExtentions[] = {
+						VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
+						NULL };
+
+    const char* const requiredDeviceExtensions[] = {
+#if defined(__linux) || defined(__linux__) || defined(linux)
+        VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
+        VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME,
+#endif
+        VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
+        VK_KHR_VIDEO_QUEUE_EXTENSION_NAME,
+        VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME,
+        NULL };
+
+	uint32_t extensions_count = 0;
+	vkEnumerateInstanceExtensionProperties(NULL, &extensions_count, NULL);
+	printf("extensions_count: %d\n", extensions_count);
+	if (extensions_count == 0)
+	{
+		if (requiredInstanceExtentions[0] != NULL)
+		{
+			printf("[vulkan_decode] No extensions supported.\n");
+			return false;
+		}
+		
+		printf("No extentions found and none required.\n");
+		return true;
+	}
+
+	VkExtensionProperties *extensions = (VkExtensionProperties*)calloc(extensions_count, sizeof(VkExtensionProperties));
+	if (extensions == NULL)
+	{
+		printf("[vulkan_decode] Failed to allocate array for extensions!\n");
+		return false;
+	}
+
+	vkEnumerateInstanceExtensionProperties(NULL, &extensions_count, extensions);
+
+	for (uint32_t i = 0; i < extensions_count; ++i)
+	{
+		printf("\tExtension: '%s'\n", extensions[i].extensionName);
+	}
+
+	for (size_t i = 0; requiredInstanceExtentions[i] != NULL; ++i)
+	{
+		bool found = false;
+		for (uint32_t j = 0; j < extensions_count; ++j)
+		{
+			if (!strcmp(requiredInstanceExtentions[i], extensions[j].extensionName))
+			{
+				found = true;
+				break;
+			}
+		}
+
+		if (!found)
+		{
+			printf("[vulkan_decode] Required instance extention: '%s' was not found!\n",
+						requiredInstanceExtentions[i]);
+			free(extensions);
+			return false;
+		}
+	}
+
+	//TODO check for device extentions
+
+	free(extensions);
+	return true;
+}
 
 static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s,
 										VkPhysicalDevice devices[], uint32_t devices_count,
@@ -245,30 +342,14 @@ static void * vulkan_decompress_init(void)
 	}
 
 	// ---Checking for extensions---
-	PFN_vkEnumerateInstanceExtensionProperties vkEnumerateInstanceExtensionProperties =
-					(PFN_vkEnumerateInstanceExtensionProperties)getInstanceProcAddr(s->instance, "vkEnumerateInstanceExtensionProperties");
-	assert(vkEnumerateInstanceExtensionProperties != NULL);
-	uint32_t extensions_count = 0;
-
-	vkEnumerateInstanceExtensionProperties(NULL, &extensions_count, NULL);
-	printf("extensions_count: %d\n", extensions_count);
-	//TODO count == 0
-
-	VkExtensionProperties *extensions = (VkExtensionProperties*)calloc(extensions_count, sizeof(VkExtensionProperties));
-	if (extensions == NULL)
+	if (!check_for_extentions())
 	{
-		printf("[vulkan_decode] Failed to allocate array for extensions!\n");
+		//error msg should be printed inside of check_for_extentions
+		vkDestroyInstance(s->instance, NULL);
+		FreeLibrary(vulkanLib);
+		free(s);
+        return NULL;
 	}
-	else
-	{
-		vkEnumerateInstanceExtensionProperties(NULL, &extensions_count, extensions);
-
-		for (uint32_t i = 0; i < extensions_count; ++i)
-		{
-			printf("\tExtension: '%s'\n", extensions[i].extensionName);
-		}
-	}
-	free(extensions);
 
 	// ---Choosing of physical device---
 	PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices =
@@ -580,8 +661,8 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	UNUSED(callbacks);
 	UNUSED(internal_prop);
 	struct state_vulkan_decompress *s = (struct state_vulkan_decompress *)state;
-    printf("\tdst: %p, src: %p, src_len: %u, frame_seq: %d\n",
-			dst, src, src_len, frame_seq);
+    //printf("\tdst: %p, src: %p, src_len: %u, frame_seq: %d\n",
+	//		dst, src, src_len, frame_seq);
 	
     decompress_status res = DECODER_NO_FRAME;
 
@@ -608,14 +689,21 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 		return DECODER_GOT_CODEC;
 	}
 
-	if (!s->prepared) s->prepared = prepare(s);
 	if (!s->prepared)
 	{
-		printf("\tFailed to prepare for decompress.\n");
-		return res;
+		if (!(s->prepared = prepare(s)))
+		{
+			printf("\tFailed to prepare for decompress.\n");
+			return res;
+		}
 	}
 
 	//TODO decompress
+	UNUSED(src);
+	UNUSED(dst);
+	UNUSED(src_len);
+	UNUSED(frame_seq);
+
     return res;
 };
 

@@ -3507,7 +3507,6 @@ RESULT=`add_column "$RESULT" "SW video mix" $swmix $?`
 RESULT=`add_column "$RESULT" "V4L2" $v4l2 $?`
 RESULT=`add_column "$RESULT" "VULKAN_SDL2" $vulkan $?`
 RESULT=`add_column "$RESULT" "VULKAN_DECODE" $vulkan_decode $?`
-RESULT=`add_column "$RESULT" "found_vulkan" $found_vulkan $?` #TODO delete this
 RESULT=`add_column "$RESULT" "XIMEA" $ximea $?`
 RESULT=`end_section "$RESULT"`
 
