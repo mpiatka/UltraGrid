@@ -21,46 +21,109 @@
 #define VK_NO_PROTOTYPES
 #endif
 #include "vulkan/vulkan.h"
-//#include "vk_video/vulkan_video_codecs_common.h" //?
 
+// activates vulkan validation layers if defined
+// if defined your vulkan loader needs to know where to find the validation layer manifest
+// (for example through VK_LAYER_PATH or VK_ADD_LAYER_PATH env. variables)
+#define VULKAN_VALIDATE
+
+// one of value from enum VkDebugUtilsMessageSeverityFlagBitsEXT from vulkan.h (vulkan_core.h)
+#define VULKAN_VALIDATE_SHOW_SEVERITY VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
+
+static PFN_vkCreateInstance vkCreateInstance = NULL;
 static PFN_vkDestroyInstance vkDestroyInstance = NULL;
+#ifdef VULKAN_VALIDATE
+static PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT = NULL;
+static PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT = NULL;
+#endif
+static PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices = NULL;
+static PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties = NULL;
+static PFN_vkCreateDevice vkCreateDevice = NULL;
 static PFN_vkDestroyDevice vkDestroyDevice = NULL;
 static PFN_vkEnumerateInstanceExtensionProperties vkEnumerateInstanceExtensionProperties = NULL;
+static PFN_vkEnumerateInstanceLayerProperties vkEnumerateInstanceLayerProperties = NULL;
+static PFN_vkEnumerateDeviceExtensionProperties vkEnumerateDeviceExtensionProperties = NULL;
+static PFN_vkGetDeviceQueue vkGetDeviceQueue = NULL;
 static PFN_vkGetPhysicalDeviceVideoCapabilitiesKHR vkGetPhysicalDeviceVideoCapabilitiesKHR = NULL;
+static PFN_vkGetPhysicalDeviceVideoFormatPropertiesKHR vkGetPhysicalDeviceVideoFormatPropertiesKHR = NULL;
+static PFN_vkCreateVideoSessionKHR vkCreateVideoSessionKHR = NULL;
+static PFN_vkDestroyVideoSessionKHR vkDestroyVideoSessionKHR = NULL;
+
+static bool load_vulkan_functions_globals(PFN_vkGetInstanceProcAddr loader)
+{
+	vkCreateInstance = (PFN_vkCreateInstance)loader(NULL, "vkCreateInstance");
+	vkEnumerateInstanceExtensionProperties = (PFN_vkEnumerateInstanceExtensionProperties)
+												loader(NULL, "vkEnumerateInstanceExtensionProperties");
+	vkEnumerateInstanceLayerProperties = (PFN_vkEnumerateInstanceLayerProperties)
+												loader(NULL, "vkEnumerateInstanceLayerProperties");
+	
+	return vkCreateInstance &&
+		   vkEnumerateInstanceExtensionProperties && vkEnumerateInstanceLayerProperties;
+}
 
 static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader, VkInstance instance)
 {
 	vkDestroyInstance = (PFN_vkDestroyInstance)loader(instance, "vkDestroyInstance");
+	#ifdef VULKAN_VALIDATE
+	vkCreateDebugUtilsMessengerEXT = (PFN_vkCreateDebugUtilsMessengerEXT)
+										loader(instance, "vkCreateDebugUtilsMessengerEXT");
+	vkDestroyDebugUtilsMessengerEXT = (PFN_vkDestroyDebugUtilsMessengerEXT)
+										loader(instance, "vkDestroyDebugUtilsMessengerEXT");
+	#endif
+	vkEnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)
+										loader(instance, "vkEnumeratePhysicalDevices");
+	vkGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)
+										loader(instance, "vkGetPhysicalDeviceProperties");
+	
+	vkCreateDevice = (PFN_vkCreateDevice)loader(instance, "vkCreateDevice");
 	vkDestroyDevice = (PFN_vkDestroyDevice)loader(instance, "vkDestroyDevice");
-	vkEnumerateInstanceExtensionProperties = (PFN_vkEnumerateInstanceExtensionProperties)
-												loader(instance, "vkEnumerateInstanceExtensionProperties");
+	vkEnumerateDeviceExtensionProperties = (PFN_vkEnumerateDeviceExtensionProperties)
+												loader(instance, "vkEnumerateDeviceExtensionProperties");
+	vkGetDeviceQueue = (PFN_vkGetDeviceQueue)loader(instance, "vkGetDeviceQueue");
 	vkGetPhysicalDeviceVideoCapabilitiesKHR = (PFN_vkGetPhysicalDeviceVideoCapabilitiesKHR)
 												loader(instance, "vkGetPhysicalDeviceVideoCapabilitiesKHR");
+	vkGetPhysicalDeviceVideoFormatPropertiesKHR = (PFN_vkGetPhysicalDeviceVideoFormatPropertiesKHR)
+												loader(instance, "vkGetPhysicalDeviceVideoFormatPropertiesKHR");
+	vkCreateVideoSessionKHR = (PFN_vkCreateVideoSessionKHR)loader(instance, "vkCreateVideoSessionKHR");
+	vkDestroyVideoSessionKHR = (PFN_vkDestroyVideoSessionKHR)loader(instance, "vkDestroyVideoSessionKHR");
 
-	return vkDestroyInstance && vkDestroyDevice &&
-			vkEnumerateInstanceExtensionProperties && vkGetPhysicalDeviceVideoCapabilitiesKHR;
+	return vkDestroyInstance &&
+	#ifdef VULKAN_VALIDATE
+		   vkCreateDebugUtilsMessengerEXT && vkDestroyDebugUtilsMessengerEXT &&
+	#endif
+		   vkEnumeratePhysicalDevices && vkGetPhysicalDeviceProperties &&
+		   vkCreateDevice && vkDestroyDevice &&
+		   vkEnumerateDeviceExtensionProperties &&
+		   vkGetDeviceQueue && vkGetPhysicalDeviceVideoCapabilitiesKHR &&
+		   vkGetPhysicalDeviceVideoFormatPropertiesKHR &&
+		   vkCreateVideoSessionKHR && vkDestroyVideoSessionKHR;
 }
 
 struct state_vulkan_decompress
 {
-	HMODULE vulkanLib;					// needs to be destroyed if valid
-	VkInstance instance; 				// needs to be destroyed if valid
+	HMODULE vulkanLib;							// needs to be destroyed if valid
+	VkInstance instance; 						// needs to be destroyed if valid
 	PFN_vkGetInstanceProcAddr loader;
+	//maybe this could be present only when VULKAN_VALIDATE is defined?
+	VkDebugUtilsMessengerEXT debugMessenger;	// needs to be destroyed if valid
 	VkPhysicalDevice physicalDevice;
-	VkDevice device;					// needs to be destroyed if valid
-	VkQueue decode_queue;
+	VkDevice device;							// needs to be destroyed if valid
+	uint32_t queueFamilyIdx;
+	VkQueue decode_queue; //USELESS maybe we need only the index?
 	VkVideoCodecOperationFlagsKHR queueVideoFlags;
 	VkVideoCodecOperationFlagsKHR codecOperation;
 	bool prepared;
+	VkVideoSessionKHR videoSession;				// needs to be destroyed if valid
 
 	// UltraGrid
 	//video_desc desc;
+	int width, height;
 	int rshift, gshift, bshift;
 	int pitch;
 	codec_t out_codec;
 };
 
-static VkResult check_for_extentions()
+static bool check_for_instance_extensions(const char * const requiredInstanceextensions[])
 {
 	/*const char* const requiredInstanceLayerExtensions[] = {
 								"VK_LAYER_KHRONOS_validation",
@@ -83,55 +146,41 @@ static VkResult check_for_extentions()
 								VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
 								NULL };*/
 
-	const char* const requiredInstanceExtentions[] = {
-						VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
-						NULL };
-
-    const char* const requiredDeviceExtensions[] = {
-#if defined(__linux) || defined(__linux__) || defined(linux)
-        VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
-        VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME,
-#endif
-        VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
-        VK_KHR_VIDEO_QUEUE_EXTENSION_NAME,
-        VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME,
-        NULL };
-
 	uint32_t extensions_count = 0;
 	vkEnumerateInstanceExtensionProperties(NULL, &extensions_count, NULL);
-	printf("extensions_count: %d\n", extensions_count);
+	printf("instance extensions_count: %d\n", extensions_count);
 	if (extensions_count == 0)
 	{
-		if (requiredInstanceExtentions[0] != NULL)
+		if (requiredInstanceextensions[0] != NULL)
 		{
-			printf("[vulkan_decode] No extensions supported.\n");
+			printf("[vulkan_decode] No instance extensions supported.\n");
 			return false;
 		}
 		
-		printf("No extentions found and none required.\n");
+		printf("No instance extensions found and none required.\n");
 		return true;
 	}
 
 	VkExtensionProperties *extensions = (VkExtensionProperties*)calloc(extensions_count, sizeof(VkExtensionProperties));
 	if (extensions == NULL)
 	{
-		printf("[vulkan_decode] Failed to allocate array for extensions!\n");
+		printf("[vulkan_decode] Failed to allocate array for instance extensions!\n");
 		return false;
 	}
 
 	vkEnumerateInstanceExtensionProperties(NULL, &extensions_count, extensions);
 
-	for (uint32_t i = 0; i < extensions_count; ++i)
-	{
-		printf("\tExtension: '%s'\n", extensions[i].extensionName);
-	}
+	//IDEA verbose setting
+	// Printing of all found instance extentions
+	//for (uint32_t i = 0; i < extensions_count; ++i) printf("\tExtension: '%s'\n", extensions[i].extensionName);
 
-	for (size_t i = 0; requiredInstanceExtentions[i] != NULL; ++i)
+	// Checking for required ones
+	for (size_t i = 0; requiredInstanceextensions[i] != NULL; ++i)
 	{
 		bool found = false;
 		for (uint32_t j = 0; j < extensions_count; ++j)
 		{
-			if (!strcmp(requiredInstanceExtentions[i], extensions[j].extensionName))
+			if (!strcmp(requiredInstanceextensions[i], extensions[j].extensionName))
 			{
 				found = true;
 				break;
@@ -140,22 +189,168 @@ static VkResult check_for_extentions()
 
 		if (!found)
 		{
-			printf("[vulkan_decode] Required instance extention: '%s' was not found!\n",
-						requiredInstanceExtentions[i]);
+			printf("[vulkan_decode] Required instance extension: '%s' was not found!\n",
+						requiredInstanceextensions[i]);
 			free(extensions);
 			return false;
 		}
 	}
 
-	//TODO check for device extentions
+	free(extensions);
+	return true;
+}
+
+#ifdef VULKAN_VALIDATE
+static bool check_for_validation_layers(const char * const validationLayers[])
+{
+	uint32_t properties_count = 0;
+	VkResult result = vkEnumerateInstanceLayerProperties(&properties_count, NULL);
+	if (result != VK_SUCCESS) return false;
+
+	VkLayerProperties *properties = (VkLayerProperties*)calloc(properties_count, sizeof(VkLayerProperties));
+	if (!properties) return false;
+
+	result = vkEnumerateInstanceLayerProperties(&properties_count, properties);
+	if (result != VK_SUCCESS) return false;
+
+	//IDEA verbose setting
+	// Printing of all found layers extentions
+	//for (uint32_t i = 0; i < properties_count; ++i) printf("\tLayer: '%s' desc: '%s'\n",
+	//		properties[i].layerName, properties[i].description);
+
+	for (size_t i = 0; validationLayers[i]; ++i)
+	{
+		bool found = false;
+
+		for (uint32_t j = 0; j < properties_count; ++j)
+		{
+			if (!strcmp(validationLayers[i], properties[j].layerName))
+			{
+				found = true;
+				break;
+			}
+		}
+
+		if (!found)
+		{
+			free(properties);
+			return false;
+		}
+	}
+
+	free(properties);
+	return true;
+}
+#endif
+
+static bool check_for_device_extensions(VkPhysicalDevice physDevice, const char* const requiredDeviceExtensions[])
+{
+	uint32_t extensions_count = 0;
+	vkEnumerateDeviceExtensionProperties(physDevice, NULL, &extensions_count, NULL);
+	printf("device extensions_count: %d\n", extensions_count);
+	if (extensions_count == 0)
+	{
+		if (requiredDeviceExtensions[0] != NULL)
+		{
+			printf("[vulkan_decode] No device extensions supported.\n");
+			return false;
+		}
+		
+		printf("No device extensions found and none required.\n");
+		return true;
+	}
+
+	VkExtensionProperties *extensions = (VkExtensionProperties*)calloc(extensions_count, sizeof(VkExtensionProperties));
+	if (extensions == NULL)
+	{
+		printf("[vulkan_decode] Failed to allocate array for device extensions!\n");
+		return false;
+	}
+
+	vkEnumerateDeviceExtensionProperties(physDevice, NULL, &extensions_count, extensions);
+
+	//IDEA verbose setting
+	// Printing of all found device extentions
+	//for (uint32_t i = 0; i < extensions_count; ++i) printf("\tExtension: '%s'\n", extensions[i].extensionName);
+
+	// Checking for required ones
+	for (size_t i = 0; requiredDeviceExtensions[i] != NULL; ++i)
+	{
+		bool found = false;
+		for (uint32_t j = 0; j < extensions_count; ++j)
+		{
+			if (!strcmp(requiredDeviceExtensions[i], extensions[j].extensionName))
+			{
+				found = true;
+				break;
+			}
+		}
+
+		if (!found)
+		{
+			printf("[vulkan_decode] Required device extension: '%s' was not found!\n",
+						requiredDeviceExtensions[i]);
+			free(extensions);
+			return false;
+		}
+	}
 
 	free(extensions);
 	return true;
 }
 
+#ifdef VULKAN_VALIDATE
+static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
+								VkDebugUtilsMessageSeverityFlagBitsEXT           messageSeverity,
+								VkDebugUtilsMessageTypeFlagsEXT                  messageTypes,
+								const VkDebugUtilsMessengerCallbackDataEXT*      pCallbackData,
+								void*                                            pUserData)
+{
+	UNUSED(messageTypes);
+	UNUSED(pUserData);
+
+	if (messageSeverity >= VULKAN_VALIDATE_SHOW_SEVERITY)
+	{
+		printf("VULKAN VALIDATION: '%s'\n", pCallbackData->pMessage);
+	}
+
+	return VK_FALSE;
+}
+
+static VkResult create_debug_messenger(VkInstance instance, VkDebugUtilsMessengerEXT *debugMessenger_ptr)
+{
+	VkDebugUtilsMessengerCreateInfoEXT messengerCreateInfo = { .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+												   			   .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+								 				   			 	VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
+															 	VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+															 	VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+								 				   			   .messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+												    		 	VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+															 	VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+												   			    .pfnUserCallback = debug_callback };
+
+	return vkCreateDebugUtilsMessengerEXT(instance, &messengerCreateInfo, NULL, debugMessenger_ptr);
+}
+#endif
+
+static void destroy_debug_messenger(VkInstance instance, VkDebugUtilsMessengerEXT debugMessenger)
+{
+	//destroys debug messenger when VULKAN_VALIDATE is defined and destructor exists
+	//this function is defined even when VULKAN_VALIDATE is not just to avoid too many
+	//ifdefs everywhere where destroying needs to happen
+	#ifdef VULKAN_VALIDATE
+	if (vkDestroyDebugUtilsMessengerEXT != NULL && instance != VK_NULL_HANDLE)
+				vkDestroyDebugUtilsMessengerEXT(instance, debugMessenger, NULL);
+	#else
+	UNUSED(instance);
+	UNUSED(debugMessenger);
+	#endif
+}
+
 static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s,
 										VkPhysicalDevice devices[], uint32_t devices_count,
 										VkQueueFlags requestedQueueFamilyFlags,
+										const char* const requiredDeviceExtensions[],
 										uint32_t *queue_family_idx, VkQueueFamilyProperties2 *queue_family,
 										VkQueueFamilyVideoPropertiesKHR *queue_video_props)
 {
@@ -164,8 +359,8 @@ static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s
 	// them with queue family properties and video properties of preferred queue of the chosen device and the family index
 	// returns VK_NULL_HANDLE and does not set queue_family if no suitable physical device found
 	assert(devices_count > 0);
-	assert((queue_family && queue_family_idx) || (!queue_family && !queue_family_idx)); //both must be NULL or both non-NULL
 
+	//TODO move those to global
 	PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties =
 					(PFN_vkGetPhysicalDeviceProperties)s->loader(s->instance, "vkGetPhysicalDeviceProperties");
 	assert(vkGetPhysicalDeviceProperties != NULL);
@@ -188,12 +383,18 @@ static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s
 		//VkPhysicalDeviceFeatures deviceFeatures;
 		//vkGetPhysicalDeviceFeatures(devices[i], &deviceFeatures);
 
+		if (!check_for_device_extensions(devices[i], requiredDeviceExtensions))
+		{
+			printf("\tDevice does not have required extensions.\n");
+			continue;
+		}
+
 		uint32_t queues_count = 0;
 		vkGetPhysicalDeviceQueueFamilyProperties2(devices[i], &queues_count, NULL);
 
 		if (queues_count == 0)
 		{
-			printf("\t No queue families found for this device.\n");
+			printf("\tNo queue families found for this device.\n");
 			continue;
 		}
 		
@@ -202,7 +403,7 @@ static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s
 		VkQueueFamilyVideoPropertiesKHR *video_properties = (VkQueueFamilyVideoPropertiesKHR*)calloc(queues_count, sizeof(VkQueueFamilyVideoPropertiesKHR));
 		if (properties == NULL || video_properties == NULL) //TODO probably return error?
 		{
-			printf("[vulkan_decode] Failed to allocate propertie and/or video_properties arrays!\n");
+			printf("[vulkan_decode] Failed to allocate properties and/or video_properties arrays!\n");
 			free(properties);
 			free(video_properties);
 			break;
@@ -218,7 +419,8 @@ static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s
 
 		vkGetPhysicalDeviceQueueFamilyProperties2(devices[i], &queues_count, properties);
 
-		//the only important queue flags for us
+		//printf("\tQueue families of the device:\n");
+		// the only important queue flags for us
 		const VkQueueFlags queueFlagsFilter = (VK_QUEUE_GRAPHICS_BIT |
                                                VK_QUEUE_COMPUTE_BIT |
                                                VK_QUEUE_TRANSFER_BIT |
@@ -229,7 +431,9 @@ static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s
 		for (uint32_t j = 0; j < queues_count; ++j)
 		{
 			VkQueueFlags flags = properties[j].queueFamilyProperties.queueFlags & queueFlagsFilter;
-			int encode = flags & VK_QUEUE_VIDEO_ENCODE_BIT_KHR ? 1 : 0;
+			VkVideoCodecOperationFlagsKHR videoFlags = video_properties[j].videoCodecOperations;
+
+			/*int encode = flags & VK_QUEUE_VIDEO_ENCODE_BIT_KHR ? 1 : 0;
 			int decode = flags & VK_QUEUE_VIDEO_DECODE_BIT_KHR ? 1 : 0;
 			int compute = flags & VK_QUEUE_COMPUTE_BIT ? 1 : 0;
 			int transfer = flags & VK_QUEUE_TRANSFER_BIT ? 1 : 0;
@@ -237,14 +441,13 @@ static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s
 			printf("\tflags: %d, encode: %d, decode: %d, compute: %d, transfer: %d, graphics: %d\n",
 					  flags, encode, decode, compute, transfer, graphics);
 
-			VkVideoCodecOperationFlagsKHR videoFlags = video_properties[j].videoCodecOperations;
 			int h264_en = videoFlags & VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR ? 1 : 0;
 			int h265_en = videoFlags & VK_VIDEO_CODEC_OPERATION_ENCODE_H265_BIT_KHR ? 1 : 0;
 			int h264_de = videoFlags & VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR ? 1 : 0;
 			int h265_de = videoFlags & VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR ? 1 : 0;
 			//int av1_de = videoFlags & VK_VIDEO_CODEC_OPERATION_DECODE_AV1_BIT_KHR ? 1 : 0;
 			printf("\tvideo flags: %d, h264: %d %d, h265: %d %d\n",
-					  videoFlags, h264_en, h264_de, h265_en, h265_de);
+					  videoFlags, h264_en, h264_de, h265_en, h265_de);*/
 
 			if (requestedQueueFamilyFlags == (flags & requestedQueueFamilyFlags) && videoFlags)
 			{
@@ -286,28 +489,67 @@ static void * vulkan_decompress_init(void)
 
 	// ---Dynamic loading of the vulkan loader library---
 	const char vulkan_lib_filename[] = "vulkan-1.dll"; //TODO .so
-    HMODULE vulkanLib = LoadLibrary(vulkan_lib_filename);
-	if (vulkanLib == NULL)
+    s->vulkanLib = LoadLibrary(vulkan_lib_filename);
+	if (s->vulkanLib == NULL)
 	{
 		printf("[vulkan_decode] Vulkan loader file '%s' not found!\n", vulkan_lib_filename);
 		free(s);
 		return NULL;
 	}
-	//printf("[vulkan_decode] Vulkan file '%s' loaded.\n", vulkan_lib_filename);
-	s->vulkanLib = vulkanLib;
 
 	// ---Getting the loader function---
 	const char vulkan_proc_name[] = "vkGetInstanceProcAddr";
-	PFN_vkGetInstanceProcAddr getInstanceProcAddr = (PFN_vkGetInstanceProcAddr)GetProcAddress(vulkanLib, vulkan_proc_name);
+	PFN_vkGetInstanceProcAddr getInstanceProcAddr = (PFN_vkGetInstanceProcAddr)GetProcAddress(s->vulkanLib, vulkan_proc_name);
     if (getInstanceProcAddr == NULL) {
 
 		printf("[vulkan_decode] Vulkan function '%s' not found!\n", vulkan_proc_name);
-        FreeLibrary(vulkanLib);
+        FreeLibrary(s->vulkanLib);
 		free(s);
         return NULL;
     }
 	s->loader = getInstanceProcAddr;
+
+	// ---Loading function pointers where the instance is not needed---
+	if (!load_vulkan_functions_globals(getInstanceProcAddr))
+	{
+		printf("[vulkan_decode] Failed to load all vulkan functions!\n");
+		FreeLibrary(s->vulkanLib);
+		free(s);
+        return NULL;
+	}
+
+	// ---Enabling validation layers---
+	#ifdef VULKAN_VALIDATE
+	const char* const validationLayers[] = {
+						"VK_LAYER_KHRONOS_validation",
+						NULL };
 	
+	//printf("Checking for validation layers.\n");
+	if (!check_for_validation_layers(validationLayers))
+	{
+		printf("[vulkan_deconde] Required vulkan validation layers not found!\n");
+		FreeLibrary(s->vulkanLib);
+		free(s);
+        return NULL;
+	}
+	#endif
+
+	// ---Checking for extensions---
+	const char* const requiredInstanceExtensions[] = {
+						VK_EXT_DEBUG_REPORT_EXTENSION_NAME, //?
+	#ifdef VULKAN_VALIDATE
+						VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
+	#endif
+						NULL };
+	
+	if (!check_for_instance_extensions(requiredInstanceExtensions))
+	{
+		//error msg should be printed inside of check_for_extensions
+		FreeLibrary(s->vulkanLib);
+		free(s);
+        return NULL;
+	}
+
 	// ---Creating the vulkan instance---
 	//TODO InitDebugReport form NVidia example
 	VkApplicationInfo appInfo = { .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -318,75 +560,95 @@ static void * vulkan_decompress_init(void)
 								  .apiVersion = VK_API_VERSION_1_0 };
 	VkInstanceCreateInfo createInfo = { .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
 										.pApplicationInfo = &appInfo,
-										.enabledExtensionCount = 0,
+										//-1 for not counting the NULL ptr
+										.enabledExtensionCount = sizeof(requiredInstanceExtensions) / sizeof(requiredInstanceExtensions[0]) -1,
+										.ppEnabledExtensionNames = requiredInstanceExtensions,
+	#ifdef VULKAN_VALIDATE
+										.enabledLayerCount = sizeof(validationLayers) / sizeof(validationLayers[0]) - 1,
+										.ppEnabledLayerNames = validationLayers };
+	#else
 										.enabledLayerCount = 0 };
-
-	PFN_vkCreateInstance vkCreateInstance = (PFN_vkCreateInstance)getInstanceProcAddr(NULL, "vkCreateInstance");
-	assert(vkCreateInstance != NULL);
-	int result = vkCreateInstance(&createInfo, NULL, &s->instance);
+	#endif
+	VkResult result = vkCreateInstance(&createInfo, NULL, &s->instance);
 	if (result != VK_SUCCESS)
 	{
 		printf("[vulkan_decode] Failed to create vulkan instance! Error: %d\n", result);
-        FreeLibrary(vulkanLib);
+        FreeLibrary(s->vulkanLib);
 		free(s);
 		return NULL;
 	}
 
 	if (!load_vulkan_functions_with_instance(getInstanceProcAddr, s->instance))
 	{
-		printf("[vulkan_decode] Failed to load all vulkan functions!\n");
+		printf("[vulkan_decode] Failed to load all instance related vulkan functions!\n");
 		if (vkDestroyInstance != NULL) vkDestroyInstance(s->instance, NULL);
-		FreeLibrary(vulkanLib);
+		FreeLibrary(s->vulkanLib);
 		free(s);
         return NULL;
 	}
 
-	// ---Checking for extensions---
-	if (!check_for_extentions())
+	// ---Setting up Debug messenger---
+	#ifdef VULKAN_VALIDATE
+	result = create_debug_messenger(s->instance, &s->debugMessenger);
+	if (result != VK_SUCCESS)
 	{
-		//error msg should be printed inside of check_for_extentions
+		printf("[vulkan_decode] Failed to setup debug messenger!\n");
 		vkDestroyInstance(s->instance, NULL);
-		FreeLibrary(vulkanLib);
+        FreeLibrary(s->vulkanLib);
 		free(s);
-        return NULL;
+		return NULL;
 	}
+	#endif
 
 	// ---Choosing of physical device---
-	PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices =
-						(PFN_vkEnumeratePhysicalDevices)getInstanceProcAddr(s->instance, "vkEnumeratePhysicalDevices");
-	assert(vkEnumeratePhysicalDevices != NULL);
-	PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties =
-						(PFN_vkGetPhysicalDeviceProperties)getInstanceProcAddr(s->instance, "vkGetPhysicalDeviceProperties");
-	assert(vkGetPhysicalDeviceProperties != NULL);
 	VkQueueFlags requestedFamilyQueueFlags = VK_QUEUE_VIDEO_DECODE_BIT_KHR | VK_QUEUE_TRANSFER_BIT;
-	uint32_t phys_devices_count = 0;
-	//TODO count == 0
+	const char* const requiredDeviceExtensions[] = {
+	#if defined(__linux) || defined(__linux__) || defined(linux)
+        VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
+        VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME,
+	#endif
+        VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
+        VK_KHR_VIDEO_QUEUE_EXTENSION_NAME,
+        VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME,
+        NULL };
 
+	uint32_t phys_devices_count = 0;
 	vkEnumeratePhysicalDevices(s->instance, &phys_devices_count, NULL);
 	printf("phys_devices_count: %d\n", phys_devices_count);
+	if (phys_devices_count == 0)
+	{
+		printf("[vulkan_decode] No physical devices found!\n");
+		destroy_debug_messenger(s->instance, s->debugMessenger);
+		vkDestroyInstance(s->instance, NULL);
+        FreeLibrary(s->vulkanLib);
+		free(s);
+		return NULL;
+	}
 
 	VkPhysicalDevice *devices = (VkPhysicalDevice*)calloc(phys_devices_count, sizeof(VkPhysicalDevice));
 	if (devices == NULL)
 	{
 		printf("[vulkan_decode] Failed to allocate array for devices!\n");
+		destroy_debug_messenger(s->instance, s->debugMessenger);
 		vkDestroyInstance(s->instance, NULL);
-        FreeLibrary(vulkanLib);
+        FreeLibrary(s->vulkanLib);
 		free(s);
 		return NULL;
 	}
 
 	vkEnumeratePhysicalDevices(s->instance, &phys_devices_count, devices);
-	uint32_t chosen_queue_family_idx = 0;
 	VkQueueFamilyProperties2 chosen_queue_family; //TODO use this?
 	VkQueueFamilyVideoPropertiesKHR chosen_queue_video_props; //TODO use this more?
 	s->physicalDevice = choose_physical_device(s, devices, phys_devices_count, requestedFamilyQueueFlags,
-											   &chosen_queue_family_idx, &chosen_queue_family, &chosen_queue_video_props);
+											   requiredDeviceExtensions,
+											   &s->queueFamilyIdx, &chosen_queue_family, &chosen_queue_video_props);
 	free(devices);
 	if (s->physicalDevice == VK_NULL_HANDLE)
 	{
 		printf("[vulkan_decode] Failed to choose a appropriate physical device!\n");
+		destroy_debug_messenger(s->instance, s->debugMessenger);
 		vkDestroyInstance(s->instance, NULL);
-        FreeLibrary(vulkanLib);
+        FreeLibrary(s->vulkanLib);
 		free(s);
 		return NULL;
 	}
@@ -398,39 +660,39 @@ static void * vulkan_decompress_init(void)
 	VkPhysicalDeviceProperties deviceProperties;
 	vkGetPhysicalDeviceProperties(s->physicalDevice, &deviceProperties);
 	printf("Chosen physical device is: '%s' and chosen queue family index is: %d\n", 
-				deviceProperties.deviceName, chosen_queue_family_idx);
+				deviceProperties.deviceName, s->queueFamilyIdx);
 
 	// ---Creating a logical device---
-	PFN_vkCreateDevice vkCreateDevice = (PFN_vkCreateDevice)getInstanceProcAddr(s->instance, "vkCreateDevice");
-	assert(vkCreateDevice != NULL);
-
 	float queue_priorities = 1.0f;
 	VkDeviceQueueCreateInfo queueCreateInfo = { .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-												.queueFamilyIndex = chosen_queue_family_idx,
+												.queueFamilyIndex = s->queueFamilyIdx,
 												.queueCount = 1,
 												.pQueuePriorities = &queue_priorities };
-	VkPhysicalDeviceFeatures deviceFeatures = { 0 };
+	//VkPhysicalDeviceFeatures deviceFeatures = { 0 };
 	VkDeviceCreateInfo createDeviceInfo = { .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+											.pNext = NULL,
+											.flags = 0,
 											.queueCreateInfoCount = 1,
 											.pQueueCreateInfos = &queueCreateInfo,
-											.pEnabledFeatures = &deviceFeatures,
-											.enabledLayerCount = 0,
-											.enabledExtensionCount = 0 };
+											.pEnabledFeatures = NULL,
+											//-1 because of NULL at the end of the array
+											.enabledExtensionCount = sizeof(requiredDeviceExtensions) / sizeof(requiredDeviceExtensions[0]) - 1,
+											.ppEnabledExtensionNames = requiredDeviceExtensions };
 	
 	result = vkCreateDevice(s->physicalDevice, &createDeviceInfo, NULL, &s->device);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to create a appropriate vulkan device!\n");
+		printf("[vulkan_decode] Failed to create a appropriate vulkan logical device!\n");
+		destroy_debug_messenger(s->instance, s->debugMessenger);
 		vkDestroyInstance(s->instance, NULL);
+        FreeLibrary(s->vulkanLib);
 		free(s);
-        FreeLibrary(vulkanLib);
 		return NULL;
 	}
 
-	PFN_vkGetDeviceQueue vkGetDeviceQueue = (PFN_vkGetDeviceQueue)getInstanceProcAddr(s->instance, "vkGetDeviceQueue");
-	assert(vkGetDeviceQueue != NULL);
+	vkGetDeviceQueue(s->device, s->queueFamilyIdx, 0, &s->decode_queue);
 
-	vkGetDeviceQueue(s->device, queueCreateInfo.queueFamilyIndex, 0, &s->decode_queue);
+	s->videoSession = VK_NULL_HANDLE; //video session gets created in prepare function
 
 	printf("[vulkan_decode] Initialization finished successfully.\n");
 	return s;
@@ -442,7 +704,12 @@ static void vulkan_decompress_done(void *state)
 	struct state_vulkan_decompress *s = (struct state_vulkan_decompress *)state;
 	if (!s) return;
 
+	if (vkDestroyVideoSessionKHR != NULL && s->device != VK_NULL_HANDLE)
+			vkDestroyVideoSessionKHR(s->device, s->videoSession, NULL);
+
 	if (vkDestroyDevice != NULL) vkDestroyDevice(s->device, NULL);
+
+	destroy_debug_messenger(s->instance, s->debugMessenger);
 
 	if (vkDestroyInstance != NULL) vkDestroyInstance(s->instance, NULL);
 
@@ -476,7 +743,7 @@ static codec_t vulkan_flag_to_codec(VkVideoCodecOperationFlagsKHR flag)
 static bool configure_with(struct state_vulkan_decompress *s, struct video_desc desc)
 {
 	printf("vulkan_decode - configure_with\n");
-	const char *spec_name = get_codec_name(desc.color_spec);
+	const char *spec_name = get_codec_name_long(desc.color_spec);
 	printf("\tw: %u, h: %u, color_spec: '%s', fps: %f, tile_count: %u\n",
 			desc.width, desc.height, spec_name, desc.fps, desc.tile_count);
 
@@ -490,6 +757,9 @@ static bool configure_with(struct state_vulkan_decompress *s, struct video_desc 
 	}
 
 	s->codecOperation = videoCodecOperation;
+	s->width = desc.width;
+	s->height = desc.height;
+
 	return true;
 }
 
@@ -500,19 +770,20 @@ static int vulkan_decompress_reconfigure(void *state, struct video_desc desc,
 	struct state_vulkan_decompress *s = (struct state_vulkan_decompress *)state;
 	if (!s) return false;
 
-	const char *spec_name = get_codec_name(desc.color_spec);
-	const char *out_name = get_codec_name(out_codec);
+	const char *spec_name = get_codec_name_long(desc.color_spec);
+	const char *out_name = get_codec_name_long(out_codec);
 	printf("\tcodec color_spec: '%s', out_codec: '%s'\n", spec_name, out_name);
 	if (out_codec == VIDEO_CODEC_NONE) printf("\tRequested probing.\n");
 
 	if (desc.tile_count != 1)
 	{
+		//TODO they could be supported
 		printf("[vulkan_decode] Tiled video formats are not supported!\n");
 		return false;
 	}
 
 	s->prepared = false; //TODO - freeing resources probably needed when s->prepared == true
-	//s->desc = desc;
+
 	s->rshift = rshift;
 	s->gshift = gshift;
 	s->bshift = bshift;
@@ -545,7 +816,6 @@ static int vulkan_decompress_get_property(void *state, int property, void *val, 
 
 	return ret;
 }
-
 
 static int vulkan_decompress_get_priority(codec_t compression, struct pixfmt_desc internal, codec_t ugc)
 {
@@ -585,6 +855,80 @@ static VkVideoComponentBitDepthFlagBitsKHR depth_to_vulkan_flag(int depth)
 		case 12: return VK_VIDEO_COMPONENT_BIT_DEPTH_12_BIT_KHR;
 		default: return VK_VIDEO_COMPONENT_BIT_DEPTH_INVALID_KHR;
 	}
+}
+
+static bool does_video_size_fit(VkExtent2D videoSize, VkExtent2D minExtent, VkExtent2D maxExtent)
+{
+	assert(minExtent.width <= maxExtent.width && minExtent.height <= maxExtent.height);
+
+	return minExtent.width <= videoSize.width && videoSize.width <= maxExtent.width &&
+		   minExtent.height <= videoSize.height && videoSize.height <= maxExtent.height;
+}
+
+static VkFormat codec_to_vulkan_format(codec_t codec)
+{
+	switch(codec)
+	{
+		case I420: return VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
+		default: return VK_FORMAT_UNDEFINED;
+	}
+}
+
+static bool check_for_vulkan_format(VkPhysicalDevice physDevice, VkPhysicalDeviceVideoFormatInfoKHR videoFormatInfo,
+									codec_t codec, VkFormat *pictureFormat)
+{
+	uint32_t properties_count = 0;
+
+	VkResult result = vkGetPhysicalDeviceVideoFormatPropertiesKHR(physDevice, &videoFormatInfo,
+																  &properties_count, NULL);
+	if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to get video format properties of physical device!\n");
+		return false;
+	}
+	if (properties_count == 0)
+	{
+		return false;
+	}
+
+	VkVideoFormatPropertiesKHR *properties = (VkVideoFormatPropertiesKHR*)
+							calloc(properties_count, sizeof(VkVideoFormatPropertiesKHR));
+	if (properties == NULL)
+	{
+		printf("[vulkan_decode] Failed to allocate memory for video format properties!\n");
+		return false;
+	}
+	for (uint32_t i = 0; i < properties_count; ++i)
+			properties[i].sType = VK_STRUCTURE_TYPE_VIDEO_FORMAT_PROPERTIES_KHR;
+
+	result = vkGetPhysicalDeviceVideoFormatPropertiesKHR(physDevice, &videoFormatInfo,
+														 &properties_count, properties);
+	if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to get video format properties of physical device!\n");
+		free(properties);
+		return false;
+	}
+
+	printf("videoFromatProperties_count: %u\n", properties_count);
+	VkFormat wanted = codec_to_vulkan_format(codec);
+
+	for (uint32_t i = 0; i < properties_count; ++i)
+	{
+		VkFormat format = properties[i].format;
+		printf("\tformat: %d image_type: %d\n", format, properties[i].imageType);
+		if (format == wanted)
+		{
+			*pictureFormat = format;
+			
+			free(properties);
+			return true;
+		}
+	}
+
+	printf("[vulkan_decode] Wanted output video format is not supported!\n");
+	free(properties);
+	return false;
 }
 
 static bool prepare(struct state_vulkan_decompress *s)
@@ -646,6 +990,75 @@ static bool prepare(struct state_vulkan_decompress *s)
 		else if (result == VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR) puts("\t- Video format not supported.");
 		else if (result == VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR) puts("\t- Video codec not supported.");
 		else printf("\t- Vulkan error: %d\n", result);
+		return false;
+	}
+
+	const VkExtent2D videoSize = { s->width, s->height };
+	if (!does_video_size_fit(videoSize, videoCapabilities.minCodedExtent, videoCapabilities.maxCodedExtent))
+	{
+		printf("[vulkan_decode] Requested video size: %ux%u does not fit in vulkan video extents."
+			   " Min extent: %ux%u, max extent: %ux%u\n",
+				videoSize.width, videoSize.height,
+				videoCapabilities.minCodedExtent.width, videoCapabilities.minCodedExtent.height,
+				videoCapabilities.maxCodedExtent.width, videoCapabilities.maxCodedExtent.height);
+		return false;
+	}
+
+	VkVideoDecodeCapabilityFlagsKHR decodeCapabilitiesFlags = decodeCapabilities.flags;
+	VkFormat pictureFormat = VK_FORMAT_UNDEFINED, referencePictureFormat = VK_FORMAT_UNDEFINED;
+
+	VkVideoProfileListInfoKHR videoProfileList = { .sType = VK_STRUCTURE_TYPE_VIDEO_PROFILE_LIST_INFO_KHR,
+												   .profileCount = 1,
+												   .pProfiles = &videoProfile };
+	VkPhysicalDeviceVideoFormatInfoKHR videoFormatInfo = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_FORMAT_INFO_KHR,
+														  .pNext = (void*)&videoProfileList };
+
+	assert(s->physicalDevice != VK_NULL_HANDLE);
+
+	if (decodeCapabilitiesFlags & VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR)
+	{
+		videoFormatInfo.imageUsage = VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR | VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR;
+		// err msg should be printed inside of check_for_vulkan_format function 
+		if (!check_for_vulkan_format(s->physicalDevice, videoFormatInfo, s->out_codec, &referencePictureFormat)) return false;
+
+		pictureFormat = referencePictureFormat;
+	}
+	else if (decodeCapabilitiesFlags & VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_DISTINCT_BIT_KHR)
+	{
+		
+		videoFormatInfo.imageUsage = VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR;
+		// err msg should be printed inside of check_for_vulkan_format function 
+		if (!check_for_vulkan_format(s->physicalDevice, videoFormatInfo, s->out_codec, &referencePictureFormat)) return false;
+		videoFormatInfo.imageUsage = VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR;
+		if (!check_for_vulkan_format(s->physicalDevice, videoFormatInfo, s->out_codec, &pictureFormat)) return false;
+	}
+	else
+	{
+		printf("[vulkan_decode] Unsupported decodeCapabilitiesFlags value (%d)!\n", decodeCapabilitiesFlags);
+		return false;
+	}
+
+	assert(pictureFormat != VK_FORMAT_UNDEFINED);
+	assert(referencePictureFormat != VK_FORMAT_UNDEFINED);
+	assert(s->device != VK_NULL_HANDLE);
+	assert(s->videoSession == VK_NULL_HANDLE);
+
+	VkVideoSessionCreateInfoKHR sessionInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_SESSION_CREATE_INFO_KHR,
+												.pNext = NULL,
+												.queueFamilyIndex = s->queueFamilyIdx,
+												.flags = 0,
+												.pVideoProfile = &videoProfile,
+												.pictureFormat = pictureFormat,
+												.maxCodedExtent = (VkExtent2D){ s->width, s->height },
+												.referencePictureFormat = referencePictureFormat,
+												.maxDpbSlots = videoCapabilities.maxDpbSlots,
+												.maxActiveReferencePictures = videoCapabilities.maxActiveReferencePictures,
+												//TODO version might be wrong
+												.pStdHeaderVersion = &videoCapabilities.stdHeaderVersion };
+	result = vkCreateVideoSessionKHR(s->device, &sessionInfo, NULL, &s->videoSession);
+	if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to create vulkan video session!\n");
 		return false;
 	}
 
