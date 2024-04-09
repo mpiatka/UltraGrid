@@ -15,6 +15,9 @@
 #include "video.h"				//?
 #include "video_decompress.h"
 
+#include "rtp/rtpdec_h264.h"	//TODO
+#include "rtp/rtpenc_h264.h"	//TODO
+
 //#include <windows.h> //LoadLibrary
 
 #ifndef VK_NO_PROTOTYPES
@@ -38,16 +41,22 @@ static PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT = NUL
 #endif
 static PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices = NULL;
 static PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties = NULL;
+static PFN_vkGetPhysicalDeviceProperties2 vkGetPhysicalDeviceProperties2 = NULL;
 static PFN_vkCreateDevice vkCreateDevice = NULL;
 static PFN_vkDestroyDevice vkDestroyDevice = NULL;
 static PFN_vkEnumerateInstanceExtensionProperties vkEnumerateInstanceExtensionProperties = NULL;
 static PFN_vkEnumerateInstanceLayerProperties vkEnumerateInstanceLayerProperties = NULL;
 static PFN_vkEnumerateDeviceExtensionProperties vkEnumerateDeviceExtensionProperties = NULL;
 static PFN_vkGetDeviceQueue vkGetDeviceQueue = NULL;
+static PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties = NULL;
 static PFN_vkAllocateMemory vkAllocateMemory = NULL;
 static PFN_vkFreeMemory vkFreeMemory = NULL;
 static PFN_vkGetPhysicalDeviceVideoCapabilitiesKHR vkGetPhysicalDeviceVideoCapabilitiesKHR = NULL;
 static PFN_vkGetPhysicalDeviceVideoFormatPropertiesKHR vkGetPhysicalDeviceVideoFormatPropertiesKHR = NULL;
+static PFN_vkCreateBuffer vkCreateBuffer = NULL;
+static PFN_vkDestroyBuffer vkDestroyBuffer = NULL;
+static PFN_vkGetBufferMemoryRequirements vkGetBufferMemoryRequirements = NULL;
+static PFN_vkBindBufferMemory vkBindBufferMemory = NULL;
 static PFN_vkCreateCommandPool vkCreateCommandPool = NULL;
 static PFN_vkDestroyCommandPool vkDestroyCommandPool = NULL;
 static PFN_vkAllocateCommandBuffers vkAllocateCommandBuffers = NULL;
@@ -88,18 +97,26 @@ static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader
 										loader(instance, "vkEnumeratePhysicalDevices");
 	vkGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)
 										loader(instance, "vkGetPhysicalDeviceProperties");
-	
+	vkGetPhysicalDeviceProperties2 = (PFN_vkGetPhysicalDeviceProperties2)
+										loader(instance, "vkGetPhysicalDeviceProperties2");
 	vkCreateDevice = (PFN_vkCreateDevice)loader(instance, "vkCreateDevice");
 	vkDestroyDevice = (PFN_vkDestroyDevice)loader(instance, "vkDestroyDevice");
 	vkEnumerateDeviceExtensionProperties = (PFN_vkEnumerateDeviceExtensionProperties)
 												loader(instance, "vkEnumerateDeviceExtensionProperties");
-	vkGetDeviceQueue = (PFN_vkGetDeviceQueue)loader(instance, "vkGetDeviceQueue");
+	vkGetDeviceQueue = (PFN_vkGetDeviceQueue)loader(instance, "vkGetDeviceQueue"); //USELESS
+	vkGetPhysicalDeviceMemoryProperties = (PFN_vkGetPhysicalDeviceMemoryProperties)
+												loader(instance, "vkGetPhysicalDeviceMemoryProperties");
 	vkAllocateMemory = (PFN_vkAllocateMemory)loader(instance, "vkAllocateMemory");
 	vkFreeMemory = (PFN_vkFreeMemory)loader(instance, "vkFreeMemory");
 	vkGetPhysicalDeviceVideoCapabilitiesKHR = (PFN_vkGetPhysicalDeviceVideoCapabilitiesKHR)
 												loader(instance, "vkGetPhysicalDeviceVideoCapabilitiesKHR");
 	vkGetPhysicalDeviceVideoFormatPropertiesKHR = (PFN_vkGetPhysicalDeviceVideoFormatPropertiesKHR)
 												loader(instance, "vkGetPhysicalDeviceVideoFormatPropertiesKHR");
+	vkCreateBuffer = (PFN_vkCreateBuffer)loader(instance, "vkCreateBuffer");
+	vkDestroyBuffer = (PFN_vkDestroyBuffer)loader(instance, "vkDestroyBuffer");
+	vkGetBufferMemoryRequirements = (PFN_vkGetBufferMemoryRequirements)
+												loader(instance, "vkGetBufferMemoryRequirements");
+	vkBindBufferMemory = (PFN_vkBindBufferMemory)loader(instance, "vkBindBufferMemory");
 	vkCreateCommandPool = (PFN_vkCreateCommandPool)loader(instance, "vkCreateCommandPool");
 	vkDestroyCommandPool = (PFN_vkDestroyCommandPool)loader(instance, "vkDestroyCommandPool");
 	vkAllocateCommandBuffers = (PFN_vkAllocateCommandBuffers)loader(instance, "vkAllocateCommandBuffers");
@@ -125,11 +142,16 @@ static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader
 		   vkCreateDebugUtilsMessengerEXT && vkDestroyDebugUtilsMessengerEXT &&
 	#endif
 		   vkEnumeratePhysicalDevices && vkGetPhysicalDeviceProperties &&
+		   vkGetPhysicalDeviceProperties2 &&
 		   vkCreateDevice && vkDestroyDevice &&
 		   vkEnumerateDeviceExtensionProperties &&
-		   vkGetDeviceQueue && vkAllocateMemory && vkFreeMemory &&
+		   vkGetDeviceQueue &&
+		   vkGetPhysicalDeviceMemoryProperties &&
+		   vkAllocateMemory && vkFreeMemory &&
 		   vkGetPhysicalDeviceVideoCapabilitiesKHR &&
 		   vkGetPhysicalDeviceVideoFormatPropertiesKHR &&
+		   vkCreateBuffer && vkDestroyBuffer &&
+		   vkGetBufferMemoryRequirements && vkBindBufferMemory &&
 		   vkCreateCommandPool && vkDestroyCommandPool &&
 		   vkAllocateCommandBuffers &&
 		   vkBeginCommandBuffer && vkEndCommandBuffer &&
@@ -147,20 +169,25 @@ struct state_vulkan_decompress
 	PFN_vkGetInstanceProcAddr loader;
 	//maybe this could be present only when VULKAN_VALIDATE is defined?
 	VkDebugUtilsMessengerEXT debugMessenger;	// needs to be destroyed if valid
+	VkDeviceSize physDeviceMaxBuffSize;
 	VkPhysicalDevice physicalDevice;
 	VkDevice device;							// needs to be destroyed if valid
 	uint32_t queueFamilyIdx;
-	VkQueue decode_queue; //USELESS maybe we need only the index?
+	//VkQueue decode_queue; //USELESS maybe we need only the index?
 	VkVideoCodecOperationFlagsKHR queueVideoFlags;
 	VkVideoCodecOperationFlagsKHR codecOperation;
-	bool prepared;
+	bool prepared, videoCodingStarted;
+	VkBuffer decodeBuffer;						// needs to be destroyed if valid
+	VkDeviceMemory decodeBufferMemory;			// needs to be freed if valid
+	VkDeviceSize decodeBufferSize;
+	VkDeviceSize decodeBufferOffsetAlignment;
 	VkCommandPool commandPool;					// needs to be destroyed if valid
 	VkCommandBuffer cmdBuffer;
 	VkVideoSessionKHR videoSession;				// needs to be destroyed if valid
 	VkVideoSessionParametersKHR videoSessionParams; // needs to be destroyed if valid
-	uint32_t deviceMemory_count;
-	// array of size deviceMemory_count, needs to be freed and VkDeviceMemory deallocated
-	VkDeviceMemory *deviceMemory;
+	uint32_t videoSessionMemory_count;
+	// array of size videoSessionMemory_count, needs to be freed and VkvideoSessionMemory deallocated
+	VkDeviceMemory *videoSessionMemory;
 
 	// UltraGrid
 	//video_desc desc;
@@ -169,6 +196,8 @@ struct state_vulkan_decompress
 	int pitch;
 	codec_t out_codec;
 };
+
+static bool end_video_decoding(struct state_vulkan_decompress *s);
 
 static bool check_for_instance_extensions(const char * const requiredInstanceextensions[])
 {
@@ -408,9 +437,9 @@ static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s
 	assert(devices_count > 0);
 
 	//TODO move those to global
-	PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties =
+	/*PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties =
 					(PFN_vkGetPhysicalDeviceProperties)s->loader(s->instance, "vkGetPhysicalDeviceProperties");
-	assert(vkGetPhysicalDeviceProperties != NULL);
+	assert(vkGetPhysicalDeviceProperties != NULL);*/
 	PFN_vkGetPhysicalDeviceFeatures vkGetPhysicalDeviceFeatures =
 					(PFN_vkGetPhysicalDeviceFeatures)s->loader(s->instance, "vkGetPhysicalDeviceFeatures");
 	assert(vkGetPhysicalDeviceFeatures != NULL);
@@ -651,12 +680,16 @@ static void * vulkan_decompress_init(void)
 	VkQueueFlags requestedFamilyQueueFlags = VK_QUEUE_VIDEO_DECODE_BIT_KHR | VK_QUEUE_TRANSFER_BIT;
 	const char* const requiredDeviceExtensions[] = {
 	#if defined(__linux) || defined(__linux__) || defined(linux)
-        VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
-        VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME,
+        VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,	//?
+        VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME,	//?
 	#endif
-        VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
+        VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,	//?
         VK_KHR_VIDEO_QUEUE_EXTENSION_NAME,
         VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME,
+		VK_KHR_VIDEO_DECODE_H264_EXTENSION_NAME,
+		VK_KHR_VIDEO_DECODE_H265_EXTENSION_NAME,
+		VK_KHR_VIDEO_MAINTENANCE_1_EXTENSION_NAME,
+		VK_KHR_MAINTENANCE_4_EXTENSION_NAME,		//maxBuffSize
         NULL };
 
 	uint32_t phys_devices_count = 0;
@@ -704,10 +737,18 @@ static void * vulkan_decompress_init(void)
 	assert(chosen_queue_family.pNext == NULL && chosen_queue_video_props.pNext == NULL);
 	assert(s->queueVideoFlags != 0);
 
-	VkPhysicalDeviceProperties deviceProperties;
-	vkGetPhysicalDeviceProperties(s->physicalDevice, &deviceProperties);
-	printf("Chosen physical device is: '%s' and chosen queue family index is: %d\n", 
-				deviceProperties.deviceName, s->queueFamilyIdx);
+	VkPhysicalDeviceMaintenance4Properties physDevicePropertiesExtra =
+												{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_PROPERTIES,
+												  .maxBufferSize = 13 };
+	VkPhysicalDeviceProperties2 physDeviceProperties = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+														 .pNext = (void*)&physDevicePropertiesExtra };
+	printf("before: maxBufferSize: %u\n", physDevicePropertiesExtra.maxBufferSize);
+	vkGetPhysicalDeviceProperties2(s->physicalDevice, &physDeviceProperties);
+	printf("after: maxBufferSize: %u\n", physDevicePropertiesExtra.maxBufferSize); //TODO this?
+
+	s->physDeviceMaxBuffSize = physDevicePropertiesExtra.maxBufferSize;
+	printf("Chosen physical device is: '%s', maxBuffSize: %u and chosen queue family index is: %d\n", 
+				physDeviceProperties.properties.deviceName, s->physDeviceMaxBuffSize, s->queueFamilyIdx);
 
 	// ---Creating a logical device---
 	float queue_priorities = 1.0f;
@@ -737,14 +778,16 @@ static void * vulkan_decompress_init(void)
 		return NULL;
 	}
 
-	vkGetDeviceQueue(s->device, s->queueFamilyIdx, 0, &s->decode_queue);
+	//vkGetDeviceQueue(s->device, s->queueFamilyIdx, 0, &s->decode_queue);
 
+	s->decodeBuffer = VK_NULL_HANDLE; //buffer gets created in prepare function
+	s->decodeBufferMemory = VK_NULL_HANDLE;
 	s->commandPool = VK_NULL_HANDLE;  //command pool gets created in prepare function
 	s->cmdBuffer = VK_NULL_HANDLE;	  //same
 	s->videoSession = VK_NULL_HANDLE; //video session gets created in prepare function
 	s->videoSessionParams = VK_NULL_HANDLE; //same
-	s->deviceMemory_count = 0;
-	s->deviceMemory = NULL;
+	s->videoSessionMemory_count = 0;
+	s->videoSessionMemory = NULL;
 
 	printf("[vulkan_decode] Initialization finished successfully.\n");
 	return s;
@@ -752,17 +795,24 @@ static void * vulkan_decompress_init(void)
 
 static void free_device_memory(struct state_vulkan_decompress *s)
 {
-	if (vkFreeMemory != NULL && s->device != VK_NULL_HANDLE && s->deviceMemory != NULL)
+	if (vkFreeMemory != NULL && s->device != VK_NULL_HANDLE)
 	{
-		for (uint32_t i = 0; i < s->deviceMemory_count; ++i)
+		vkFreeMemory(s->device, s->decodeBufferMemory, NULL);
+
+		if (s->videoSessionMemory != NULL)
 		{
-			vkFreeMemory(s->device, s->deviceMemory[i], NULL);
+			for (uint32_t i = 0; i < s->videoSessionMemory_count; ++i)
+			{
+				vkFreeMemory(s->device, s->videoSessionMemory[i], NULL);
+			}
 		}
 	}
 
-	free(s->deviceMemory);
-	s->deviceMemory_count = 0;
-	s->deviceMemory = NULL;
+	s->decodeBufferMemory = VK_NULL_HANDLE;
+
+	free(s->videoSessionMemory);
+	s->videoSessionMemory_count = 0;
+	s->videoSessionMemory = NULL;
 }
 
 static void vulkan_decompress_done(void *state)
@@ -771,17 +821,24 @@ static void vulkan_decompress_done(void *state)
 	struct state_vulkan_decompress *s = (struct state_vulkan_decompress *)state;
 	if (!s) return;
 
+	if (s->videoCodingStarted && s->cmdBuffer != VK_NULL_HANDLE)
+			end_video_decoding(s);
+
 	if (vkDestroyVideoSessionParametersKHR != NULL && s->device != VK_NULL_HANDLE)
 			vkDestroyVideoSessionParametersKHR(s->device, s->videoSessionParams, NULL);
 
 	if (vkDestroyVideoSessionKHR != NULL && s->device != VK_NULL_HANDLE)
 			vkDestroyVideoSessionKHR(s->device, s->videoSession, NULL);
 	
+	//this needs to be destroyed before freeing underlying memory
+	if (vkDestroyBuffer != NULL && s->device != VK_NULL_HANDLE)
+			vkDestroyBuffer(s->device, s->decodeBuffer, NULL);
+	
 	free_device_memory(s);
 	
 	if (vkDestroyCommandPool != NULL && s->device != VK_NULL_HANDLE)
 			vkDestroyCommandPool(s->device, s->commandPool, NULL);
-
+	
 	if (vkDestroyDevice != NULL) vkDestroyDevice(s->device, NULL);
 
 	destroy_debug_messenger(s->instance, s->debugMessenger);
@@ -858,6 +915,7 @@ static int vulkan_decompress_reconfigure(void *state, struct video_desc desc,
 	}
 
 	s->prepared = false; //TODO - freeing resources probably needed when s->prepared == true
+	s->videoCodingStarted = false; //TODO same as s->prepared?
 
 	s->rshift = rshift;
 	s->gshift = gshift;
@@ -1006,11 +1064,34 @@ static bool check_for_vulkan_format(VkPhysicalDevice physDevice, VkPhysicalDevic
 	return false;
 }
 
+static bool find_memory_type(struct state_vulkan_decompress *s, uint32_t typeFilter,
+								 VkMemoryPropertyFlags reqProperties, uint32_t *idx)
+{
+	assert(s->physicalDevice != VK_NULL_HANDLE);
+
+	VkPhysicalDeviceMemoryProperties memoryProperties = { 0 };
+	vkGetPhysicalDeviceMemoryProperties(s->physicalDevice, &memoryProperties);
+
+	assert(memoryProperties.memoryTypeCount <= 32);
+
+	for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++)
+	{
+		if ((typeFilter & (1 << i)) &&
+			(memoryProperties.memoryTypes[i].propertyFlags & reqProperties) == reqProperties)
+		{
+			if (idx != NULL) *idx = i;
+			return true;
+		}
+	}
+
+	return false;
+}
+
 static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
 {
 	assert(s->device != VK_NULL_HANDLE);
 	assert(s->videoSession != VK_NULL_HANDLE);
-	assert(s->deviceMemory == NULL); // deviceMemory should be properly freed beforehand
+	assert(s->videoSessionMemory == NULL); // videoSessionMemory should be properly freed beforehand
 
 	uint32_t memoryRequirements_count = 0;
 	VkResult result = vkGetVideoSessionMemoryRequirementsKHR(s->device, s->videoSession, &memoryRequirements_count, NULL);
@@ -1026,9 +1107,9 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
 	VkBindVideoSessionMemoryInfoKHR *bindMemoryInfo = (VkBindVideoSessionMemoryInfoKHR*)
 														calloc(memoryRequirements_count,
 																sizeof(VkBindVideoSessionMemoryInfoKHR));
-	s->deviceMemory_count = memoryRequirements_count;
-	s->deviceMemory = (VkDeviceMemory*)calloc(memoryRequirements_count, sizeof(VkDeviceMemory));
-	if (memoryRequirements == NULL || bindMemoryInfo == NULL || s->deviceMemory == NULL)
+	s->videoSessionMemory_count = memoryRequirements_count;
+	s->videoSessionMemory = (VkDeviceMemory*)calloc(memoryRequirements_count, sizeof(VkDeviceMemory));
+	if (memoryRequirements == NULL || bindMemoryInfo == NULL || s->videoSessionMemory == NULL)
 	{
 		printf("[vulkan_decode] Failed to allocate memory for vulkan video session!\n");
 		free(memoryRequirements);
@@ -1041,7 +1122,7 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
 	{
 		memoryRequirements[i].sType = VK_STRUCTURE_TYPE_VIDEO_SESSION_MEMORY_REQUIREMENTS_KHR;
 		bindMemoryInfo[i].sType = VK_STRUCTURE_TYPE_BIND_VIDEO_SESSION_MEMORY_INFO_KHR;
-		s->deviceMemory[i] = VK_NULL_HANDLE;
+		s->videoSessionMemory[i] = VK_NULL_HANDLE;
 	}
 	
 	result = vkGetVideoSessionMemoryRequirementsKHR(s->device, s->videoSession, &memoryRequirements_count, memoryRequirements);
@@ -1057,24 +1138,22 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
 	//TODO check if we can make enough allocations using maxMemoryAllocationCount
 	for (uint32_t i = 0; i < memoryRequirements_count; ++i)
 	{
-		// start of nonsense from VulkanVideoSession.cpp from NVidia decoder example
         uint32_t memoryTypeIndex = 0;
-		uint32_t memoryTypeBits = memoryRequirements[i].memoryRequirements.memoryTypeBits;
-		if (memoryTypeBits == 0)
+		if (!find_memory_type(s, memoryRequirements[i].memoryRequirements.memoryTypeBits,
+							  0, //TODO flags
+							  &memoryTypeIndex))
 		{
-			printf("[vulkan_decode] Bad vulkan video session memory required type bits!\n");
+			printf("[vulkan_decode] No suitable memory type for vulkan video session requirments!\n");
 			free(memoryRequirements);
 			free(bindMemoryInfo);
 			free_device_memory(s);
 			return false;
 		}
-		for (; !(memoryTypeBits & 1); memoryTypeIndex++) memoryTypeBits >>= 1;
-		// end of nonsense
 
 		VkMemoryAllocateInfo allocateInfo = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
 											  .allocationSize = memoryRequirements[i].memoryRequirements.size,
 											  .memoryTypeIndex = memoryTypeIndex };
-		result = vkAllocateMemory(s->device, &allocateInfo, NULL, &s->deviceMemory[i]);
+		result = vkAllocateMemory(s->device, &allocateInfo, NULL, &s->videoSessionMemory[i]);
 		if (result != VK_SUCCESS)
 		{
 			printf("[vulkan_decode] Failed to allocate vulkan memory!\n");
@@ -1087,7 +1166,7 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
 		bindMemoryInfo[i].memoryBindIndex = memoryRequirements[i].memoryBindIndex;
 		bindMemoryInfo[i].memorySize = memoryRequirements[i].memoryRequirements.size;
 		bindMemoryInfo[i].memoryOffset = 0 * memoryRequirements[i].memoryRequirements.alignment; //zero for now
-		bindMemoryInfo[i].memory = s->deviceMemory[i];
+		bindMemoryInfo[i].memory = s->videoSessionMemory[i];
 	}
 
 	result = vkBindVideoSessionMemoryKHR(s->device, s->videoSession, memoryRequirements_count, bindMemoryInfo);
@@ -1110,7 +1189,7 @@ static bool prepare(struct state_vulkan_decompress *s)
 	printf("vulkan_decode - prepare\n");
 	assert(!s->prepared); //this function should be called only when decompress is not prepared
 
-	struct pixfmt_desc pf_desc = get_pixfmt_desc(s->out_codec);
+	struct pixfmt_desc pf_desc = get_pixfmt_desc(s->out_codec); //TODO this should be input_codec not output one!
 	printf("\tpf_desc - depth: %d, subsampling: %d, rgb: %d, accel_type: %d\n",
 				pf_desc.depth, pf_desc.subsampling, pf_desc.rgb, pf_desc.accel_type);
 	
@@ -1224,8 +1303,86 @@ static bool prepare(struct state_vulkan_decompress *s)
 	assert(pictureFormat != VK_FORMAT_UNDEFINED);
 	assert(referencePictureFormat != VK_FORMAT_UNDEFINED);
 
-	// ---Creating command pool---
+	// ---Creating VkBuffer for decoding---
 	assert(s->device != VK_NULL_HANDLE);
+	assert(s->decodeBuffer == VK_NULL_HANDLE);
+
+	const VkDeviceSize wantedBufferSize = 1024 * 1024; //TODO magic number, check if smaller than allowed amount
+	s->decodeBufferOffsetAlignment = videoCapabilities.minBitstreamBufferSizeAlignment;
+	s->decodeBufferSize = (wantedBufferSize + (s->decodeBufferOffsetAlignment - 1))
+						  & ~(s->decodeBufferOffsetAlignment - 1); //alignment bit mask magic
+	VkBufferCreateInfo bufferInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+									  .pNext = (void*)&videoProfileList,
+									  .flags = 0,
+									  .usage = VK_BUFFER_USAGE_VIDEO_DECODE_SRC_BIT_KHR,
+									  .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+									  .size = s->decodeBufferSize,
+									  .queueFamilyIndexCount = 1,
+									  .pQueueFamilyIndices = &s->queueFamilyIdx };
+	result = vkCreateBuffer(s->device, &bufferInfo, NULL, &s->decodeBuffer);
+	if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to create vulkan buffer for decoding!\n");
+		return false;
+	}
+	s->decodeBufferOffsetAlignment = videoCapabilities.minBitstreamBufferOffsetAlignment;
+	
+	//TODO
+	assert(s->decodeBuffer != VK_NULL_HANDLE);
+
+	VkMemoryRequirements bufferMemoryRequirements;
+	vkGetBufferMemoryRequirements(s->device, s->decodeBuffer, &bufferMemoryRequirements);
+
+	uint32_t bufferMemoryType_idx = 0;
+	if (!find_memory_type(s, bufferMemoryRequirements.memoryTypeBits,
+						  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+						  &bufferMemoryType_idx))
+	{
+		printf("[vulkan_decode] Failed to find required memory type for vulkan buffer!\n");
+		if (vkDestroyBuffer != NULL)
+		{
+			vkDestroyBuffer(s->device, s->decodeBuffer, NULL);
+			s->decodeBuffer = VK_NULL_HANDLE;
+		}
+
+		return false;
+	}
+
+	assert(s->decodeBufferMemory == VK_NULL_HANDLE);
+
+	VkMemoryAllocateInfo bufferAllocInfo = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+											 .allocationSize = bufferMemoryRequirements.size,
+											 .memoryTypeIndex = bufferMemoryType_idx };
+	result = vkAllocateMemory(s->device, &bufferAllocInfo, NULL, &s->decodeBufferMemory); //TODO
+	if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to allocate memory for vulkan buffer!\n");
+		if (vkDestroyBuffer != NULL)
+		{
+			vkDestroyBuffer(s->device, s->decodeBuffer, NULL);
+			s->decodeBuffer = VK_NULL_HANDLE;
+		}
+
+		return false;
+	}
+
+	assert(s->decodeBufferMemory != VK_NULL_HANDLE);
+
+	result = vkBindBufferMemory(s->device, s->decodeBuffer, s->decodeBufferMemory, 0);
+	if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to bind vulkan memory to vulkan buffer!\n");
+		if (vkDestroyBuffer != NULL)
+		{
+			vkDestroyBuffer(s->device, s->decodeBuffer, NULL);
+			s->decodeBuffer = VK_NULL_HANDLE;
+		}
+		free_device_memory(s);
+
+		return false;
+	}
+
+	// ---Creating command pool---
 	assert(s->commandPool == VK_NULL_HANDLE);
 
 	VkCommandPoolCreateInfo poolInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -1235,6 +1392,13 @@ static bool prepare(struct state_vulkan_decompress *s)
 	if (result != VK_SUCCESS)
 	{
 		printf("[vulkan_decode] Failed to create vulkan command pool!\n");
+		if (vkDestroyBuffer != NULL)
+		{
+			vkDestroyBuffer(s->device, s->decodeBuffer, NULL);
+			s->decodeBuffer = VK_NULL_HANDLE;
+		}
+		free_device_memory(s);
+
 		return false;
 	}
 
@@ -1247,7 +1411,18 @@ static bool prepare(struct state_vulkan_decompress *s)
 	if (result != VK_SUCCESS)
 	{
 		printf("[vulkan_decode] Failed to allocate vulkan command buffer!\n");
-		if (vkDestroyCommandPool != NULL) vkDestroyCommandPool(s->device, s->commandPool, NULL);
+		if (vkDestroyCommandPool != NULL)
+		{
+			vkDestroyCommandPool(s->device, s->commandPool, NULL);
+			s->commandPool = VK_NULL_HANDLE;
+		}
+		if (vkDestroyBuffer != NULL)
+		{
+			vkDestroyBuffer(s->device, s->decodeBuffer, NULL);
+			s->decodeBuffer = VK_NULL_HANDLE;
+		}
+		free_device_memory(s);
+
 		return false;
 	}
 
@@ -1270,13 +1445,24 @@ static bool prepare(struct state_vulkan_decompress *s)
 	if (result != VK_SUCCESS)
 	{
 		printf("[vulkan_decode] Failed to create vulkan video session!\n");
-		if (vkDestroyCommandPool != NULL) vkDestroyCommandPool(s->device, s->commandPool, NULL);
+		if (vkDestroyCommandPool != NULL)
+		{
+			vkDestroyCommandPool(s->device, s->commandPool, NULL);
+			s->commandPool = VK_NULL_HANDLE;
+		}
+		if (vkDestroyBuffer != NULL)
+		{
+			vkDestroyBuffer(s->device, s->decodeBuffer, NULL);
+			s->decodeBuffer = VK_NULL_HANDLE;
+		}
+		free_device_memory(s);
+
 		return false;
 	}
 
 	// ---Creating video session parameters---
 	assert(s->videoSession);
-	//borrowed from NVidia example
+	//constants borrowed from NVidia example
 	static const uint32_t MAX_VPS_IDS =  16;
     static const uint32_t MAX_SPS_IDS =  32;
     static const uint32_t MAX_PPS_IDS = 256;
@@ -1303,8 +1489,24 @@ static bool prepare(struct state_vulkan_decompress *s)
 	if (result != VK_SUCCESS)
 	{
 		printf("[vulkan_decode] Failed to create vulkan video session parameters!\n");
-		if (vkDestroyVideoSessionKHR != NULL) vkDestroyVideoSessionKHR(s->device, s->videoSession, NULL);
-		if (vkDestroyCommandPool != NULL) vkDestroyCommandPool(s->device, s->commandPool, NULL);
+		if (vkDestroyVideoSessionKHR != NULL)
+		{
+			vkDestroyVideoSessionKHR(s->device, s->videoSession, NULL);
+			s->videoSession = VK_NULL_HANDLE;
+		}
+		
+		if (vkDestroyCommandPool != NULL)
+		{
+			vkDestroyCommandPool(s->device, s->commandPool, NULL);
+			s->commandPool = VK_NULL_HANDLE;
+		}
+		if (vkDestroyBuffer != NULL)
+		{
+			vkDestroyBuffer(s->device, s->decodeBuffer, NULL);
+			s->decodeBuffer = VK_NULL_HANDLE;
+		}
+		free_device_memory(s);
+		
 		return false;
 	}
 
@@ -1313,15 +1515,166 @@ static bool prepare(struct state_vulkan_decompress *s)
 	{
 		//err msg should get printed inside of allocate_memory_for_video_session
 		if (vkDestroyVideoSessionParametersKHR != NULL)
-				vkDestroyVideoSessionParametersKHR(s->device, s->videoSessionParams, NULL);
-		if (vkDestroyVideoSessionKHR != NULL) vkDestroyVideoSessionKHR(s->device, s->videoSession, NULL);
-		if (vkDestroyCommandPool != NULL) vkDestroyCommandPool(s->device, s->commandPool, NULL);
+		{
+			vkDestroyVideoSessionParametersKHR(s->device, s->videoSessionParams, NULL);
+			s->videoSessionParams = VK_NULL_HANDLE;
+		}
+		if (vkDestroyVideoSessionKHR != NULL)
+		{
+			vkDestroyVideoSessionKHR(s->device, s->videoSession, NULL);
+			s->videoSession = VK_NULL_HANDLE;
+		}
+		if (vkDestroyCommandPool != NULL)
+		{
+			vkDestroyCommandPool(s->device, s->commandPool, NULL);
+			s->commandPool = VK_NULL_HANDLE;
+		}
+		if (vkDestroyBuffer != NULL)
+		{
+			vkDestroyBuffer(s->device, s->decodeBuffer, NULL);
+			s->decodeBuffer = VK_NULL_HANDLE;
+		}
+		free_device_memory(s); //is called here as well because of s->decodeBufferMemory
+
 		return false;
 	}
 
 	printf("Preparation successful.\n");
 	return true;
 }
+
+static bool start_video_decoding(struct state_vulkan_decompress *s)
+{
+	// ---Command buffer into recording state---
+	
+	//TODO info
+	VkCommandBufferBeginInfo cmdBufferBeginInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+	VkResult result = vkBeginCommandBuffer(s->cmdBuffer, &cmdBufferBeginInfo);
+	if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to begin command buffer recording!\n");
+		return false;
+	}
+
+	// ---Begining of video coding---
+	VkVideoBeginCodingInfoKHR beginCodingInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_BEGIN_CODING_INFO_KHR,
+												  .videoSession = s->videoSession,
+												  .videoSessionParameters = s->videoSessionParams,
+												  .referenceSlotCount = 0 };
+	vkCmdBeginVideoCodingKHR(s->cmdBuffer, &beginCodingInfo);
+
+	VkVideoCodingControlInfoKHR vidCodingControlInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_CODING_CONTROL_INFO_KHR,
+														 .flags = VK_VIDEO_CODING_CONTROL_RESET_BIT_KHR };
+	vkCmdControlVideoCodingKHR(s->cmdBuffer, &vidCodingControlInfo);
+
+	return true;
+}
+
+static bool end_video_decoding(struct state_vulkan_decompress *s)
+{
+	assert(s->cmdBuffer != VK_NULL_HANDLE);
+
+	VkVideoEndCodingInfoKHR endCodingInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_END_CODING_INFO_KHR };
+	vkCmdEndVideoCodingKHR(s->cmdBuffer, &endCodingInfo);
+
+	VkResult result = vkEndCommandBuffer(s->cmdBuffer);
+	s->videoCodingStarted = false; //we end video decoding no matter the result
+
+	if (result == VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR)
+	{
+		printf("[vulkan_decode] Failed to end command buffer recording - Invalid video standard parameters\n");
+		return false;
+	}
+	else if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to end command buffer recording!\n");
+		return false;
+	}
+
+	return true;
+}
+
+static void print_bits(unsigned char num) //DEBUG
+{
+	unsigned int bit = 1<<(sizeof(unsigned char) *8 - 1);
+
+	while (bit)
+	{
+		printf("%i ", num & bit ? 1 : 0);
+		bit >>= 1;
+	}
+}
+
+//copied from rtp/rtpenc_h264.c
+static uint32_t get4Bytes(const unsigned char *ptr)
+{
+	return (ptr[0] << 24) | (ptr[1] << 16) | (ptr[2] << 8) | ptr[3];
+}
+
+//copied from rtp/rtpenc_h264.c
+static const unsigned char *get_next_nal(const unsigned char *start, long len, bool with_start_code)
+{
+	const unsigned char * const stop = start + len;
+	while (stop - start >= 4) {
+		uint32_t next4Bytes = get4Bytes(start);
+		if (next4Bytes == 0x00000001) {
+			return start + (with_start_code ? 0 : 4);
+		}
+		if ((next4Bytes & 0xFFFFFF00) == 0x00000100) {
+			return start + (with_start_code ? 0 : 3);
+		}
+		// We save at least some of "next4Bytes".
+		if ((unsigned) (next4Bytes & 0xFF) > 1) {
+			// Common case: 0x00000001 or 0x000001 definitely doesn't begin anywhere in "next4Bytes", so we save all of it:
+			start += 4;
+		} else {
+			// Save the first byte, and continue testing the rest:
+			start += 1;
+		}
+	}
+	return NULL;
+}
+
+//copied from rtp/rtpenc_h264.c
+/*static void print_nalu_name(int type)
+{
+	switch ((enum nal_type)type)
+	{
+		case NAL_H264_IDR:
+			printf("H264 IDR");
+			break;
+		case NAL_H264_SEI:
+			printf("H264 SEI");
+			break;
+		case NAL_H264_SPS:
+			printf("H264 SPS");
+			break;
+		case NAL_H264_PPS:
+			printf("H264 PPS");
+			break;
+		case NAL_H264_AUD:
+			printf("H264 AUD");
+			break;
+		case NAL_HEVC_VPS:
+			printf("HEVC VPS");
+			break;
+		case NAL_HEVC_SPS:
+			printf("HEVC SPS");
+			break;
+		case NAL_HEVC_PPS:
+			printf("HEVC PPS");
+			break;
+		case NAL_HEVC_AUD:
+			printf("HEVC AUD");
+			break;
+    }
+}*/
+
+/*static void print_nalu_header(unsigned char header)
+{
+	printf("forbidden bit: %u, idc: %u, type: %u", header & 128 ? 1 : 0,
+				H264_NALU_HDR_GET_NRI(header), H264_NALU_HDR_GET_TYPE(header));
+}*/
 
 static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsigned char *src,
                 unsigned int src_len, int frame_seq, struct video_frame_callbacks *callbacks,
@@ -1330,14 +1683,16 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	printf("vulkan_decode - decompress\n");
 	UNUSED(callbacks);
 	struct state_vulkan_decompress *s = (struct state_vulkan_decompress *)state;
-    //printf("\tdst: %p, src: %p, src_len: %u, frame_seq: %d\n",
-	//		dst, src, src_len, frame_seq);
+    printf("\tdst: %p, src: %p, src_len: %u, frame_seq: %d\n",
+			dst, src, src_len, frame_seq);
 	
     decompress_status res = DECODER_NO_FRAME;
 
 	if (s->out_codec == VIDEO_CODEC_NONE)
 	{
 		printf("\tProbing...\n");
+		//TODO make prepare-video-profile and return pixfmt_desc from it
+		//TODO this assumes same codec for input and output
 		codec_t pf = vulkan_flag_to_codec(s->codecOperation);
 		if (pf == VIDEO_CODEC_NONE)
 		{
@@ -1347,8 +1702,7 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 		
 		struct pixfmt_desc pf_desc = get_pixfmt_desc(pf);
 
-		//TODO
-		if (pf_desc.rgb)
+		if (pf_desc.rgb) //decode operations only defined for YCbCr format
 		{
 			printf("[vulkan_decode] RGB is not supported!\n");
 			return DECODER_UNSUPP_PIXFMT;
@@ -1367,50 +1721,93 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 		}
 	}
 
-	// ---Command buffer into recrodgin state---
+	if (src_len <= 5)
+	{
+		printf("[vulkan_decode] Source buffer too short!\n");
+		return res;
+	}
+
 	assert(s->cmdBuffer != VK_NULL_HANDLE);
 	assert(s->videoSession != VK_NULL_HANDLE);
 	assert(s->videoSessionParams != VK_NULL_HANDLE);
 
-	//TODO info
-	VkCommandBufferBeginInfo cmdBufferBeginInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-	VkResult result = vkBeginCommandBuffer(s->cmdBuffer, &cmdBufferBeginInfo);
-	if (result != VK_SUCCESS)
+	if (!s->videoCodingStarted)
 	{
-		printf("[vulkan_decode] Failed to begin command buffer recording!\n");
-		return res;
+		if (!(s->videoCodingStarted = start_video_decoding(s)))
+		{
+			//more detailed error printed inside of start_video_decoding
+			printf("\tFailed to start video decoding.\n");
+			return res;
+		}
 	}
-
-	VkVideoBeginCodingInfoKHR beginCodingInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_BEGIN_CODING_INFO_KHR,
-												  .videoSession = s->videoSession,
-												  .videoSessionParameters = s->videoSessionParams,
-												  .referenceSlotCount = 0 };
-	vkCmdBeginVideoCodingKHR(s->cmdBuffer, &beginCodingInfo);
-
-	VkVideoCodingControlInfoKHR vidCodingControlInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_CODING_CONTROL_INFO_KHR,
-														 .flags = VK_VIDEO_CODING_CONTROL_RESET_BIT_KHR };
-	vkCmdControlVideoCodingKHR(s->cmdBuffer, &vidCodingControlInfo);
-
-	//TODO decompress
-	UNUSED(src);
+	
+	//UNUSED(src);
 	UNUSED(dst);
-	UNUSED(src_len);
+	//UNUSED(src_len);
 	UNUSED(frame_seq);
 
-	VkVideoEndCodingInfoKHR endCodingInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_END_CODING_INFO_KHR };
-	vkCmdEndVideoCodingKHR(s->cmdBuffer, &endCodingInfo);
+	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
 
-	result = vkEndCommandBuffer(s->cmdBuffer);
-	if (result == VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR)
+	//printf("\t4 bytes: %u %u %u %u\n", src[0], src[1], src[2], src[3]);
+	//printf("\t5th btyte: %u\n", src[4]);
+	printf("\tlast byte: %u - ", src[src_len - 1]);
+	print_bits(src[src_len - 1]);
+	putchar('\n');
+
+	for (const unsigned char *nal = get_next_nal(src, src_len, false);
+		 nal != NULL;
+		 nal = get_next_nal(nal, src_len - (nal - src), false))
 	{
-		printf("[vulkan_decode] Failed to end command buffer recording - Invalid video standard parameters\n");
-		return res;
+		int nalu_type = NALU_HDR_GET_TYPE(nal[0], !isH264);
+
+		/*printf("\tNALU - input idx: %u, header: (", nal - src);
+		print_nalu_header(nal[0]);
+		printf(") type name - ");
+		print_nalu_name(nalu_type);
+		putchar('\n');*/
+
+		switch(nalu_type)
+		{
+			case NAL_H264_SEI:
+				puts("\t\tSEI => Skipping.");
+				continue;
+			case NAL_H264_IDR:
+				puts("\t\tIDR => Decode."); //TODO decode
+				break;
+			case 1:
+				puts("\t\tNon-IDR => Decode."); //TODO decode
+				break;
+			case NAL_H264_SPS:
+				puts("\t\tSPS => Load SPS."); //TODO sps
+				break;
+			case NAL_H264_PPS:
+				puts("\t\tPPS => Load PPS."); //TODO pps
+				break;
+			default:
+				puts("\t\tOther => Skipping.");
+				continue;
+		}
 	}
-	else if (result != VK_SUCCESS)
-	{
-		printf("[vulkan_decode] Failed to end command buffer recording!\n");
-		return res;
-	}
+
+	//TODO decompress
+	// check - rtp/rtpenc_h264.h, utils/h264_stream.h
+
+	/*assert(s->codecOperation != VK_VIDEO_CODEC_OPERATION_NONE_KHR);
+	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
+	
+	VkVideoDecodeH264PictureInfoKHR h264DecodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PICTURE_INFO_KHR };
+	VkVideoDecodeH265PictureInfoKHR h265DecodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_PICTURE_INFO_KHR };
+	VkVideoDecodeInfoKHR decodeInfo = { .sType = ,
+										.pNext = isH264 ? (void*)&h264DecodeInfo : (void*)&h265DecodeInfo,
+										.flags = ,
+										.srcBuffer = ,
+										.dstPictureResource = ,
+										.pSetupReferenceSlot = ,
+    									.referenceSlotCount = 0,
+										.pReferenceSlots = NULL };
+	vkCmdDecodeVideoKHR(s->cmdBuffer, &decodeInfo);*/
+
+	//end_video_decoding(s);
 
     return res;
 };
