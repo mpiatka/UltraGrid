@@ -15,6 +15,7 @@
 #include "video.h"				//?
 #include "video_decompress.h"
 
+#include "utils/bs.h"
 #include "rtp/rtpdec_h264.h"	//TODO
 #include "rtp/rtpenc_h264.h"	//TODO
 
@@ -26,6 +27,7 @@
 //TODO add into configure.ac
 #include "vulkan/vulkan.h"
 #include "vk_video/vulkan_video_codec_h264std_decode.h"
+#include "vulkan_decode_h264.h"
 
 // activates vulkan validation layers if defined
 // if defined your vulkan loader needs to know where to find the validation layer manifest
@@ -39,10 +41,6 @@
 //#define VULKAN_VALIDATE_SHOW_SEVERITY VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
 
 #define MAX_REF_FRAMES 16
-//constants borrowed from NVidia example
-#define MAX_VPS_IDS 16
-#define MAX_SPS_IDS 32
-#define MAX_PPS_IDS 256
 
 static PFN_vkCreateInstance vkCreateInstance = NULL;
 static PFN_vkDestroyInstance vkDestroyInstance = NULL;
@@ -91,6 +89,12 @@ static PFN_vkDestroyFence vkDestroyFence = NULL;
 static PFN_vkGetFenceStatus vkGetFenceStatus = NULL;
 static PFN_vkResetFences vkResetFences = NULL;
 static PFN_vkWaitForFences vkWaitForFences = NULL;
+static PFN_vkCreateImage vkCreateImage = NULL;
+static PFN_vkDestroyImage vkDestroyImage = NULL;
+static PFN_vkGetImageMemoryRequirements vkGetImageMemoryRequirements = NULL;
+static PFN_vkBindImageMemory vkBindImageMemory = NULL;
+static PFN_vkCreateImageView vkCreateImageView = NULL;
+static PFN_vkDestroyImageView vkDestroyImageView = NULL;
 
 static bool load_vulkan_functions_globals(PFN_vkGetInstanceProcAddr loader)
 {
@@ -165,6 +169,13 @@ static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader
 	vkGetFenceStatus = (PFN_vkGetFenceStatus)loader(instance, "vkGetFenceStatus");
 	vkResetFences = (PFN_vkResetFences)loader(instance, "vkResetFences");
 	vkWaitForFences = (PFN_vkWaitForFences)loader(instance, "vkWaitForFences");
+	vkCreateImage = (PFN_vkCreateImage)loader(instance, "vkCreateImage");
+	vkDestroyImage = (PFN_vkDestroyImage)loader(instance, "vkDestroyImage");
+	vkGetImageMemoryRequirements = (PFN_vkGetImageMemoryRequirements)
+												loader(instance, "vkGetImageMemoryRequirements");
+	vkBindImageMemory = (PFN_vkBindImageMemory)loader(instance, "vkBindImageMemory");
+	vkCreateImageView = (PFN_vkCreateImageView)loader(instance, "vkCreateImageView");
+	vkDestroyImageView = (PFN_vkDestroyImageView)loader(instance, "vkDestroyImageView");
 
 	return vkDestroyInstance &&
 	#ifdef VULKAN_VALIDATE
@@ -194,7 +205,10 @@ static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader
 		   vkQueueSubmit &&
 		   vkCreateFence && vkDestroyFence&&
 		   vkGetFenceStatus && vkResetFences &&
-		   vkWaitForFences;
+		   vkWaitForFences &&
+		   vkCreateImage && vkDestroyImage && 
+		   vkGetImageMemoryRequirements && vkBindImageMemory &&
+		   vkCreateImageView && vkDestroyImageView;
 }
 
 struct state_vulkan_decompress
@@ -220,14 +234,21 @@ struct state_vulkan_decompress
 	VkCommandPool commandPool;					// needs to be destroyed if valid
 	VkCommandBuffer cmdBuffer;
 	VkVideoSessionKHR videoSession;				// needs to be destroyed if valid
-	VkVideoSessionParametersKHR videoSessionParams; // needs to be destroyed if valid
 	uint32_t videoSessionMemory_count;
 	// array of size videoSessionMemory_count, needs to be freed and VkvideoSessionMemory deallocated
 	VkDeviceMemory *videoSessionMemory;
 
-	VkImage dpb[MAX_REF_FRAMES + 1];	// decoded picture buffer
-	VkFormat dpbFormat;					// format of VkImages in dpb
-	uint32_t dpbDecodedFrameIdx;		// the index (into dpb) of next to be decoded frame
+	VkVideoSessionParametersKHR videoSessionParams; // needs to be destroyed if valid
+	// pointers to arrays of sps (length MAX_SPS_IDS), pps (length MAX_PPS_IDS)
+	// could be static arrays but that would take too much memory of this struct
+	sps_t *sps_array;
+	pps_t *pps_array;
+
+	VkImage dpb[MAX_REF_FRAMES + 1];			// decoded picture buffer
+	VkImageView dpbViews[MAX_REF_FRAMES + 1];	// dpb image views
+	VkDeviceMemory dpbMemory;					// backing memory for dpb - needs to be freed if valid (destroyed in destroy_dpb)
+	VkFormat dpbFormat;							// format of VkImages in dpb
+	uint32_t dpbDstPictureIdx;					// index (into dpb) of the slot for next to be decoded frame
 	uint32_t referenceSlotsQueue[MAX_REF_FRAMES]; // queue containing indices (into dpb) of current reference frames 
 	uint32_t referenceSlotsQueue_start;			  // index into referenceSlotsQueue where the queue starts
 	uint32_t referenceSlotsQueue_count;			  // the current length of the reference slots queue
@@ -241,6 +262,7 @@ struct state_vulkan_decompress
 };
 
 static bool end_video_decoding(struct state_vulkan_decompress *s);
+static void destroy_dpb(struct state_vulkan_decompress *s);
 
 static bool check_for_instance_extensions(const char * const requiredInstanceextensions[])
 {
@@ -598,13 +620,33 @@ static void * vulkan_decompress_init(void)
 {
 	printf("vulkan_decode - init\n");
 
-	// ---Allocation of the vulkan_decompress state---
+	// ---Allocation of the vulkan_decompress state and sps/pps arrays---
 	struct state_vulkan_decompress *s = calloc(1, sizeof(struct state_vulkan_decompress));
-	if (!s)
+	if (s == NULL)
 	{
 		printf("[vulkan_decode] Couldn't allocate memory for state struct!\n");
 		return NULL;
 	}
+
+	sps_t *sps_array = calloc(MAX_SPS_IDS, sizeof(sps_t));
+	if (sps_array == NULL)
+	{
+		printf("[vulkan_decode] Couldn't allocate memory for SPS array (num of members: %u)!\n", MAX_SPS_IDS);
+		free(s);
+		return NULL;
+	}
+
+	pps_t *pps_array = calloc(MAX_PPS_IDS, sizeof(pps_t));
+	if (pps_array == NULL)
+	{
+		printf("[vulkan_decode] Couldn't allocate memory for PPS array (num of members: %u)!\n", MAX_PPS_IDS);
+		free(sps_array);
+		free(s);
+		return NULL;
+	}
+
+	s->sps_array = sps_array;
+	s->pps_array = pps_array;
 
 	// ---Dynamic loading of the vulkan loader library---
 	const char vulkan_lib_filename[] = "vulkan-1.dll"; //TODO .so
@@ -612,6 +654,8 @@ static void * vulkan_decompress_init(void)
 	if (s->vulkanLib == NULL)
 	{
 		printf("[vulkan_decode] Vulkan loader file '%s' not found!\n", vulkan_lib_filename);
+		free(pps_array);
+		free(sps_array);
 		free(s);
 		return NULL;
 	}
@@ -623,6 +667,8 @@ static void * vulkan_decompress_init(void)
 
 		printf("[vulkan_decode] Vulkan function '%s' not found!\n", vulkan_proc_name);
         FreeLibrary(s->vulkanLib);
+		free(pps_array);
+		free(sps_array);
 		free(s);
         return NULL;
     }
@@ -633,6 +679,8 @@ static void * vulkan_decompress_init(void)
 	{
 		printf("[vulkan_decode] Failed to load all vulkan functions!\n");
 		FreeLibrary(s->vulkanLib);
+		free(pps_array);
+		free(sps_array);
 		free(s);
         return NULL;
 	}
@@ -648,6 +696,8 @@ static void * vulkan_decompress_init(void)
 	{
 		printf("[vulkan_deconde] Required vulkan validation layers not found!\n");
 		FreeLibrary(s->vulkanLib);
+		free(pps_array);
+		free(sps_array);
 		free(s);
         return NULL;
 	}
@@ -666,6 +716,8 @@ static void * vulkan_decompress_init(void)
 	{
 		//error msg should be printed inside of check_for_extensions
 		FreeLibrary(s->vulkanLib);
+		free(pps_array);
+		free(sps_array);
 		free(s);
         return NULL;
 	}
@@ -693,6 +745,8 @@ static void * vulkan_decompress_init(void)
 	{
 		printf("[vulkan_decode] Failed to create vulkan instance! Error: %d\n", result);
         FreeLibrary(s->vulkanLib);
+		free(pps_array);
+		free(sps_array);
 		free(s);
 		return NULL;
 	}
@@ -702,6 +756,8 @@ static void * vulkan_decompress_init(void)
 		printf("[vulkan_decode] Failed to load all instance related vulkan functions!\n");
 		if (vkDestroyInstance != NULL) vkDestroyInstance(s->instance, NULL);
 		FreeLibrary(s->vulkanLib);
+		free(pps_array);
+		free(sps_array);
 		free(s);
         return NULL;
 	}
@@ -714,6 +770,8 @@ static void * vulkan_decompress_init(void)
 		printf("[vulkan_decode] Failed to setup debug messenger!\n");
 		vkDestroyInstance(s->instance, NULL);
         FreeLibrary(s->vulkanLib);
+		free(pps_array);
+		free(sps_array);
 		free(s);
 		return NULL;
 	}
@@ -744,6 +802,8 @@ static void * vulkan_decompress_init(void)
 		destroy_debug_messenger(s->instance, s->debugMessenger);
 		vkDestroyInstance(s->instance, NULL);
         FreeLibrary(s->vulkanLib);
+		free(pps_array);
+		free(sps_array);
 		free(s);
 		return NULL;
 	}
@@ -755,6 +815,8 @@ static void * vulkan_decompress_init(void)
 		destroy_debug_messenger(s->instance, s->debugMessenger);
 		vkDestroyInstance(s->instance, NULL);
         FreeLibrary(s->vulkanLib);
+		free(pps_array);
+		free(sps_array);
 		free(s);
 		return NULL;
 	}
@@ -772,6 +834,8 @@ static void * vulkan_decompress_init(void)
 		destroy_debug_messenger(s->instance, s->debugMessenger);
 		vkDestroyInstance(s->instance, NULL);
         FreeLibrary(s->vulkanLib);
+		free(pps_array);
+		free(sps_array);
 		free(s);
 		return NULL;
 	}
@@ -819,6 +883,8 @@ static void * vulkan_decompress_init(void)
 		destroy_debug_messenger(s->instance, s->debugMessenger);
 		vkDestroyInstance(s->instance, NULL);
         FreeLibrary(s->vulkanLib);
+		free(pps_array);
+		free(sps_array);
 		free(s);
 		return NULL;
 	}
@@ -835,7 +901,12 @@ static void * vulkan_decompress_init(void)
 	s->videoSessionMemory_count = 0;
 	s->videoSessionMemory = NULL;
 
-	for (size_t i = 0; i < MAX_REF_FRAMES + 1; ++i) s->dpb[i] = VK_NULL_HANDLE;
+	for (size_t i = 0; i < MAX_REF_FRAMES + 1; ++i)
+	{
+		s->dpb[i] = VK_NULL_HANDLE;
+		s->dpbViews[i] = VK_NULL_HANDLE;
+	}
+	s->dpbMemory = VK_NULL_HANDLE;
 	s->dpbFormat = VK_FORMAT_UNDEFINED;
 
 	printf("[vulkan_decode] Initialization finished successfully.\n");
@@ -884,6 +955,8 @@ static void vulkan_decompress_done(void *state)
 			vkDestroyVideoSessionKHR(s->device, s->videoSession, NULL);
 	
 	free_video_session_memory(s);
+
+	destroy_dpb(s);
 	
 	if (vkDestroyCommandPool != NULL && s->device != VK_NULL_HANDLE)
 			vkDestroyCommandPool(s->device, s->commandPool, NULL);
@@ -901,6 +974,8 @@ static void vulkan_decompress_done(void *state)
 
 	FreeLibrary(s->vulkanLib);
 
+	free(s->pps_array);
+	free(s->sps_array);
 	free(s);
 }
 
@@ -947,7 +1022,7 @@ static bool configure_with(struct state_vulkan_decompress *s, struct video_desc 
 	s->height = desc.height;
 
 	s->dpbFormat = VK_FORMAT_UNDEFINED;
-	s->dpbDecodedFrameIdx = 0;
+	s->dpbDstPictureIdx = 0;
 	s->referenceSlotsQueue_start = 0;
 	s->referenceSlotsQueue_count = 0;
 
@@ -1205,8 +1280,7 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
 	{
         uint32_t memoryTypeIndex = 0;
 		if (!find_memory_type(s, memoryRequirements[i].memoryRequirements.memoryTypeBits,
-							  0, //TODO flags
-							  &memoryTypeIndex))
+							  0, &memoryTypeIndex))
 		{
 			printf("[vulkan_decode] No suitable memory type for vulkan video session requirments!\n");
 			free(memoryRequirements);
@@ -1253,33 +1327,145 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
 	return true;
 }
 
-static bool create_dpb(struct state_vulkan_decompress *s)
+static bool create_dpb(struct state_vulkan_decompress *s, VkVideoProfileListInfoKHR *videoProfileList)
 {
-	//TODO
-	assert(s->dpbFormat != VK_FORMAT_UNDEFINED);
+	assert(s->device != VK_NULL_HANDLE && s->dpbFormat != VK_FORMAT_UNDEFINED);
 
+	const VkImageType imageType = VK_IMAGE_TYPE_2D;
 	const VkExtent3D videoSize = { s->width, s->height, 1 }; //depth must be 1 for VK_IMAGE_TYPE_2D
 
+	//imageCreateMaxMipLevels, imageCreateMaxArrayLayers, imageCreateMaxExtent, and imageCreateSampleCounts
 	VkImageCreateInfo imgInfo = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-								  .flags = 0, //TODO
+								  .pNext = (void*)videoProfileList,
+								  .flags = 0,
 								  .usage = VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR |
 								  		   VK_IMAGE_USAGE_VIDEO_DECODE_SRC_BIT_KHR |
 										   VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR,
-								  .imageType = VK_IMAGE_TYPE_2D,
+								  .imageType = imageType,
 								  .mipLevels = 1,
+								  .samples = VK_SAMPLE_COUNT_1_BIT,
 								  .format = s->dpbFormat,
 								  .extent = videoSize,
-								  .arrayLayers = 1, //TODO
+								  .arrayLayers = 1,
+								  .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
 								  .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
 								  .queueFamilyIndexCount = 1,
 								  .pQueueFamilyIndices = &s->queueFamilyIdx };
+
+	size_t dpb_len = sizeof(s->dpb) / sizeof(s->dpb[0]);
+
+	for (size_t i = 0; i < dpb_len; ++i)
+	{
+		//printf("Creating image %u.\n", i);
+		VkResult result = vkCreateImage(s->device, &imgInfo, NULL, s->dpb + i);
+		if (result != VK_SUCCESS)
+		{
+			printf("[vulkan_decode] Failed to create vulkan image(%u) for DPB slot!\n", i);
+			destroy_dpb(s);
+			return false;
+		}
+	}
+
+	VkMemoryRequirements imgMemoryRequirements;
+	vkGetImageMemoryRequirements(s->device, s->dpb[0], &imgMemoryRequirements);
+
+	uint32_t imgMemoryTypeIdx = 0;
+	if (!find_memory_type(s, imgMemoryRequirements.memoryTypeBits, 0, &imgMemoryTypeIdx))
+	{
+		printf("[vulkan_decode] Failed to find required memory type for DPB!\n");
+		destroy_dpb(s);
+		return false;
+	}
+
+	VkDeviceSize imgAlignment = imgMemoryRequirements.alignment;
+	VkDeviceSize imgAlignedSize = (imgMemoryRequirements.size + (imgAlignment - 1))
+								   & ~(imgAlignment - 1); //alignment bit mask magic
+	VkMemoryAllocateInfo dpbAllocInfo = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+										  .allocationSize = imgAlignedSize * dpb_len,
+										  .memoryTypeIndex = imgMemoryTypeIdx };
+
+	VkResult result = vkAllocateMemory(s->device, &dpbAllocInfo, NULL, &s->dpbMemory);
+	if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to allocate vulkan device memory for DPB!\n");
+		destroy_dpb(s);
+		return false;
+	}
+
+	for (size_t i = 0; i < dpb_len; ++i)
+	{
+		result = vkBindImageMemory(s->device, s->dpb[i], s->dpbMemory, i * imgAlignedSize);
+		if (result != VK_SUCCESS)
+		{
+			printf("[vulkan_decode] Failed to bind vulkan device memory to DPB image (idx: %u)!\n", i);
+			destroy_dpb(s);
+			return false;
+		}
+	}
+
+	VkImageSubresourceRange viewSubresourceRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, //TODO aspect
+													 .baseMipLevel = 0, .levelCount = 1,
+													 .baseArrayLayer = 0, .layerCount = 1 };
+	VkImageViewCreateInfo viewInfo = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+									   .flags = 0,
+									   .image = VK_NULL_HANDLE, //gets correctly set in the for loop
+									   .viewType = VK_IMAGE_VIEW_TYPE_2D,
+									   .format = imgInfo.format,
+									   .components = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                            						   VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY },
+									   .subresourceRange = viewSubresourceRange };
+	
+	for (size_t i = 0; i < dpb_len; ++i)
+	{
+		//printf("Creating image view %u.\n", i);
+		assert(s->dpb[i] != VK_NULL_HANDLE);
+
+		viewInfo.image = s->dpb[i];
+		result = vkCreateImageView(s->device, &viewInfo, NULL, s->dpbViews + i);
+		if (result != VK_SUCCESS)
+		{
+			printf("[vulkan_decode] Failed to create vulkan image view(%u) for DPB slot!\n", i);
+			destroy_dpb(s);
+			return false;
+		}
+	}
 
 	return true;
 }
 
 static void destroy_dpb(struct state_vulkan_decompress *s)
 {
-	//TODO
+	size_t dpb_len = sizeof(s->dpb) / sizeof(s->dpb[0]);
+
+	// freeing dpb image views
+	if (vkDestroyImageView != NULL && s->device != VK_NULL_HANDLE)
+	{
+		for (size_t i = 0; i < dpb_len; ++i)
+		{
+			vkDestroyImageView(s->device, s->dpbViews[i], NULL);
+		}
+	}
+
+	// freeing dpb images
+	if (vkDestroyImage != NULL && s->device != VK_NULL_HANDLE)
+	{
+		for (size_t i = 0; i < dpb_len; ++i)
+		{
+			//printf("Destroying image: %u.\n", i);
+			vkDestroyImage(s->device, s->dpb[i], NULL);
+		}
+	}
+
+	for (size_t i = 0; i < dpb_len; ++i)
+	{
+		s->dpb[i] = VK_NULL_HANDLE;
+		s->dpbViews[i] = VK_NULL_HANDLE;
+	}
+
+	// freeing backing device memory
+	if (vkFreeMemory != NULL && s->device != VK_NULL_HANDLE) vkFreeMemory(s->device, s->dpbMemory, NULL);
+	
+	s->dpbMemory = VK_NULL_HANDLE;
 }
 
 static bool prepare(struct state_vulkan_decompress *s)
@@ -1547,8 +1733,23 @@ static bool prepare(struct state_vulkan_decompress *s)
 	}
 
 	// ---Creating DPB (decoded picture buffer)---
-	//TODO
-	//create_dpb(s);
+	if (!create_dpb(s, &videoProfileList))
+	{
+		// err msg should get printed inside of create_dpb
+		if (vkDestroyCommandPool != NULL)
+		{
+			vkDestroyCommandPool(s->device, s->commandPool, NULL);
+			s->commandPool = VK_NULL_HANDLE;
+		}
+		free_decode_buffer(s);
+		if (vkDestroyFence != NULL)
+		{
+			vkDestroyFence(s->device, s->fence, NULL);
+			s->fence = VK_NULL_HANDLE;
+		}
+
+		return false;
+	}
 
 	// ---Creating video session---
 	assert(s->videoSession == VK_NULL_HANDLE);
@@ -1570,6 +1771,7 @@ static bool prepare(struct state_vulkan_decompress *s)
 	if (result != VK_SUCCESS)
 	{
 		printf("[vulkan_decode] Failed to create vulkan video session!\n");
+		destroy_dpb(s);
 		if (vkDestroyCommandPool != NULL)
 		{
 			vkDestroyCommandPool(s->device, s->commandPool, NULL);
@@ -1615,7 +1817,7 @@ static bool prepare(struct state_vulkan_decompress *s)
 			vkDestroyVideoSessionKHR(s->device, s->videoSession, NULL);
 			s->videoSession = VK_NULL_HANDLE;
 		}
-		
+		destroy_dpb(s);
 		if (vkDestroyCommandPool != NULL)
 		{
 			vkDestroyCommandPool(s->device, s->commandPool, NULL);
@@ -1645,6 +1847,7 @@ static bool prepare(struct state_vulkan_decompress *s)
 			vkDestroyVideoSessionKHR(s->device, s->videoSession, NULL);
 			s->videoSession = VK_NULL_HANDLE;
 		}
+		destroy_dpb(s);
 		if (vkDestroyCommandPool != NULL)
 		{
 			vkDestroyCommandPool(s->device, s->commandPool, NULL);
@@ -1780,6 +1983,9 @@ static void print_nalu_name(int type)
 {
 	switch ((enum nal_type)type)
 	{
+		case NAL_H264_NONIDR:
+			printf("H264 NON-IDR");
+			break;
 		case NAL_H264_IDR:
 			printf("H264 IDR");
 			break;
@@ -1849,6 +2055,54 @@ static bool search_for_first_sps_vps(const unsigned char *src, size_t src_len, b
 	return false;
 }
 
+static bool create_rbsp(const unsigned char *nal, size_t nal_len, uint8_t **rbsp, int *rbsp_len)
+{
+	// allocates memory for rbsp and fills it with correct rbsp corresponding to given nal buffer range
+	// returns false if error and prints error msg
+	assert(nal != NULL && rbsp != NULL && rbsp_len != NULL);
+
+	if (sizeof(unsigned char) != sizeof(uint8_t))
+	{
+		printf("[vulkan_decode] H.264/H.265 stream handling requires sizeof(unsigned char) == sizeof(uint8_t)!\n");
+		*rbsp_len = 0;
+		return false;
+	}
+
+	*rbsp_len = (int)nal_len;
+	assert(*rbsp_len >= 0);
+	uint8_t *out = (uint8_t*)malloc(nal_len * sizeof(uint8_t));
+	if (out == NULL)
+	{
+		printf("[vulkan_decode] Failed to allocate memory for RBSP stream data!\n");
+		*rbsp_len = 0;
+		return false;
+	}
+
+	// throw away variable, could be set to 'nal_len' instead, but we are using the fact that 'rbsp_len' is already converted
+	int nal_payload_len = *rbsp_len;
+	// the cast here to (const uint8_t*) is valid because of the first 'if'
+	int ret = nal_to_rbsp((const uint8_t*)nal, &nal_payload_len, out, rbsp_len);
+	if (ret == -1)
+	{
+		printf("[vulkan_decode] Failed to convert NALU stream into RBSP data!\n");
+		free(out);
+		*rbsp_len = 0;
+		return false;
+	}
+
+	assert(ret == *rbsp_len);
+	*rbsp = out;
+	
+	return true;
+}
+
+static void destroy_rbsp(uint8_t *rbsp)
+{
+	// destroys rbsp previously created with create_rbsp function
+	// (just frees the memory, maybe pointless)
+	free(rbsp);
+}
+
 static void * begin_nalu_writing(struct state_vulkan_decompress *s)
 {
 	void *memoryPtr = NULL;
@@ -1886,6 +2140,209 @@ static void end_nalu_writing(struct state_vulkan_decompress *s)
 
 	vkUnmapMemory(s->device, s->decodeBufferMemory);
 }
+
+static bool handle_sps_nalu(struct state_vulkan_decompress *s, const unsigned char *nal_payload, size_t len)
+{
+	// reads sequence parameters set from given buffer range
+	
+	uint8_t *rbsp = NULL;
+	int rbsp_len = 0;
+
+	if (!create_rbsp(nal_payload, len, &rbsp, &rbsp_len))
+	{
+		//err should get printed inside of create_rbsp
+		return false;
+	}
+	assert(rbsp != NULL);
+
+	/*printf("reading pps - payload len: %u (converted: %d), rbsp_len: %d\n", len, nal_payload_len, rbsp_len);
+	puts("nal_payload:");
+	for (size_t i = 0; i < len && i < 30; ++i) printf("%u ", nal_payload[i]);
+	putchar('\n');
+	puts("rbsp:");
+	for (size_t i = 0; i < rbsp_len && i < 30; ++i) printf("%u ", rbsp[i]);
+	putchar('\n');
+
+	puts("bits:");
+	for (size_t i = 0; i < rbsp_len && i < 30; ++i)
+	{
+		print_bits((unsigned char)rbsp[i]);
+		putchar('|');
+	}
+	putchar('\n');*/
+
+	bs_t b = { 0 };
+	sps_t sps = { 0 };
+
+	bs_init(&b, rbsp, rbsp_len);
+	
+	//puts("bitstream:");
+	//printf("ue1: %d, ue2: %d\n", bs_read_ue(&b), bs_read_ue(&b));
+	//for (size_t i = 0; i < rbsp_len && i < 30; ++i) printf("%u ", bs_read_u8(&b));
+	//putchar('\n');
+
+	read_sps(&sps, &b);
+	//print_sps(&sps);
+
+	int id = sps.seq_parameter_set_id;
+	if (id < 0 || id >= MAX_SPS_IDS)
+	{
+		printf("[vulkan_decode] Id of read SPS is out of bounds (%d)! Discarting it.\n", id);
+		destroy_rbsp(rbsp);
+		return false;
+	}
+
+	assert(s->sps_array != NULL);
+	s->sps_array[id] = sps;
+
+	destroy_rbsp(rbsp);
+	return true;
+}
+
+static bool handle_pps_nalu(struct state_vulkan_decompress *s, const unsigned char *nal_payload, size_t len)
+{
+	// reads picture parameters set from given buffer range
+	
+	uint8_t *rbsp = NULL;
+	int rbsp_len = 0;
+
+	if (!create_rbsp(nal_payload, len, &rbsp, &rbsp_len))
+	{
+		//err should get printed inside of create_rbsp
+		return false;
+	}
+	assert(rbsp != NULL);
+
+	/*printf("reading pps - payload len: %u (converted: %d), rbsp_len: %d\n", len, nal_payload_len, rbsp_len);
+	puts("nal_payload:");
+	for (size_t i = 0; i < len && i < 30; ++i) printf("%u ", nal_payload[i]);
+	putchar('\n');
+	puts("rbsp:");
+	for (size_t i = 0; i < rbsp_len && i < 30; ++i) printf("%u ", rbsp[i]);
+	putchar('\n');
+
+	puts("bits:");
+	for (size_t i = 0; i < rbsp_len && i < 30; ++i)
+	{
+		print_bits((unsigned char)rbsp[i]);
+		putchar('|');
+	}
+	putchar('\n');*/
+
+	bs_t b = { 0 };
+	pps_t pps = { 0 };
+
+	bs_init(&b, rbsp, rbsp_len);
+	
+	//puts("bitstream:");
+	//printf("ue1: %d, ue2: %d\n", bs_read_ue(&b), bs_read_ue(&b));
+	//for (size_t i = 0; i < rbsp_len && i < 30; ++i) printf("%u ", bs_read_u8(&b));
+	//putchar('\n');
+
+	read_pps(&pps, &b);
+	//print_pps(&pps);
+
+	int id = pps.pic_parameter_set_id;
+	if (id < 0 || id >= MAX_PPS_IDS)
+	{
+		printf("[vulkan_decode] Id of read PPS is out of bounds (%d)! Discarting it.\n", id);
+		destroy_rbsp(rbsp);
+		return false;
+	}
+
+	assert(s->pps_array != NULL);
+	s->pps_array[id] = pps;
+
+	destroy_rbsp(rbsp);
+	return true;
+}
+
+static bool handle_sh_nalu(struct state_vulkan_decompress *s, const unsigned char *nal_payload, size_t len,
+						   int nal_type, int nal_idc)
+{
+	// reads slice header from given buffer range
+	
+	uint8_t *rbsp = NULL;
+	int rbsp_len = 0;
+
+	if (!create_rbsp(nal_payload, len, &rbsp, &rbsp_len))
+	{
+		//err should get printed inside of create_rbsp
+		return false;
+	}
+	assert(rbsp != NULL);
+
+	bs_t b = { 0 };
+	slice_header_t sh = { 0 };
+
+	bs_init(&b, rbsp, rbsp_len);
+
+	assert(s->sps_array != NULL);
+	assert(s->pps_array != NULL);
+
+	if (!read_slice_header(&sh, nal_type, nal_idc, s->pps_array, s->sps_array, &b))
+	{
+		printf("[vulkan_decode] Encountered wrong SPS/PPS ids while reading a slice header! Discarting it.\n");
+		destroy_rbsp(rbsp);
+		return false;
+	}
+	print_sh(&sh);
+
+	destroy_rbsp(rbsp);
+	return true;
+}
+
+static uint32_t get_ref_slot_from_queue(struct state_vulkan_decompress *s, uint32_t index)
+{
+	uint32_t wrapped = (s->referenceSlotsQueue_start) + index % MAX_REF_FRAMES;
+	return s->referenceSlotsQueue[wrapped];
+}
+
+/*static VkVideoPictureResourceInfoKHR get_dst_picture_info(struct state_vulkan_decompress *s)
+{
+	//TODO
+	VkVideoPictureResourceInfoKHR info = { .sType = VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR,
+										   .codedOffset = ,
+										   .codedExtent = ,
+										   .baseArrayLayer = 0,
+										   .imageViewBinding = s->dpbView[s->dpbDstPictureIdx] };
+	return info;
+}
+
+static bool fill_ref_picture_infos(VkVideoReferenceSlotInfoKHR refInfos[], VkVideoPictureResourceInfoKHR picInfos[],
+								   uint32_t count, bool isH264)
+{
+	// count is a size of both given arrays (should be at most same as MAX_REF_FRAMES)
+	assert(count <= MAX_REF_FRAMES);
+
+	VkExtent2D videoSize = { s->width, s->height };
+
+	for (uint32_t i = 0; i < count; ++i)
+	{
+		uint32_t slotIndex = get_ref_slot_from_queue(i);
+		assert(slotIndex < MAX_REF_FRAMES + 1);
+		VkImageView view = s->dpbView[slotIndex];
+		assert(view != VK_NULL_HANDLE);
+
+		//TODO infos mustnt be local variables!
+		StdVideoDecodeH264ReferenceInfo h264StdRefInfo = { .flags = ,
+														   .FrameNum = };
+		VkVideoDecodeH264DpbSlotInfoKHR h264RefInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR,
+														.pStdReferenceInfo = &h264StdRefInfo }; //TODO
+		VkVideoDecodeH265DpbSlotInfoKHR h265RefInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_DPB_SLOT_INFO_KHR }; //TODO
+		picInfos[i] = (VkVideoPictureResourceInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR,
+													   .codedOffset = { 0, 0 }, // no offset
+													   .codedExtent = videoSize,
+													   .baseArrayLayer = 0,
+													   .imageViewBinding = view };
+		refInfos[i] = (VkVideoReferenceSlotInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR,
+													 .pNext = isH264 ? (void*)&h264RefInfo : (void*)&h265RefInfo,
+													 .slotIndex = slotIndex, //TODO is it the same slot index?
+													 .pPictureResource = picInfos + i };
+	}
+
+	return true;
+}*/
 
 static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsigned char *src,
                 unsigned int src_len, int frame_seq, struct video_frame_callbacks *callbacks,
@@ -2006,8 +2463,9 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 			size_t nal_payload_len = nal_len - (nal_payload - nal); //should be non-zero now
 
 			int nalu_type = NALU_HDR_GET_TYPE(nal_payload[0], !isH264);
+			int nalu_idc = H264_NALU_HDR_GET_NRI(nal_payload[0]);
 
-			/*printf("\tNALU - input idx: %u, header: (", nal - src);
+			/*printf("\tNALU - input idx: %u, header %u: (", nal - src, nal_payload[0]);
 			print_nalu_header(nal_payload[0]);
 			printf(") type name - ");
 			print_nalu_name(nalu_type);
@@ -2021,9 +2479,12 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 				case NAL_H264_IDR:
 					{
 						puts("\t\tIDR => Decode.");
+						bool sh_ret = handle_sh_nalu(s, nal_payload, nal_payload_len, nalu_type, nalu_idc);
+						UNUSED(sh_ret); //TODO maybe error?
+
 						VkDeviceSize written = write_nalu(nalu_buffer + nalu_buffer_written,
-														nalu_buffer_len - nalu_buffer_written,
-														nal, nal_len);
+														  nalu_buffer_len - nalu_buffer_written,
+														  nal, nal_len);
 						nalu_buffer_written += written;
 						if (written > 0) printf("\t\tWriting success.\n");
 						else printf("\t\tWriting fail.\n");
@@ -2032,6 +2493,9 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 				case NAL_H264_NONIDR:
 					{
 						puts("\t\tNon-IDR => Decode.");
+						bool sh_ret = handle_sh_nalu(s, nal_payload, nal_payload_len, nalu_type, nalu_idc);
+						UNUSED(sh_ret); //TODO maybe error?
+
 						VkDeviceSize written = write_nalu(nalu_buffer + nalu_buffer_written,
 														nalu_buffer_len - nalu_buffer_written,
 														nal, nal_len);
@@ -2041,10 +2505,19 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 					}
 					break; //switch break
 				case NAL_H264_SPS:
-					puts("\t\tSPS => Load SPS."); //TODO sps
+					{
+						puts("\t\tSPS => Load SPS.");
+						bool sps_ret = handle_sps_nalu(s, nal_payload, nal_payload_len);
+						UNUSED(sps_ret); //TODO maybe error?
+					}
 					break; //switch break
 				case NAL_H264_PPS:
-					puts("\t\tPPS => Load PPS."); //TODO pps
+					{
+						puts("\t\tPPS => Load PPS.");
+						bool pps_ret = handle_pps_nalu(s, nal_payload, nal_payload_len);
+						UNUSED(pps_ret); //TODO maybe error?
+					}
+					
 					break; //switch break
 
 				//TODO H.265 NAL unit types
@@ -2069,7 +2542,19 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	//TODO decompress
 	// check - rtp/rtpenc_h264.h, utils/h264_stream.h
 	
-	/*VkVideoDecodeH264PictureInfoKHR h264DecodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PICTURE_INFO_KHR };
+	/*VkVideoPictureResourceInfoKHR dstPictureInfo = get_dst_picture_info(s);
+	VkVideoPictureResourceInfoKHR referencePictureInfos[MAX_REF_FRAMES] = { 0 };
+	VkVideoReferenceSlotInfoKHR referenceSlotInfos[MAX_REF_FRAMES] = { 0 };
+	uint32_t referencePicture_count = s->referenceSlotsQueue_count;
+	
+	assert(referencePicture_count <= MAX_REF_FRAMES);
+	if (!fill_ref_picture_infos(referenceSlotInfos, referencePictureInfos, referencePicture_count, isH264))
+	{
+		//TODO err
+		return res;
+	}
+
+	VkVideoDecodeH264PictureInfoKHR h264DecodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PICTURE_INFO_KHR };
 	VkVideoDecodeH265PictureInfoKHR h265DecodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_PICTURE_INFO_KHR };
 	VkVideoDecodeInfoKHR decodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_INFO_KHR,
 										.pNext = isH264 ? (void*)&h264DecodeInfo : (void*)&h265DecodeInfo,
@@ -2077,11 +2562,11 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 										.srcBuffer = s->decodeBuffer,
 										.srcBufferOffset = 0,
 										.srcBufferRange = nalu_buffer_written,
-
-										.dstPictureResource = ,
-										.pSetupReferenceSlot = ,
-										.referenceSlotCount = , //specifies the needed used references (but not the decoded frame)
-										.pReferenceSlots =  };
+										.dstPictureResource = dstPictureInfo,
+										//specifies the needed used references (but not the decoded frame)
+										.referenceSlotCount = referencePicture_count,
+										.pReferenceSlots = referenceSlotInfos,
+										.pSetupReferenceSlot = NULL };
 	vkCmdDecodeVideoKHR(s->cmdBuffer, &decodeInfo);*/
 
 	if (!end_video_decoding(s))
