@@ -78,6 +78,7 @@ static PFN_vkGetVideoSessionMemoryRequirementsKHR vkGetVideoSessionMemoryRequire
 static PFN_vkBindVideoSessionMemoryKHR vkBindVideoSessionMemoryKHR = NULL;
 static PFN_vkCreateVideoSessionParametersKHR vkCreateVideoSessionParametersKHR = NULL;
 static PFN_vkDestroyVideoSessionParametersKHR vkDestroyVideoSessionParametersKHR = NULL;
+static PFN_vkUpdateVideoSessionParametersKHR vkUpdateVideoSessionParametersKHR = NULL;
 static PFN_vkCmdBeginVideoCodingKHR vkCmdBeginVideoCodingKHR = NULL;
 static PFN_vkCmdEndVideoCodingKHR vkCmdEndVideoCodingKHR = NULL;
 static PFN_vkCmdControlVideoCodingKHR vkCmdControlVideoCodingKHR = NULL;
@@ -157,6 +158,8 @@ static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader
 												loader(instance, "vkCreateVideoSessionParametersKHR");
 	vkDestroyVideoSessionParametersKHR = (PFN_vkDestroyVideoSessionParametersKHR)
 												loader(instance, "vkDestroyVideoSessionParametersKHR");
+	vkUpdateVideoSessionParametersKHR = (PFN_vkUpdateVideoSessionParametersKHR)
+												loader(instance, "vkUpdateVideoSessionParametersKHR");
 	vkCmdBeginVideoCodingKHR = (PFN_vkCmdBeginVideoCodingKHR)loader(instance, "vkCmdBeginVideoCodingKHR");
 	vkCmdEndVideoCodingKHR = (PFN_vkCmdEndVideoCodingKHR)loader(instance, "vkCmdEndVideoCodingKHR");
 	vkCmdControlVideoCodingKHR = (PFN_vkCmdControlVideoCodingKHR)
@@ -199,6 +202,7 @@ static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader
 		   vkCreateVideoSessionKHR && vkDestroyVideoSessionKHR &&
 		   vkGetVideoSessionMemoryRequirementsKHR && vkBindVideoSessionMemoryKHR &&
 		   vkCreateVideoSessionParametersKHR && vkDestroyVideoSessionParametersKHR &&
+		   vkUpdateVideoSessionParametersKHR &&
 		   vkCmdBeginVideoCodingKHR && vkCmdEndVideoCodingKHR &&
 		   vkCmdControlVideoCodingKHR &&
 		   vkMapMemory && vkUnmapMemory &&
@@ -238,12 +242,18 @@ struct state_vulkan_decompress
 	// array of size videoSessionMemory_count, needs to be freed and VkvideoSessionMemory deallocated
 	VkDeviceMemory *videoSessionMemory;
 
+	// Parameters of the video:
+	int depth_chroma, depth_luma;
+	int subsampling; // in the Ultragrid format
+	StdVideoH264ProfileIdc profileIdc; //TODO H.265
 	VkVideoSessionParametersKHR videoSessionParams; // needs to be destroyed if valid
+	//uint32_t videoSessionParams_update_count;
 	// pointers to arrays of sps (length MAX_SPS_IDS), pps (length MAX_PPS_IDS)
 	// could be static arrays but that would take too much memory of this struct
-	sps_t *sps_array;
+	sps_t *sps_array; //TODO maybe better to store already converted vulkan version?
 	pps_t *pps_array;
 
+	// Memory related to decode picture buffer and picture queue
 	VkImage dpb[MAX_REF_FRAMES + 1];			// decoded picture buffer
 	VkImageView dpbViews[MAX_REF_FRAMES + 1];	// dpb image views
 	VkDeviceMemory dpbMemory;					// backing memory for dpb - needs to be freed if valid (destroyed in destroy_dpb)
@@ -253,11 +263,9 @@ struct state_vulkan_decompress
 	uint32_t referenceSlotsQueue_start;			  // index into referenceSlotsQueue where the queue starts
 	uint32_t referenceSlotsQueue_count;			  // the current length of the reference slots queue
 
-	// UltraGrid
-	//video_desc desc;
+	// UltraGrid data
 	int width, height;
-	//int rshift, gshift, bshift;
-	int pitch;
+	int pitch; //USELESS ?
 	codec_t out_codec;
 };
 
@@ -594,6 +602,7 @@ static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s
 			{
 				preferred_queue_family = j;
 				approved = true;
+				break; // the first suitable queue family should be the preferred one
 			}
 		}
 		
@@ -898,6 +907,7 @@ static void * vulkan_decompress_init(void)
 	s->cmdBuffer = VK_NULL_HANDLE;	  //same
 	s->videoSession = VK_NULL_HANDLE; //video session gets created in prepare function
 	s->videoSessionParams = VK_NULL_HANDLE; //same
+	//s->videoSessionParams_update_count = 0;
 	s->videoSessionMemory_count = 0;
 	s->videoSessionMemory = NULL;
 
@@ -1050,6 +1060,10 @@ static int vulkan_decompress_reconfigure(void *state, struct video_desc desc,
 
 	s->prepared = false; //TODO - freeing resources probably needed when s->prepared == true
 	s->sps_vps_found = false;
+	s->depth_chroma = 0;
+	s->depth_luma = 0;
+	s->subsampling = 0;
+	s->profileIdc = STD_VIDEO_H264_PROFILE_IDC_INVALID;
 
 	UNUSED(rshift);
 	UNUSED(gshift);
@@ -1114,6 +1128,39 @@ static VkVideoChromaSubsamplingFlagBitsKHR subsampling_to_vulkan_flag(int subs)
 		case SUBS_444: return VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR;
 		case SUBS_4444: return VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR;
 		default: return VK_VIDEO_CHROMA_SUBSAMPLING_INVALID_KHR;
+	}
+}
+
+static int vulkan_flag_to_subsampling(VkVideoChromaSubsamplingFlagBitsKHR flag)
+{
+	switch(flag)
+	{
+		case VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR: return 4200;
+		case VK_VIDEO_CHROMA_SUBSAMPLING_422_BIT_KHR: return 4220;
+		case VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR: return 4440;
+		default: return 0; // invalid subsampling
+	}
+}
+
+static int h264_flag_to_subsampling(StdVideoH264ChromaFormatIdc flag)
+{
+	switch(flag)
+	{
+		case STD_VIDEO_H264_CHROMA_FORMAT_IDC_420: return 4200;
+		case STD_VIDEO_H264_CHROMA_FORMAT_IDC_422: return 4220;
+		case STD_VIDEO_H264_CHROMA_FORMAT_IDC_444: return 4440;
+		default: return 0; // invalid subsampling
+	}
+}
+
+static int h265_flag_to_subsampling(StdVideoH265ChromaFormatIdc flag)
+{
+	switch(flag)
+	{
+		case STD_VIDEO_H265_CHROMA_FORMAT_IDC_420: return 4200;
+		case STD_VIDEO_H265_CHROMA_FORMAT_IDC_422: return 4220;
+		case STD_VIDEO_H265_CHROMA_FORMAT_IDC_444: return 4440;
+		default: return 0; // invalid subsampling
 	}
 }
 
@@ -1468,47 +1515,67 @@ static void destroy_dpb(struct state_vulkan_decompress *s)
 	s->dpbMemory = VK_NULL_HANDLE;
 }
 
-static bool prepare(struct state_vulkan_decompress *s)
+static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 {
 	printf("vulkan_decode - prepare\n");
 	assert(!s->prepared); //this function should be called only when decompress is not prepared
 
-	struct pixfmt_desc pf_desc = get_pixfmt_desc(s->out_codec); //TODO this should be input_codec not output one!
-	printf("\tpf_desc - depth: %d, subsampling: %d, rgb: %d, accel_type: %d\n",
-				pf_desc.depth, pf_desc.subsampling, pf_desc.rgb, pf_desc.accel_type);
-	
-	if (!pf_desc.depth) //pixel format description is invalid
+	*wrong_pixfmt = false;
+
+	//codec_t in_codec = vulkan_flag_to_codec(s->codecOperation);
+	//struct pixfmt_desc pf_desc = get_pixfmt_desc(in_codec);
+	//printf("\tpf_desc - depth: %d, subsampling: %d, rgb: %d, accel_type: %d\n",
+	//			pf_desc.depth, pf_desc.subsampling, pf_desc.rgb, pf_desc.accel_type);
+	//if (!pf_desc.depth) //pixel format description is invalid
+	//{
+	//	printf("[vulkan_decode] Got invalid pixel format!\n");
+	//	return false;
+	//}
+
+	printf("\tPreparing with - depth: %d %d, subsampling: %d, profile: %d\n",
+			s->depth_chroma, s->depth_luma, s->subsampling, (int)s->profileIdc);
+
+	VkVideoChromaSubsamplingFlagsKHR chromaSubsampling = subsampling_to_vulkan_flag(s->subsampling);
+	if (chromaSubsampling == VK_VIDEO_CHROMA_SUBSAMPLING_INVALID_KHR)
 	{
-		printf("[vulkan_decode] Got invalid pixel format!\n");
+		printf("[vulkan_decode] Got unsupported chroma subsampling!\n");
+		*wrong_pixfmt = true;
+		return false;
+	}
+	//NOTE: Otherwise vulkan video fails to work (on my hardware)
+	else if (chromaSubsampling != VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR)
+	{
+		printf("[vulkan_decode] Wrong chroma subsampling! Currently the only supported one is 4:2:0!\n");
+		*wrong_pixfmt = true;
 		return false;
 	}
 
-	VkVideoChromaSubsamplingFlagsKHR chromaSubsampling = subsampling_to_vulkan_flag(pf_desc.subsampling);
-	if (chromaSubsampling == VK_VIDEO_CHROMA_SUBSAMPLING_INVALID_KHR)
-	{
-		printf("[vulkan_decode] Got unsupported subsampling!\n");
-		return false; //TODO maybe return DECODER_UNSUPP_PIXFMT?
-	}
-
-	VkVideoComponentBitDepthFlagBitsKHR vulkanDepth = depth_to_vulkan_flag(pf_desc.depth);
-	if (vulkanDepth == VK_VIDEO_COMPONENT_BIT_DEPTH_INVALID_KHR)
+	VkVideoComponentBitDepthFlagBitsKHR vulkanChromaDepth = depth_to_vulkan_flag(s->depth_chroma);
+	VkVideoComponentBitDepthFlagBitsKHR vulkanLumaDepth = depth_to_vulkan_flag(s->depth_luma);
+	if (vulkanChromaDepth == VK_VIDEO_COMPONENT_BIT_DEPTH_INVALID_KHR ||
+		vulkanLumaDepth == VK_VIDEO_COMPONENT_BIT_DEPTH_INVALID_KHR)
 	{
 		printf("[vulkan_decode] Got unsupported color channel depth!\n");
-		return false; //TODO maybe return DECODER_UNSUPP_PIXFMT?
+		*wrong_pixfmt = true;
+		return false;
 	}
 
 	assert(s->codecOperation != VK_VIDEO_CODEC_OPERATION_NONE_KHR);
 	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
 
-	//TODO interlacing and stdProfileIdc in h264/h265
-	VkVideoDecodeH264ProfileInfoKHR h264Profile = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PROFILE_INFO_KHR };
-	VkVideoDecodeH265ProfileInfoKHR h265Profile = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_PROFILE_INFO_KHR };
+	//TODO interlacing
+	VkVideoDecodeH264ProfileInfoKHR h264Profile = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PROFILE_INFO_KHR,
+													.stdProfileIdc = s->profileIdc,
+													.pictureLayout = VK_VIDEO_DECODE_H264_PICTURE_LAYOUT_PROGRESSIVE_KHR };
+	VkVideoDecodeH265ProfileInfoKHR h265Profile = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_PROFILE_INFO_KHR,
+													.stdProfileIdc = STD_VIDEO_H265_PROFILE_IDC_MAIN //TODO H.265
+													 };
 	VkVideoProfileInfoKHR videoProfile = { .sType = VK_STRUCTURE_TYPE_VIDEO_PROFILE_INFO_KHR,
 										   .pNext = isH264 ? (void*)&h264Profile : (void*)&h265Profile,
 										   .videoCodecOperation = s->codecOperation,
 										   .chromaSubsampling = chromaSubsampling,
-										   .lumaBitDepth = vulkanDepth,
-										   .chromaBitDepth = vulkanDepth };
+										   .lumaBitDepth = vulkanLumaDepth,
+										   .chromaBitDepth = vulkanChromaDepth };
 	
 	VkVideoDecodeH264CapabilitiesKHR h264Capabilites = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_CAPABILITIES_KHR };
 	VkVideoDecodeH265CapabilitiesKHR h265Capabilites = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_CAPABILITIES_KHR };
@@ -1519,14 +1586,22 @@ static bool prepare(struct state_vulkan_decompress *s)
 	VkResult result = vkGetPhysicalDeviceVideoCapabilitiesKHR(s->physicalDevice, &videoProfile, &videoCapabilities);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to get physical device video capabilities!\n");
-		if (result == VK_ERROR_OUT_OF_HOST_MEMORY) puts("\t- Host out of memory.");
-		else if (result == VK_ERROR_OUT_OF_DEVICE_MEMORY) puts("\t- Device out of memory.");
-		else if (result == VK_ERROR_VIDEO_PICTURE_LAYOUT_NOT_SUPPORTED_KHR) puts("\t- Video picture layout not supported.");
-		else if (result == VK_ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR) puts("\t- Video operation not supported.");
-		else if (result == VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR) puts("\t- Video format not supported.");
-		else if (result == VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR) puts("\t- Video codec not supported.");
-		else printf("\t- Vulkan error: %d\n", result);
+		printf("[vulkan_decode] Failed to get physical device video capabilities!");
+		if (result == VK_ERROR_OUT_OF_HOST_MEMORY) puts(" - Host out of memory.");
+		else if (result == VK_ERROR_OUT_OF_DEVICE_MEMORY) puts(" - Device out of memory.");
+		else if (result == VK_ERROR_VIDEO_PICTURE_LAYOUT_NOT_SUPPORTED_KHR) puts(" - Video picture layout not supported.");
+		else if (result == VK_ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR) puts(" - Video operation not supported.");
+		else if (result == VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR) puts(" - Video format not supported.");
+		else if (result == VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR) puts(" - Video codec not supported.");
+		else printf(" - Vulkan error: %d\n", result);
+		// it's not obvious when to set '*wrong_pixfmt = true;'
+		return false;
+	}
+
+	//TODO allow dpb be implemented using only one VkImage
+	if (!(videoCapabilities.flags & VK_VIDEO_CAPABILITY_SEPARATE_REFERENCE_IMAGES_BIT_KHR))
+	{
+		printf("[vulkan_decode] Chosen physical device does not support separate reference images for DPB!\n");
 		return false;
 	}
 
@@ -1555,7 +1630,9 @@ static bool prepare(struct state_vulkan_decompress *s)
 
 	if (decodeCapabilitiesFlags & VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR)
 	{
-		videoFormatInfo.imageUsage = VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR | VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR;
+		videoFormatInfo.imageUsage = VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR |
+								  	 VK_IMAGE_USAGE_VIDEO_DECODE_SRC_BIT_KHR |
+									 VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR;
 		// err msg should be printed inside of check_for_vulkan_format function 
 		if (!check_for_vulkan_format(s->physicalDevice, videoFormatInfo, s->out_codec, &referencePictureFormatProperties))
 				return false;
@@ -1564,7 +1641,7 @@ static bool prepare(struct state_vulkan_decompress *s)
 		referencePictureFormat = referencePictureFormatProperties.format;
 		pictureFormat = pictureFormatProperites.format;
 	}
-	else if (decodeCapabilitiesFlags & VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_DISTINCT_BIT_KHR)
+	/*else if (decodeCapabilitiesFlags & VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_DISTINCT_BIT_KHR)
 	{
 		
 		videoFormatInfo.imageUsage = VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR;
@@ -1577,7 +1654,7 @@ static bool prepare(struct state_vulkan_decompress *s)
 
 		referencePictureFormat = referencePictureFormatProperties.format;
 		pictureFormat = pictureFormatProperites.format;
-	}
+	}*/
 	else
 	{
 		printf("[vulkan_decode] Unsupported decodeCapabilitiesFlags value (%d)!\n", decodeCapabilitiesFlags);
@@ -1765,7 +1842,6 @@ static bool prepare(struct state_vulkan_decompress *s)
 												.maxDpbSlots = videoCapabilities.maxDpbSlots < MAX_REF_FRAMES ?
 															   videoCapabilities.maxDpbSlots : MAX_REF_FRAMES,
 												.maxActiveReferencePictures = videoCapabilities.maxActiveReferencePictures,
-												//TODO version might be wrong
 												.pStdHeaderVersion = &videoCapabilities.stdHeaderVersion };
 	result = vkCreateVideoSessionKHR(s->device, &sessionInfo, NULL, &s->videoSession);
 	if (result != VK_SUCCESS)
@@ -1788,6 +1864,7 @@ static bool prepare(struct state_vulkan_decompress *s)
 	}
 
 	// ---Creating video session parameters---
+	//TODO probably useless to create them in prepare
 	assert(s->videoSession != VK_NULL_HANDLE);
 
 	VkVideoDecodeH264SessionParametersCreateInfoKHR h264SessionParamsInfo =
@@ -1805,7 +1882,6 @@ static bool prepare(struct state_vulkan_decompress *s)
 																.pNext = isH264 ?
 																			(void*)&h264SessionParamsInfo :
 																			(void*)&h265SessionParamsInfo,
-																.flags = 0,
 																.videoSessionParametersTemplate = VK_NULL_HANDLE,
 																.videoSession = s->videoSession };
 	result = vkCreateVideoSessionParametersKHR(s->device, &sessionParamsInfo, NULL, &s->videoSessionParams);
@@ -1832,6 +1908,7 @@ static bool prepare(struct state_vulkan_decompress *s)
 		
 		return false;
 	}
+	//s->videoSessionParams_update_count = 0; // update sequence count for video params must be resetted to zero
 
 	// ---Allocation needed device memory and binding it to current video session---
 	if (!allocate_memory_for_video_session(s))
@@ -1888,13 +1965,26 @@ static bool start_video_decoding(struct state_vulkan_decompress *s)
 	}
 
 	// ---Begining of video coding---
-	//StdVideoDecodeH264ReferenceInfo h264ReferenceInfo;
+	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
 
+	/*StdVideoDecodeH264ReferenceInfo h264ReferenceInfo = { .flags = ,
+														  .FrameNum = ,
+														  .PicOrderCnt = {} };
+	//TODO
+	VkVideoDecodeH264DpbSlotInfoKHR h264SlotInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR,
+													 .pStdReferenceInfo = &h264ReferenceInfo };
+	VkVideoDecodeH265DpbSlotInfoKHR h265SlotInfo = {};
+	VkVideoReferenceSlotInfoKHR slotInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR,
+											 .pNext = isH264 ? (void*)&h264SlotInfo : (void*)&h265SlotInfo
+											 .slotIndex = ,
+											 .pPictureResource = };*/
+	
 	VkVideoBeginCodingInfoKHR beginCodingInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_BEGIN_CODING_INFO_KHR,
 												  .flags = 0,
 												  .videoSession = s->videoSession,
 												  .videoSessionParameters = s->videoSessionParams,
-												  .referenceSlotCount = 0 };
+												  .referenceSlotCount = 0,
+												  .pReferenceSlots = NULL };
 	vkCmdBeginVideoCodingKHR(s->cmdBuffer, &beginCodingInfo);
 
 	VkVideoCodingControlInfoKHR vidCodingControlInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_CODING_CONTROL_INFO_KHR,
@@ -2022,39 +2112,6 @@ static void print_nalu_header(unsigned char header)
 				H264_NALU_HDR_GET_NRI(header), H264_NALU_HDR_GET_TYPE(header));
 }
 
-static bool search_for_first_sps_vps(const unsigned char *src, size_t src_len, bool isH264)
-{
-	// looks if the input stream contains SPS (or VPS for H.265) NAL units
-	//TODO
-	const unsigned char *nal = get_next_nal(src, src_len, true), *next_nal = NULL;
-	while (nal != NULL)
-	{
-		const unsigned char *nal_payload = skip_nal_start_code(nal);
-		if (nal_payload == NULL)
-		{
-			return false;
-		}
-
-		next_nal = get_next_nal(nal_payload, src_len - (nal_payload - src), true);
-
-		int nalu_type = NALU_HDR_GET_TYPE(nal_payload[0], !isH264);
-		if (isH264 &&
-			nalu_type == NAL_H264_SPS)
-		{
-			return true;
-		}
-		else if (!isH264 &&
-				 (nalu_type == NAL_HEVC_SPS || nalu_type == NAL_HEVC_VPS))
-		{
-			return true;
-		}
-
-		nal = next_nal;
-	}
-
-	return false;
-}
-
 static bool create_rbsp(const unsigned char *nal, size_t nal_len, uint8_t **rbsp, int *rbsp_len)
 {
 	// allocates memory for rbsp and fills it with correct rbsp corresponding to given nal buffer range
@@ -2103,6 +2160,99 @@ static void destroy_rbsp(uint8_t *rbsp)
 	free(rbsp);
 }
 
+static bool get_video_info_from_sps(struct state_vulkan_decompress *s, const unsigned char *sps_src, size_t sps_src_len)
+{
+	uint8_t *rbsp = NULL;
+	int rbsp_len = 0;
+
+	if (!create_rbsp(sps_src, sps_src_len, &rbsp, &rbsp_len))
+	{
+		//err should get printed inside of create_rbsp
+		return false;
+	}
+	assert(rbsp != NULL);
+
+	sps_t sps = { 0 };
+	bs_t b = { 0 };
+	bs_init(&b, rbsp, rbsp_len);
+
+	read_sps(&sps, &b);
+	destroy_rbsp(rbsp);
+
+	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
+
+	s->depth_chroma = sps.bit_depth_chroma_minus8 + 8;
+	s->depth_luma = sps.bit_depth_luma_minus8 + 8;
+	s->subsampling = isH264 ? h264_flag_to_subsampling((StdVideoH264ChromaFormatIdc)sps.chroma_format_idc)
+							: h265_flag_to_subsampling((StdVideoH265ChromaFormatIdc)sps.chroma_format_idc);
+	s->profileIdc = profile_idc_to_h264_flag(sps.profile_idc); //TODO H.265
+
+	//printf("Profile IDC - sps: %d, state: %d\n", sps.profile_idc, (int)s->profileIdc);
+
+	if (s->profileIdc == STD_VIDEO_H264_PROFILE_IDC_INVALID ||
+		s->depth_chroma < 8 ||
+		s->depth_luma < 8 ||
+		s->subsampling <= 0)
+	{
+		s->depth_chroma = 0;
+		s->depth_luma = 0;
+		s->subsampling = 0;
+		s->profileIdc = STD_VIDEO_H264_PROFILE_IDC_INVALID;
+
+		return false;
+	}
+
+	return true;
+}
+
+static bool find_first_sps_vps(struct state_vulkan_decompress *s, const unsigned char *src, size_t src_len)
+{
+	// looks if the input stream contains SPS (or VPS for H.265) NAL units
+	// if it does then it fill video information into the decompress state and returns true,
+	// otherwise returns false and prints error msg if error happened
+	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
+
+	const unsigned char *nal = get_next_nal(src, src_len, true), *next_nal = NULL;
+	while (nal != NULL)
+	{
+		const unsigned char *nal_payload = skip_nal_start_code(nal);
+		if (nal_payload == NULL) return false;
+
+		next_nal = get_next_nal(nal_payload, src_len - (nal_payload - src), true);
+		size_t nal_len = next_nal == NULL ? src_len - (nal - src) : next_nal - nal;
+		if (nal_len <= 4 || (size_t)(nal_payload - nal) >= nal_len) //TODO weird?
+		{
+			printf("[vulkan_decode] NAL unit is too short.\n");
+			return false;
+		}
+
+		size_t nal_payload_len = nal_len - (nal_payload - nal); //should be non-zero now
+
+		int nalu_type = NALU_HDR_GET_TYPE(nal_payload[0], !isH264);
+		if (isH264 &&
+			nalu_type == NAL_H264_SPS)
+		{
+			//TODO
+			if (!get_video_info_from_sps(s, nal_payload, nal_payload_len))
+			{
+				printf("[vulkan_decode] Found first SPS, but it was invalid! Discarting it.\n");
+				return false;
+			}
+
+			return true;
+		}
+		else if (!isH264 &&
+				 (nalu_type == NAL_HEVC_SPS || nalu_type == NAL_HEVC_VPS))
+		{
+			return true;
+		}
+
+		nal = next_nal;
+	}
+
+	return false;
+}
+
 static void * begin_nalu_writing(struct state_vulkan_decompress *s)
 {
 	void *memoryPtr = NULL;
@@ -2141,7 +2291,83 @@ static void end_nalu_writing(struct state_vulkan_decompress *s)
 	vkUnmapMemory(s->device, s->decodeBufferMemory);
 }
 
-static bool handle_sps_nalu(struct state_vulkan_decompress *s, const unsigned char *nal_payload, size_t len)
+static bool update_video_session_params(struct state_vulkan_decompress *s, bool isH264,
+										sps_t *added_sps,// uint32_t added_sps_count,
+										pps_t *added_pps)// uint32_t added_pps_count)
+{
+	assert(s->device != VK_NULL_HANDLE && s->videoSession != VK_NULL_HANDLE);
+
+	StdVideoH264SequenceParameterSet vk_sps = { 0 };
+	StdVideoH264SequenceParameterSetVui vk_vui = { 0 };
+	StdVideoH264HrdParameters vk_hrd = { 0 };
+	StdVideoH264PictureParameterSet vk_pps = { 0 };
+	StdVideoH264ScalingLists vk_scalinglist = { 0 };
+
+	uint32_t added_sps_count = 0;
+	if (added_sps != NULL)
+	{
+		sps_to_vk_sps(added_sps, &vk_sps, &vk_vui, &vk_hrd);
+		added_sps_count = 1;
+	}
+
+	uint32_t added_pps_count = 0;
+	if (added_pps != NULL)
+	{
+		pps_to_vk_pps(added_pps, &vk_pps, &vk_scalinglist);
+		added_pps_count = 1;
+	}
+
+	VkVideoDecodeH264SessionParametersAddInfoKHR h264AddInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_SESSION_PARAMETERS_ADD_INFO_KHR,
+																 .stdSPSCount = added_sps_count,
+																 .pStdSPSs = &vk_sps,
+																 .stdPPSCount = added_pps_count,
+																 .pStdPPSs = &vk_pps };
+	//TODO H.265
+	VkVideoDecodeH265SessionParametersAddInfoKHR h265AddInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_SESSION_PARAMETERS_ADD_INFO_KHR,
+																 //.stdSPSCount = added_sps_count,
+																 //.pStdSPSs = &vk_sps,
+																 //.stdPPSCount = added_pps_count,
+																 //.pStdPPSs = &vk_pps
+																};
+	VkVideoDecodeH264SessionParametersCreateInfoKHR h264CreateInfo =
+					{ .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_SESSION_PARAMETERS_CREATE_INFO_KHR,
+					  .maxStdSPSCount = MAX_SPS_IDS,
+					  .maxStdPPSCount = MAX_PPS_IDS,
+					  .pParametersAddInfo = &h264AddInfo };
+	//TODO H.265
+	VkVideoDecodeH265SessionParametersCreateInfoKHR h265CreateInfo =
+					{ .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_SESSION_PARAMETERS_CREATE_INFO_KHR,
+					  .maxStdVPSCount = MAX_VPS_IDS,
+					  .maxStdSPSCount = MAX_SPS_IDS,
+					  .maxStdPPSCount = MAX_PPS_IDS,
+					  .pParametersAddInfo = &h265AddInfo };
+	VkVideoSessionParametersCreateInfoKHR createInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_SESSION_PARAMETERS_CREATE_INFO_KHR,
+														 .pNext = isH264 ? (void*)&h264CreateInfo : (void*)&h265CreateInfo,
+														 .videoSessionParametersTemplate = s->videoSessionParams,
+														 .videoSession = s->videoSession };
+	VkVideoSessionParametersKHR newVideoSessionParams = VK_NULL_HANDLE;
+	VkResult result = vkCreateVideoSessionParametersKHR(s->device, &createInfo, NULL, &newVideoSessionParams);
+	if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to update vulkan video session parameters!\n");
+		return false;
+	}
+
+	if (s->videoSessionParams != VK_NULL_HANDLE)
+	{
+		if (vkDestroyVideoSessionParametersKHR != NULL)
+		{
+			vkDestroyVideoSessionParametersKHR(s->device, s->videoSessionParams, NULL);
+		}
+		s->videoSessionParams = VK_NULL_HANDLE;
+	}
+
+	assert(newVideoSessionParams != VK_NULL_HANDLE);
+	s->videoSessionParams = newVideoSessionParams;
+	return true;
+}
+
+static bool handle_sps_nalu(struct state_vulkan_decompress *s, const unsigned char *nal_payload, size_t len, bool isH264)
 {
 	// reads sequence parameters set from given buffer range
 	
@@ -2182,24 +2408,26 @@ static bool handle_sps_nalu(struct state_vulkan_decompress *s, const unsigned ch
 	//putchar('\n');
 
 	read_sps(&sps, &b);
-	//print_sps(&sps);
+	destroy_rbsp(rbsp);
+	b = (bs_t){ 0 }; // just to be sure
+	print_sps(&sps);
 
 	int id = sps.seq_parameter_set_id;
 	if (id < 0 || id >= MAX_SPS_IDS)
 	{
 		printf("[vulkan_decode] Id of read SPS is out of bounds (%d)! Discarting it.\n", id);
-		destroy_rbsp(rbsp);
 		return false;
 	}
 
+	//TODO array is probably useless?
 	assert(s->sps_array != NULL);
 	s->sps_array[id] = sps;
 
-	destroy_rbsp(rbsp);
-	return true;
+	// potential err msg should get printed inside of update_video_session_params
+	return update_video_session_params(s, isH264, &sps, NULL);
 }
 
-static bool handle_pps_nalu(struct state_vulkan_decompress *s, const unsigned char *nal_payload, size_t len)
+static bool handle_pps_nalu(struct state_vulkan_decompress *s, const unsigned char *nal_payload, size_t len, bool isH264)
 {
 	// reads picture parameters set from given buffer range
 	
@@ -2240,6 +2468,8 @@ static bool handle_pps_nalu(struct state_vulkan_decompress *s, const unsigned ch
 	//putchar('\n');
 
 	read_pps(&pps, &b);
+	destroy_rbsp(rbsp);
+	b = (bs_t){ 0 }; // just to be sure
 	//print_pps(&pps);
 
 	int id = pps.pic_parameter_set_id;
@@ -2250,11 +2480,12 @@ static bool handle_pps_nalu(struct state_vulkan_decompress *s, const unsigned ch
 		return false;
 	}
 
+	//TODO array is probably useless?
 	assert(s->pps_array != NULL);
 	s->pps_array[id] = pps;
 
-	destroy_rbsp(rbsp);
-	return true;
+	// potential err msg should get printed inside of update_video_session_params
+	return update_video_session_params(s, isH264, NULL, &pps);
 }
 
 static bool handle_sh_nalu(struct state_vulkan_decompress *s, const unsigned char *nal_payload, size_t len,
@@ -2286,7 +2517,7 @@ static bool handle_sh_nalu(struct state_vulkan_decompress *s, const unsigned cha
 		destroy_rbsp(rbsp);
 		return false;
 	}
-	print_sh(&sh);
+	//print_sh(&sh);
 
 	destroy_rbsp(rbsp);
 	return true;
@@ -2300,10 +2531,11 @@ static uint32_t get_ref_slot_from_queue(struct state_vulkan_decompress *s, uint3
 
 /*static VkVideoPictureResourceInfoKHR get_dst_picture_info(struct state_vulkan_decompress *s)
 {
-	//TODO
+	VkExtent2D videoSize = { s->width, s->height };
+
 	VkVideoPictureResourceInfoKHR info = { .sType = VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR,
-										   .codedOffset = ,
-										   .codedExtent = ,
+										   .codedOffset = { 0, 0 }, // no offset
+										   .codedExtent = videoSize,
 										   .baseArrayLayer = 0,
 										   .imageViewBinding = s->dpbView[s->dpbDstPictureIdx] };
 	return info;
@@ -2359,33 +2591,10 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	if (s->out_codec == VIDEO_CODEC_NONE)
 	{
 		printf("\tProbing...\n");
-		//TODO make prepare-video-profile and return pixfmt_desc from it
-		//TODO this assumes same codec for input and output
-		codec_t pf = vulkan_flag_to_codec(s->codecOperation);
-		if (pf == VIDEO_CODEC_NONE)
-		{
-			printf("[vulkan_decode] Unsupported codec operation!\n");
-			return res;
-		}
-		
-		struct pixfmt_desc pf_desc = get_pixfmt_desc(pf);
 
-		if (pf_desc.rgb) //decode operations only defined for YCbCr format
-		{
-			printf("[vulkan_decode] RGB is not supported!\n");
-			return DECODER_UNSUPP_PIXFMT;
-		}
-
-		*internal_prop = pf_desc;
+		*internal_prop = get_pixfmt_desc(I420);
 		return DECODER_GOT_CODEC;
 	}
-
-	if (!s->prepared && !prepare(s))
-	{
-		printf("\tFailed to prepare for decompress.\n");
-		return res;
-	}
-	s->prepared = true;
 
 	if (src_len <= 5)
 	{
@@ -2393,37 +2602,42 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 		return res;
 	}
 
-	assert(s->codecOperation != VK_VIDEO_CODEC_OPERATION_NONE_KHR);
-	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
+	/*unsigned format = src[src_len - 2];
+	int av_depth = 8 + (format >> 4) * 2;
+	int subs_a = ((format >> 2) & 0x3) + 1;
+	int subs_b = ((format >> 1) & 0x1) * subs_a;
+	int av_subsampling = 4000 + subs_a * 100 + subs_b * 10;
+	int av_rgb = format & 0x1;
+	printf("forced pixfmt - depth: %d, subs: %d, rg: %d\n", av_depth, av_subsampling, av_rgb);*/
 
-	if (!s->sps_vps_found && !search_for_first_sps_vps(src, src_len, isH264))
+	assert(s->codecOperation != VK_VIDEO_CODEC_OPERATION_NONE_KHR);
+
+	if (!s->sps_vps_found && !find_first_sps_vps(s, src, src_len))
 	{
 		puts("\tStill no SPS or VPS found.");
 		return res;
 	}
 	s->sps_vps_found = true;
-
-	assert(s->cmdBuffer != VK_NULL_HANDLE);
-	assert(s->videoSession != VK_NULL_HANDLE);
-	assert(s->videoSessionParams != VK_NULL_HANDLE);
-
-	if (!start_video_decoding(s))
-	{
-		printf("[vulkan_decode] Failed to start video decoding!\n");
-		return res;
-	}
 	
-	//UNUSED(src);
 	UNUSED(dst);
-	//UNUSED(src_len);
 	UNUSED(frame_seq);
 
-	printf("\t4 bytes: %u %u %u %u\n", src[0], src[1], src[2], src[3]);
-	printf("\t5th btyte: %u\n", src[4]);
-	printf("\tlast byte: %u - ", src[src_len - 1]);
-	print_bits(src[src_len - 1]);
-	putchar('\n');
+	bool wrong_pixfmt = false;
+	if (!s->prepared && !prepare(s, &wrong_pixfmt))
+	{
+		if (wrong_pixfmt)
+		{
+			printf("\tFailed to prepare for decompress - wrong pixel format.\n");
+			return DECODER_UNSUPP_PIXFMT;
+		}
 
+		printf("\tFailed to prepare for decompress.\n");
+		return res;
+	}
+	s->prepared = true;
+
+	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
+	
 	// ---Copying NAL units into s->decodeBuffer---
 	VkDeviceSize nalu_buffer_written = 0;
 	VkDeviceSize nalu_buffer_len = s->decodeBufferSize;
@@ -2441,8 +2655,6 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 
 		while (nal != NULL)
 		{
-			//printf("\t4 bytes: %u %u %u %u\n", nal[0], nal[1], nal[2], nal[3]);
-			//printf("\t5th btyte: %u\n", nal[4]);
 			const unsigned char *nal_payload = skip_nal_start_code(nal);
 			if (nal_payload == NULL)
 			{
@@ -2507,14 +2719,14 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 				case NAL_H264_SPS:
 					{
 						puts("\t\tSPS => Load SPS.");
-						bool sps_ret = handle_sps_nalu(s, nal_payload, nal_payload_len);
+						bool sps_ret = handle_sps_nalu(s, nal_payload, nal_payload_len, isH264);
 						UNUSED(sps_ret); //TODO maybe error?
 					}
 					break; //switch break
 				case NAL_H264_PPS:
 					{
 						puts("\t\tPPS => Load PPS.");
-						bool pps_ret = handle_pps_nalu(s, nal_payload, nal_payload_len);
+						bool pps_ret = handle_pps_nalu(s, nal_payload, nal_payload_len, isH264);
 						UNUSED(pps_ret); //TODO maybe error?
 					}
 					
@@ -2527,17 +2739,23 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 					break; //switch break
 			}
 
-			//printf("nal idx: %u", nal - src);
-			//if (next_nal == NULL) printf(" next_nal is (null)\n");
-			//else printf(" next_nal idx: %u\n", next_nal - src);
-
 			nal = next_nal;
 		}
 	}
 	end_nalu_writing(s); //TODO check for err flag here
-	printf("\tEnd of NALU writing. NAL buffer size: %u, bytes written: %u\n",
-			nalu_buffer_len, nalu_buffer_written);
-	assert(nalu_buffer_written <= nalu_buffer_len);
+	//printf("\tEnd of NALU writing. NAL buffer size: %u, bytes written: %u\n",
+	//		nalu_buffer_len, nalu_buffer_written);
+ 	assert(nalu_buffer_written <= nalu_buffer_len);
+
+	assert(s->cmdBuffer != VK_NULL_HANDLE);
+	assert(s->videoSession != VK_NULL_HANDLE);
+	assert(s->videoSessionParams != VK_NULL_HANDLE);
+
+	if (!start_video_decoding(s))
+	{
+		printf("[vulkan_decode] Failed to start video decoding!\n");
+		return res;
+	}
 
 	//TODO decompress
 	// check - rtp/rtpenc_h264.h, utils/h264_stream.h
