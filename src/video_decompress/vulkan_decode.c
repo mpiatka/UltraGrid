@@ -16,8 +16,8 @@
 #include "video_decompress.h"
 
 #include "utils/bs.h"
-#include "rtp/rtpdec_h264.h"	//TODO
-#include "rtp/rtpenc_h264.h"	//TODO
+#include "rtp/rtpdec_h264.h"	//?
+#include "rtp/rtpenc_h264.h"	//?
 
 //#include <windows.h> //LoadLibrary
 
@@ -49,6 +49,9 @@ static PFN_vkDestroyInstance vkDestroyInstance = NULL;
 static PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT = NULL;
 static PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT = NULL;
 #endif
+static PFN_vkGetPhysicalDeviceFeatures vkGetPhysicalDeviceFeatures = NULL;
+static PFN_vkGetPhysicalDeviceFeatures2 vkGetPhysicalDeviceFeatures2 = NULL;
+static PFN_vkGetPhysicalDeviceQueueFamilyProperties2 vkGetPhysicalDeviceQueueFamilyProperties2 = NULL;
 static PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices = NULL;
 static PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties = NULL;
 static PFN_vkGetPhysicalDeviceProperties2KHR vkGetPhysicalDeviceProperties2KHR = NULL;
@@ -98,6 +101,9 @@ static PFN_vkBindImageMemory vkBindImageMemory = NULL;
 static PFN_vkCreateImageView vkCreateImageView = NULL;
 static PFN_vkDestroyImageView vkDestroyImageView = NULL;
 static PFN_vkCmdDecodeVideoKHR vkCmdDecodeVideoKHR = NULL;
+static PFN_vkCmdPipelineBarrier2KHR vkCmdPipelineBarrier2KHR = NULL;
+static PFN_vkCmdCopyImageToBuffer vkCmdCopyImageToBuffer = NULL;
+static PFN_vkGetPhysicalDeviceFormatProperties vkGetPhysicalDeviceFormatProperties = NULL;
 
 static bool load_vulkan_functions_globals(PFN_vkGetInstanceProcAddr loader)
 {
@@ -120,6 +126,12 @@ static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader
 	vkDestroyDebugUtilsMessengerEXT = (PFN_vkDestroyDebugUtilsMessengerEXT)
 										loader(instance, "vkDestroyDebugUtilsMessengerEXT");
 	#endif
+	vkGetPhysicalDeviceFeatures = (PFN_vkGetPhysicalDeviceFeatures)
+										loader(instance, "vkGetPhysicalDeviceFeatures");
+	vkGetPhysicalDeviceFeatures2 = (PFN_vkGetPhysicalDeviceFeatures2)
+										loader(instance, "vkGetPhysicalDeviceFeatures2");
+	vkGetPhysicalDeviceQueueFamilyProperties2 = (PFN_vkGetPhysicalDeviceQueueFamilyProperties2)
+										loader(instance, "vkGetPhysicalDeviceQueueFamilyProperties2");
 	vkEnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)
 										loader(instance, "vkEnumeratePhysicalDevices");
 	vkGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)
@@ -182,13 +194,18 @@ static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader
 	vkCreateImageView = (PFN_vkCreateImageView)loader(instance, "vkCreateImageView");
 	vkDestroyImageView = (PFN_vkDestroyImageView)loader(instance, "vkDestroyImageView");
 	vkCmdDecodeVideoKHR = (PFN_vkCmdDecodeVideoKHR)loader(instance, "vkCmdDecodeVideoKHR");
+	vkCmdCopyImageToBuffer = (PFN_vkCmdCopyImageToBuffer)loader(instance, "vkCmdCopyImageToBuffer");
+	vkCmdPipelineBarrier2KHR = (PFN_vkCmdPipelineBarrier2)loader(instance, "vkCmdPipelineBarrier2KHR");
+	vkGetPhysicalDeviceFormatProperties = (PFN_vkGetPhysicalDeviceFormatProperties)
+												loader(instance, "vkGetPhysicalDeviceFormatProperties");
 
 	return vkDestroyInstance &&
 	#ifdef VULKAN_VALIDATE
 		   vkCreateDebugUtilsMessengerEXT && vkDestroyDebugUtilsMessengerEXT &&
 	#endif
-		   vkEnumeratePhysicalDevices && vkGetPhysicalDeviceProperties &&
-		   vkGetPhysicalDeviceProperties2KHR &&
+		   vkGetPhysicalDeviceFeatures && vkGetPhysicalDeviceFeatures2 &&
+		   vkGetPhysicalDeviceQueueFamilyProperties2 && vkEnumeratePhysicalDevices &&
+		   vkGetPhysicalDeviceProperties && vkGetPhysicalDeviceProperties2KHR &&
 		   vkCreateDevice && vkDestroyDevice &&
 		   vkEnumerateDeviceExtensionProperties &&
 		   vkGetDeviceQueue &&
@@ -216,7 +233,9 @@ static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader
 		   vkCreateImage && vkDestroyImage && 
 		   vkGetImageMemoryRequirements && vkBindImageMemory &&
 		   vkCreateImageView && vkDestroyImageView &&
-		   vkCmdDecodeVideoKHR;
+		   vkCmdDecodeVideoKHR &&
+		   vkCmdCopyImageToBuffer && vkCmdPipelineBarrier2KHR &&
+		   vkGetPhysicalDeviceFormatProperties;
 }
 
 typedef struct	// structure used to pass around variables related to currently decoded frame (slice)
@@ -246,9 +265,12 @@ struct state_vulkan_decompress
 	bool prepared, sps_vps_found, resetVideoCoding;
 	VkFence fence;
 	VkBuffer decodeBuffer;						// needs to be destroyed if valid
-	VkDeviceMemory decodeBufferMemory;			// needs to be freed if valid
 	VkDeviceSize decodeBufferSize;
 	VkDeviceSize decodeBufferOffsetAlignment;
+	VkBuffer dstPicBuffer;						// needs to be destroyed if valid
+	VkDeviceSize dstPicBufferSize;
+	VkDeviceSize dstPicBufferMemoryOffset;		// offset of dstPicBuffer in the bufferMemory
+	VkDeviceMemory bufferMemory;				// allocated memory fot both decodeBuffer and dstPicBuffer, needs to be freed if valid
 	VkCommandPool commandPool;					// needs to be destroyed if valid
 	VkCommandBuffer cmdBuffer;
 	VkVideoSessionKHR videoSession;				// needs to be destroyed if valid
@@ -285,7 +307,7 @@ struct state_vulkan_decompress
 	codec_t out_codec;
 };
 
-static bool end_video_decoding(struct state_vulkan_decompress *s);
+static void free_buffers(struct state_vulkan_decompress *s);
 static void destroy_dpb(struct state_vulkan_decompress *s);
 
 static bool check_for_instance_extensions(const char * const requiredInstanceextensions[])
@@ -525,17 +547,6 @@ static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s
 	// returns VK_NULL_HANDLE and does not set queue_family if no suitable physical device found
 	assert(devices_count > 0);
 
-	//TODO move those to global
-	/*PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties =
-					(PFN_vkGetPhysicalDeviceProperties)s->loader(s->instance, "vkGetPhysicalDeviceProperties");
-	assert(vkGetPhysicalDeviceProperties != NULL);*/
-	PFN_vkGetPhysicalDeviceFeatures vkGetPhysicalDeviceFeatures =
-					(PFN_vkGetPhysicalDeviceFeatures)s->loader(s->instance, "vkGetPhysicalDeviceFeatures");
-	assert(vkGetPhysicalDeviceFeatures != NULL);
-	PFN_vkGetPhysicalDeviceQueueFamilyProperties2 vkGetPhysicalDeviceQueueFamilyProperties2 =
-					(PFN_vkGetPhysicalDeviceQueueFamilyProperties2)s->loader(s->instance, "vkGetPhysicalDeviceQueueFamilyProperties2");
-	assert(vkGetPhysicalDeviceQueueFamilyProperties2 != NULL);
-
 	VkPhysicalDevice chosen = VK_NULL_HANDLE;
 
 	for (uint32_t i = 0; i < devices_count; ++i)
@@ -544,13 +555,21 @@ static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s
 		vkGetPhysicalDeviceProperties(devices[i], &deviceProperties);
 		printf("Device %d: '%s'\n", deviceProperties.deviceID, deviceProperties.deviceName);
 
-		//TODO deviceFeatures
-		//VkPhysicalDeviceFeatures deviceFeatures;
-		//vkGetPhysicalDeviceFeatures(devices[i], &deviceFeatures);
-
 		if (!check_for_device_extensions(devices[i], requiredDeviceExtensions))
 		{
 			printf("\tDevice does not have required extensions.\n");
+			continue;
+		}
+
+		VkPhysicalDeviceVulkan13Features deviceFeatures13 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
+		VkPhysicalDeviceFeatures2 deviceFeatures = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+													 .pNext = (void*)&deviceFeatures13 };
+		vkGetPhysicalDeviceFeatures2(devices[i], &deviceFeatures);
+
+		//TODO better check, maybe make it a parameter?
+		if (!deviceFeatures13.synchronization2 || !deviceFeatures13.maintenance4)
+		{
+			printf("\tDevice does not have required features (synchronization2 and maintenance4)!\n");
 			continue;
 		}
 
@@ -753,7 +772,7 @@ static void * vulkan_decompress_init(void)
 								  .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
 								  .pEngineName = "No Engine",
 								  .engineVersion = VK_MAKE_VERSION(1, 0, 0),
-								  .apiVersion = VK_API_VERSION_1_0 };
+								  .apiVersion = VK_API_VERSION_1_3 };
 	VkInstanceCreateInfo createInfo = { .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
 										.pApplicationInfo = &appInfo,
 										//-1 for not counting the NULL ptr
@@ -890,9 +909,10 @@ static void * vulkan_decompress_init(void)
 												.queueFamilyIndex = s->queueFamilyIdx,
 												.queueCount = 1,
 												.pQueuePriorities = &queue_priorities };
-	//VkPhysicalDeviceFeatures deviceFeatures = { 0 };
+	VkPhysicalDeviceVulkan13Features enabledDeviceFeatures13 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+																 .synchronization2 = 1, .maintenance4 = 1 };
 	VkDeviceCreateInfo createDeviceInfo = { .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-											.pNext = NULL,
+											.pNext = (void*)&enabledDeviceFeatures13,
 											.flags = 0,
 											.queueCreateInfoCount = 1,
 											.pQueueCreateInfos = &queueCreateInfo,
@@ -917,8 +937,9 @@ static void * vulkan_decompress_init(void)
 	vkGetDeviceQueue(s->device, s->queueFamilyIdx, 0, &s->decodeQueue);
 
 	s->fence = VK_NULL_HANDLE;
-	s->decodeBuffer = VK_NULL_HANDLE; //buffer gets created in prepare function
-	s->decodeBufferMemory = VK_NULL_HANDLE;
+	s->decodeBuffer = VK_NULL_HANDLE; //buffers gets created in allocate_buffers function
+	s->dstPicBuffer = VK_NULL_HANDLE;
+	s->bufferMemory = VK_NULL_HANDLE;
 	s->commandPool = VK_NULL_HANDLE;  //command pool gets created in prepare function
 	s->cmdBuffer = VK_NULL_HANDLE;	  //same
 	s->videoSession = VK_NULL_HANDLE; //video session gets created in prepare function
@@ -937,20 +958,6 @@ static void * vulkan_decompress_init(void)
 
 	printf("[vulkan_decode] Initialization finished successfully.\n");
 	return s;
-}
-
-static void free_decode_buffer(struct state_vulkan_decompress *s)
-{
-	//buffer needs to get destroyed first
-	if (vkDestroyBuffer != NULL && s->device != VK_NULL_HANDLE)
-				vkDestroyBuffer(s->device, s->decodeBuffer, NULL);
-	s->decodeBuffer = VK_NULL_HANDLE;
-	s->decodeBufferSize = 0;
-	s->decodeBufferOffsetAlignment = 0;
-
-	if (vkFreeMemory != NULL && s->device != VK_NULL_HANDLE)
-				vkFreeMemory(s->device, s->decodeBufferMemory, NULL);
-	s->decodeBufferMemory = VK_NULL_HANDLE;
 }
 
 static void free_video_session_memory(struct state_vulkan_decompress *s)
@@ -987,7 +994,7 @@ static void vulkan_decompress_done(void *state)
 	if (vkDestroyCommandPool != NULL && s->device != VK_NULL_HANDLE)
 			vkDestroyCommandPool(s->device, s->commandPool, NULL);
 
-	free_decode_buffer(s);
+	free_buffers(s);
 
 	if (vkDestroyFence != NULL && s->device != VK_NULL_HANDLE)
 			vkDestroyFence(s->device, s->fence, NULL);
@@ -1213,8 +1220,21 @@ static VkFormat codec_to_vulkan_format(codec_t codec)
 	}
 }
 
+static bool check_format(const VkVideoFormatPropertiesKHR *props, const VkFormatProperties *extraProps)
+{
+	VkFormatFeatureFlags optFlags = extraProps->optimalTilingFeatures;
+	
+	return props->format == VK_FORMAT_G8_B8R8_2PLANE_420_UNORM && //TODO allow different formats
+		   optFlags & VK_FORMAT_FEATURE_VIDEO_DECODE_DPB_BIT_KHR &&
+		   optFlags & VK_FORMAT_FEATURE_VIDEO_DECODE_OUTPUT_BIT_KHR && //only for VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR
+		   optFlags & VK_FORMAT_FEATURE_TRANSFER_SRC_BIT_KHR;
+}
+
+//TODO delete:
+static void print_bits(unsigned char num);
+
 static bool check_for_vulkan_format(VkPhysicalDevice physDevice, VkPhysicalDeviceVideoFormatInfoKHR videoFormatInfo,
-									codec_t codec, VkVideoFormatPropertiesKHR *formatProperties)
+									VkVideoFormatPropertiesKHR *formatProperties)
 {
 	uint32_t properties_count = 0;
 
@@ -1250,13 +1270,32 @@ static bool check_for_vulkan_format(VkPhysicalDevice physDevice, VkPhysicalDevic
 	}
 
 	printf("videoFromatProperties_count: %u\n", properties_count);
-	VkFormat wanted = codec_to_vulkan_format(codec);
+	//VkFormat wanted = codec_to_vulkan_format(codec);
 
 	for (uint32_t i = 0; i < properties_count; ++i)
 	{
 		VkFormat format = properties[i].format;
-		printf("\tformat: %d image_type: %d\n", format, properties[i].imageType);
-		if (format == wanted)
+		VkFormatProperties extraProps = { 0 };
+		vkGetPhysicalDeviceFormatProperties(physDevice, format, &extraProps);
+
+		printf("\tformat: %d, image_type: %d, imageCreateFlags: %d, imageTiling: %d, imageUsageFlags: %d\n",
+				format, properties[i].imageType, properties[i].imageCreateFlags, properties[i].imageTiling, properties[i].imageUsageFlags);
+		printf("\tusage flags: ");
+		print_bits((unsigned char)(properties[i].imageUsageFlags >> 8)); 
+		print_bits((unsigned char)properties[i].imageUsageFlags);
+		putchar('\n');
+		
+		bool blitSrc = VK_FORMAT_FEATURE_BLIT_SRC_BIT & extraProps.optimalTilingFeatures ? 1 : 0;
+		bool blitDst = VK_FORMAT_FEATURE_BLIT_DST_BIT & extraProps.optimalTilingFeatures ? 1 : 0;
+		bool decodeOutput = VK_FORMAT_FEATURE_VIDEO_DECODE_OUTPUT_BIT_KHR & extraProps.optimalTilingFeatures ? 1 : 0;
+		bool decodeDPB = VK_FORMAT_FEATURE_VIDEO_DECODE_DPB_BIT_KHR & extraProps.optimalTilingFeatures ? 1 : 0;
+		bool transferSrc = VK_FORMAT_FEATURE_TRANSFER_SRC_BIT_KHR & extraProps.optimalTilingFeatures ? 1 : 0;
+		bool transferDst = VK_FORMAT_FEATURE_TRANSFER_DST_BIT_KHR  & extraProps.optimalTilingFeatures ? 1 : 0;
+		
+		printf("\tblit: %d %d, decode out: %d, decode dpb: %d, transfer: %d %d\n",
+				blitSrc, blitDst, decodeOutput, decodeDPB, transferSrc, transferDst);
+
+		if (check_format(properties + i, &extraProps))
 		{
 			if (formatProperties != NULL) *formatProperties = properties[i];
 			
@@ -1291,6 +1330,133 @@ static bool find_memory_type(struct state_vulkan_decompress *s, uint32_t typeFil
 	}
 
 	return false;
+}
+
+static bool allocate_buffers(struct state_vulkan_decompress *s, VkVideoProfileListInfoKHR videoProfileList,
+							 const VkVideoCapabilitiesKHR videoCapabilities)
+{
+	assert(s->decodeBuffer == VK_NULL_HANDLE);
+	assert(s->dstPicBuffer == VK_NULL_HANDLE);
+	assert(s->bufferMemory == VK_NULL_HANDLE);
+
+	const VkDeviceSize wantedDecodeBufferSize = 1024 * 1024; //TODO magic number, check if smaller than allowed amount
+	VkDeviceSize sizeAlignment = videoCapabilities.minBitstreamBufferSizeAlignment;
+	s->decodeBufferSize = (wantedDecodeBufferSize + (sizeAlignment - 1)) & ~(sizeAlignment - 1); //alignment bit mask magic
+	VkBufferCreateInfo decodeBufferInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+									  		.pNext = (void*)&videoProfileList,
+									  		.flags = 0,
+									  		.usage = VK_BUFFER_USAGE_VIDEO_DECODE_SRC_BIT_KHR,
+									  		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+									  		.size = s->decodeBufferSize,
+									  		.queueFamilyIndexCount = 1,
+									  		.pQueueFamilyIndices = &s->queueFamilyIdx };
+	VkResult result = vkCreateBuffer(s->device, &decodeBufferInfo, NULL, &s->decodeBuffer);
+	if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to create vulkan buffer for decoding!\n");
+		free_buffers(s);
+
+		return false;
+	}
+	s->decodeBufferOffsetAlignment = videoCapabilities.minBitstreamBufferOffsetAlignment;
+
+	s->dstPicBufferSize = 5 * 1024 * 1024; //TODO magic numbers, could be checked too
+	VkBufferCreateInfo picBufferInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+										 .flags = 0,
+										 .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+										 .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+										 .size = s->dstPicBufferSize,
+										 .queueFamilyIndexCount = 1,
+										 .pQueueFamilyIndices = &s->queueFamilyIdx };
+	result = vkCreateBuffer(s->device, &picBufferInfo, NULL, &s->dstPicBuffer);
+	if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to create vulkan buffer for decoded picture!\n");
+		free_buffers(s);
+
+		return false;
+	}
+
+	assert(s->decodeBuffer != VK_NULL_HANDLE);
+	assert(s->dstPicBuffer != VK_NULL_HANDLE);
+
+	VkMemoryRequirements decodeBufferMemReq, picBufferMemReq;
+	vkGetBufferMemoryRequirements(s->device, s->decodeBuffer, &decodeBufferMemReq);
+	vkGetBufferMemoryRequirements(s->device, s->dstPicBuffer, &picBufferMemReq);
+
+	uint32_t memType_idx = 0;
+	if (!find_memory_type(s, decodeBufferMemReq.memoryTypeBits | picBufferMemReq.memoryTypeBits,
+						  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+						  &memType_idx))
+	{
+		printf("[vulkan_decode] Failed to find required memory type for needed vulkan buffers!\n");
+		free_buffers(s);
+
+		return false;
+	}
+
+	s->dstPicBufferMemoryOffset = (decodeBufferMemReq.size + (picBufferMemReq.alignment - 1))
+								   & ~(picBufferMemReq.alignment - 1); //alignment bit mask magic
+	VkDeviceSize memSize = s->dstPicBufferMemoryOffset + picBufferMemReq.size;
+
+	VkMemoryAllocateInfo memAllocInfo = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+										  .allocationSize = memSize,
+										  .memoryTypeIndex = memType_idx };
+	result = vkAllocateMemory(s->device, &memAllocInfo, NULL, &s->bufferMemory);
+	if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to allocate memory for needed vulkan buffers!\n");
+		free_buffers(s);
+
+		return false;
+	}
+
+	assert(s->bufferMemory != VK_NULL_HANDLE);
+
+	result = vkBindBufferMemory(s->device, s->decodeBuffer, s->bufferMemory, 0);
+	if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to bind vulkan memory to vulkan decode buffer!\n");
+		free_buffers(s);
+		
+		return false;
+	}
+
+	result = vkBindBufferMemory(s->device, s->dstPicBuffer, s->bufferMemory, s->dstPicBufferMemoryOffset);
+	if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to bind vulkan memory to vulkan decodec picture buffer!\n");
+		free_buffers(s);
+		
+		return false;
+	}
+
+	return true;
+}
+
+static void free_buffers(struct state_vulkan_decompress *s)
+{
+	//buffers needs to get destroyed first
+	if (vkDestroyBuffer != NULL && s->device != VK_NULL_HANDLE)
+	{
+		vkDestroyBuffer(s->device, s->decodeBuffer, NULL);
+		vkDestroyBuffer(s->device, s->dstPicBuffer, NULL);
+	}
+
+	s->decodeBuffer = VK_NULL_HANDLE;
+	s->decodeBufferSize = 0;
+	s->decodeBufferOffsetAlignment = 0;
+
+	s->dstPicBuffer = VK_NULL_HANDLE;
+	s->dstPicBufferSize = 0;
+	s->dstPicBufferMemoryOffset = 0;
+
+	if (vkFreeMemory != NULL && s->device != VK_NULL_HANDLE)
+	{
+		vkFreeMemory(s->device, s->bufferMemory, NULL);
+	}
+
+	s->bufferMemory = VK_NULL_HANDLE;
 }
 
 static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
@@ -1408,14 +1574,17 @@ static bool create_dpb(struct state_vulkan_decompress *s, VkVideoProfileListInfo
 								  .flags = 0,
 								  .usage = VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR |
 								  		   VK_IMAGE_USAGE_VIDEO_DECODE_SRC_BIT_KHR |
-										   VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR,
+										   VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR |
+										   VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
 								  .imageType = imageType,
 								  .mipLevels = 1,
 								  .samples = VK_SAMPLE_COUNT_1_BIT,
 								  .format = s->dpbFormat,
 								  .extent = videoSize,
 								  .arrayLayers = 1,
+								  //.tiling = VK_IMAGE_TILING_LINEAR,
 								  .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+								  //.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED,
 								  .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
 								  .queueFamilyIndexCount = 1,
 								  .pQueueFamilyIndices = &s->queueFamilyIdx };
@@ -1645,17 +1814,19 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 												   .profileCount = 1,
 												   .pProfiles = &videoProfile };
 	VkPhysicalDeviceVideoFormatInfoKHR videoFormatInfo = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_FORMAT_INFO_KHR,
-														  .pNext = (void*)&videoProfileList };
+														   .pNext = (void*)&videoProfileList };
 
 	assert(s->physicalDevice != VK_NULL_HANDLE);
 
 	if (decodeCapabilitiesFlags & VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR)
 	{
+		// usage from create_dpb
 		videoFormatInfo.imageUsage = VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR |
 								  	 VK_IMAGE_USAGE_VIDEO_DECODE_SRC_BIT_KHR |
-									 VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR;
+									 VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR |
+									 VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 		// err msg should be printed inside of check_for_vulkan_format function 
-		if (!check_for_vulkan_format(s->physicalDevice, videoFormatInfo, s->out_codec, &referencePictureFormatProperties))
+		if (!check_for_vulkan_format(s->physicalDevice, videoFormatInfo, &referencePictureFormatProperties))
 				return false;
 
 		pictureFormatProperites = referencePictureFormatProperties;
@@ -1704,88 +1875,16 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 		return false;
 	}
 
-	// ---Creating decodeBuffer for NAL units---
-	assert(s->decodeBuffer == VK_NULL_HANDLE);
-
-	const VkDeviceSize wantedBufferSize = 1024 * 1024; //TODO magic number, check if smaller than allowed amount
-	s->decodeBufferOffsetAlignment = videoCapabilities.minBitstreamBufferSizeAlignment;
-	s->decodeBufferSize = (wantedBufferSize + (s->decodeBufferOffsetAlignment - 1))
-						  & ~(s->decodeBufferOffsetAlignment - 1); //alignment bit mask magic
-	VkBufferCreateInfo bufferInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-									  .pNext = (void*)&videoProfileList,
-									  .flags = 0,
-									  .usage = VK_BUFFER_USAGE_VIDEO_DECODE_SRC_BIT_KHR, //add VK_BUFFER_USAGE_VERTEX_BUFFER_BIT?
-									  .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-									  .size = s->decodeBufferSize,
-									  .queueFamilyIndexCount = 1,
-									  .pQueueFamilyIndices = &s->queueFamilyIdx };
-	result = vkCreateBuffer(s->device, &bufferInfo, NULL, &s->decodeBuffer);
-	if (result != VK_SUCCESS)
+	// ---Creating decodeBuffer for NAL units and dstPicBuffer for decoded image---
+	if (!allocate_buffers(s, videoProfileList, videoCapabilities))
 	{
-		printf("[vulkan_decode] Failed to create vulkan buffer for decoding!\n");
+		// err msg should get printed inside of allocate_buffers
 		if (vkDestroyFence != NULL)
 		{
 			vkDestroyFence(s->device, s->fence, NULL);
 			s->fence = VK_NULL_HANDLE;
 		}
 
-		return false;
-	}
-	s->decodeBufferOffsetAlignment = videoCapabilities.minBitstreamBufferOffsetAlignment;
-	
-	assert(s->decodeBuffer != VK_NULL_HANDLE);
-
-	VkMemoryRequirements bufferMemoryRequirements;
-	vkGetBufferMemoryRequirements(s->device, s->decodeBuffer, &bufferMemoryRequirements);
-
-	uint32_t bufferMemoryType_idx = 0;
-	if (!find_memory_type(s, bufferMemoryRequirements.memoryTypeBits,
-						  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-						  &bufferMemoryType_idx))
-	{
-		printf("[vulkan_decode] Failed to find required memory type for vulkan buffer!\n");
-		free_decode_buffer(s);
-		if (vkDestroyFence != NULL)
-		{
-			vkDestroyFence(s->device, s->fence, NULL);
-			s->fence = VK_NULL_HANDLE;
-		}
-
-		return false;
-	}
-
-	assert(s->decodeBufferMemory == VK_NULL_HANDLE);
-
-	VkMemoryAllocateInfo bufferAllocInfo = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-											 .allocationSize = bufferMemoryRequirements.size,
-											 .memoryTypeIndex = bufferMemoryType_idx };
-	result = vkAllocateMemory(s->device, &bufferAllocInfo, NULL, &s->decodeBufferMemory);
-	if (result != VK_SUCCESS)
-	{
-		printf("[vulkan_decode] Failed to allocate memory for vulkan buffer!\n");
-		free_decode_buffer(s);
-		if (vkDestroyFence != NULL)
-		{
-			vkDestroyFence(s->device, s->fence, NULL);
-			s->fence = VK_NULL_HANDLE;
-		}
-
-		return false;
-	}
-
-	assert(s->decodeBufferMemory != VK_NULL_HANDLE);
-
-	result = vkBindBufferMemory(s->device, s->decodeBuffer, s->decodeBufferMemory, 0);
-	if (result != VK_SUCCESS)
-	{
-		printf("[vulkan_decode] Failed to bind vulkan memory to vulkan buffer!\n");
-		free_decode_buffer(s);
-		if (vkDestroyFence != NULL)
-		{
-			vkDestroyFence(s->device, s->fence, NULL);
-			s->fence = VK_NULL_HANDLE;
-		}
-		
 		return false;
 	}
 
@@ -1799,7 +1898,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	if (result != VK_SUCCESS)
 	{
 		printf("[vulkan_decode] Failed to create vulkan command pool!\n");
-		free_decode_buffer(s);
+		free_buffers(s);
 		if (vkDestroyFence != NULL)
 		{
 			vkDestroyFence(s->device, s->fence, NULL);
@@ -1823,7 +1922,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 			vkDestroyCommandPool(s->device, s->commandPool, NULL);
 			s->commandPool = VK_NULL_HANDLE;
 		}
-		free_decode_buffer(s);
+		free_buffers(s);
 		if (vkDestroyFence != NULL)
 		{
 			vkDestroyFence(s->device, s->fence, NULL);
@@ -1842,7 +1941,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 			vkDestroyCommandPool(s->device, s->commandPool, NULL);
 			s->commandPool = VK_NULL_HANDLE;
 		}
-		free_decode_buffer(s);
+		free_buffers(s);
 		if (vkDestroyFence != NULL)
 		{
 			vkDestroyFence(s->device, s->fence, NULL);
@@ -1877,7 +1976,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 			vkDestroyCommandPool(s->device, s->commandPool, NULL);
 			s->commandPool = VK_NULL_HANDLE;
 		}
-		free_decode_buffer(s);
+		free_buffers(s);
 		if (vkDestroyFence != NULL)
 		{
 			vkDestroyFence(s->device, s->fence, NULL);
@@ -1925,7 +2024,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 			vkDestroyCommandPool(s->device, s->commandPool, NULL);
 			s->commandPool = VK_NULL_HANDLE;
 		}
-		free_decode_buffer(s);
+		free_buffers(s);
 		if (vkDestroyFence != NULL)
 		{
 			vkDestroyFence(s->device, s->fence, NULL);
@@ -1956,7 +2055,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 			vkDestroyCommandPool(s->device, s->commandPool, NULL);
 			s->commandPool = VK_NULL_HANDLE;
 		}
-		free_decode_buffer(s);
+		free_buffers(s);
 		if (vkDestroyFence != NULL)
 		{
 			vkDestroyFence(s->device, s->fence, NULL);
@@ -1970,11 +2069,8 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	return true;
 }
 
-static bool start_video_decoding(struct state_vulkan_decompress *s, slice_info_t *slice_info)
+static bool begin_cmd_buffer(struct state_vulkan_decompress *s)
 {
-	assert(slice_info->frame_num >= 0 && slice_info->poc_lsb >= 0 && slice_info->pps_id >= 0 && slice_info->sps_id >=0);
-
-	// ---Command buffer into recording state---
 	//maybe pointless since VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT flag
 	VkResult result = vkResetCommandBuffer(s->cmdBuffer, 0);
 	if (result != VK_SUCCESS)
@@ -1992,7 +2088,30 @@ static bool start_video_decoding(struct state_vulkan_decompress *s, slice_info_t
 		return false;
 	}
 
-	// ---Begining of video coding---
+	return true;
+}
+
+static bool end_cmd_buffer(struct state_vulkan_decompress *s)
+{
+	VkResult result = vkEndCommandBuffer(s->cmdBuffer);
+	if (result == VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR)
+	{
+		printf("[vulkan_decode] Failed to end command buffer recording - Invalid video standard parameters\n");
+		return false;
+	}
+	else if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to end command buffer recording!\n");
+		return false;
+	}
+
+	return true;
+}
+
+static void begin_video_coding_scope(struct state_vulkan_decompress *s, slice_info_t *slice_info)
+{
+	assert(slice_info->frame_num >= 0 && slice_info->poc_lsb >= 0 && slice_info->pps_id >= 0 && slice_info->sps_id >=0);
+
 	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
 	const VkExtent2D videoSize = { s->width, s->height };
 
@@ -2036,31 +2155,12 @@ static bool start_video_decoding(struct state_vulkan_decompress *s, slice_info_t
 
 		s->resetVideoCoding = false;
 	}
-
-	return true;
 }
 
-static bool end_video_decoding(struct state_vulkan_decompress *s)
+static void end_video_coding_scope(struct state_vulkan_decompress *s)
 {
-	assert(s->cmdBuffer != VK_NULL_HANDLE);
-
 	VkVideoEndCodingInfoKHR endCodingInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_END_CODING_INFO_KHR };
 	vkCmdEndVideoCodingKHR(s->cmdBuffer, &endCodingInfo);
-
-	VkResult result = vkEndCommandBuffer(s->cmdBuffer);
-	//s->videoCodingStarted = false; //we end video decoding no matter the result
-	if (result == VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR)
-	{
-		printf("[vulkan_decode] Failed to end command buffer recording - Invalid video standard parameters\n");
-		return false;
-	}
-	else if (result != VK_SUCCESS)
-	{
-		printf("[vulkan_decode] Failed to end command buffer recording!\n");
-		return false;
-	}
-
-	return true;
 }
 
 static void print_bits(unsigned char num) //DEBUG
@@ -2303,7 +2403,7 @@ static void * begin_nalu_writing(struct state_vulkan_decompress *s)
 {
 	void *memoryPtr = NULL;
 
-	VkResult result = vkMapMemory(s->device, s->decodeBufferMemory, 0, VK_WHOLE_SIZE, 0, &memoryPtr);
+	VkResult result = vkMapMemory(s->device, s->bufferMemory, 0, s->decodeBufferSize, 0, &memoryPtr);
 	if (result != VK_SUCCESS) return NULL;
 
 	memset(memoryPtr, 0, s->decodeBufferSize);
@@ -2334,7 +2434,7 @@ static void end_nalu_writing(struct state_vulkan_decompress *s)
 {
 	if (vkUnmapMemory == NULL || s->device == VK_NULL_HANDLE) return;
 
-	vkUnmapMemory(s->device, s->decodeBufferMemory);
+	vkUnmapMemory(s->device, s->bufferMemory);
 }
 
 static bool update_video_session_params(struct state_vulkan_decompress *s, bool isH264,
@@ -2721,7 +2821,6 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	if (nalu_buffer == NULL)
 	{
 		printf("[vulkan_decode] Failed to map needed vulkan memory for NAL units!\n");
-		end_video_decoding(s); //typically err in end_video_decoding happens only when bad video parameters 
 		return res;
 	}
 	{
@@ -2849,91 +2948,147 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 			slice_info.frame_seq, slice_info.frame_num, slice_info.poc_lsb, slice_info.pps_id,
 			(int)(slice_info.is_reference), slice_info.is_intra);
 
-	if (!start_video_decoding(s, &slice_info))
+	if (!begin_cmd_buffer(s))
 	{
-		printf("[vulkan_decode] Failed to start video decoding!\n");
+		// err msg should get printed inside of begin_cmd_buffer
 		return res;
 	}
 
-	//TODO decompress
+	begin_video_coding_scope(s, &slice_info); //TODO decompress
+	{
+		/*VkVideoPictureResourceInfoKHR dstPictureInfo = get_dst_picture_info(s);
+		VkVideoPictureResourceInfoKHR referencePictureInfos[MAX_REF_FRAMES] = { 0 };
+		VkVideoReferenceSlotInfoKHR dstSlotInfo = {}; //TODO
+		VkVideoReferenceSlotInfoKHR referenceSlotInfos[MAX_REF_FRAMES] = { 0 };
+		uint32_t referencePicture_count = s->referenceSlotsQueue_count;
+		
+		assert(referencePicture_count <= MAX_REF_FRAMES);
+		if (!fill_ref_picture_infos(referenceSlotInfos, referencePictureInfos, referencePicture_count, isH264))
+		{
+			//TODO err
+			return res;
+		}*/
 
-	/*VkVideoPictureResourceInfoKHR dstPictureInfo = get_dst_picture_info(s);
-	VkVideoPictureResourceInfoKHR referencePictureInfos[MAX_REF_FRAMES] = { 0 };
-	VkVideoReferenceSlotInfoKHR dstSlotInfo = {}; //TODO
-	VkVideoReferenceSlotInfoKHR referenceSlotInfos[MAX_REF_FRAMES] = { 0 };
-	uint32_t referencePicture_count = s->referenceSlotsQueue_count;
+		//TODO test
+		const VkExtent2D videoSize = { s->width, s->height };
+
+		assert(slice_info.pps_id < MAX_PPS_IDS); //TODO if
+		pps_t *pps = s->pps_array + slice_info.pps_id;
+		assert(slice_info.sps_id < MAX_SPS_IDS); //TODO if
+		sps_t *sps = s->sps_array + slice_info.sps_id;
+
+		VkDeviceSize alignedNaluBufferWritten = (nalu_buffer_written + (s->decodeBufferOffsetAlignment - 1))
+												& ~(s->decodeBufferOffsetAlignment - 1); //alignment bit mask magic
+
+		VkVideoPictureResourceInfoKHR dstPictureInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR,
+														.codedOffset = { 0, 0 }, // empty offset
+														.codedExtent = videoSize,
+														.baseArrayLayer = 0,
+														.imageViewBinding = s->dpbViews[s->dpbDstPictureIdx] };
+		StdVideoDecodeH264ReferenceInfo h264ReferenceInfo = { .flags = { .top_field_flag = 0, .bottom_field_flag = 0 }, //TODO flags
+															.FrameNum = slice_info.frame_num,
+															.PicOrderCnt = { slice_info.poc, slice_info.poc } };
+		//TODO
+		VkVideoDecodeH264DpbSlotInfoKHR h264SlotInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR,
+														.pStdReferenceInfo = &h264ReferenceInfo };
+		VkVideoDecodeH265DpbSlotInfoKHR h265SlotInfo = {}; //TODO H.265
+		VkVideoReferenceSlotInfoKHR dstSlotInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR,
+												.pNext = isH264 ? (void*)&h264SlotInfo : (void*)&h265SlotInfo,
+												.slotIndex = s->dpbDstPictureIdx,
+												.pPictureResource = &dstPictureInfo };
+
+		StdVideoDecodeH264PictureInfo h264PicInfo = { .flags = { .is_reference = slice_info.is_reference,
+																.field_pic_flag = 0,
+																.is_intra = slice_info.is_intra,
+																.IdrPicFlag = 0, //TODO
+																},
+													.seq_parameter_set_id = slice_info.sps_id,
+													.pic_parameter_set_id = slice_info.pps_id,
+													.frame_num = slice_info.frame_num,
+													//.idr_pic_id = , //TODO
+													.PicOrderCnt = { slice_info.poc, slice_info.poc } };
+		VkVideoDecodeH264PictureInfoKHR h264DecodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PICTURE_INFO_KHR,
+														.pStdPictureInfo = (void*)&h264PicInfo,
+														.sliceCount = slice_offsets_count,
+														.pSliceOffsets = slice_offsets };
+		VkVideoDecodeH265PictureInfoKHR h265DecodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_PICTURE_INFO_KHR };
+		VkVideoDecodeInfoKHR decodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_INFO_KHR,
+											.pNext = isH264 ? (void*)&h264DecodeInfo : (void*)&h265DecodeInfo,
+											.flags = 0,
+											.srcBuffer = s->decodeBuffer,
+											.srcBufferOffset = 0,
+											.srcBufferRange = alignedNaluBufferWritten,
+											.dstPictureResource = dstPictureInfo,
+											// this must be the same as dstPictureResource when VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR
+											// otherwise must not be the same as dstPictureResource
+											.pSetupReferenceSlot = &dstSlotInfo,
+											//specifies the needed used references (but not the decoded frame)
+											//.referenceSlotCount = referencePicture_count,
+											//.pReferenceSlots = referenceSlotInfos,
+											.referenceSlotCount = 0,
+											.pReferenceSlots = NULL,
+											};
+		vkCmdDecodeVideoKHR(s->cmdBuffer, &decodeInfo);
+	}
+	end_video_coding_scope(s);
 	
-	assert(referencePicture_count <= MAX_REF_FRAMES);
-	if (!fill_ref_picture_infos(referenceSlotInfos, referencePictureInfos, referencePicture_count, isH264))
-	{
-		//TODO err
-		return res;
-	}*/
-
-	//TODO test
-	const VkExtent2D videoSize = { s->width, s->height };
-
-	assert(slice_info.pps_id < MAX_PPS_IDS); //TODO if
-	pps_t *pps = s->pps_array + slice_info.pps_id;
-	assert(slice_info.sps_id < MAX_SPS_IDS); //TODO if
-	sps_t *sps = s->sps_array + slice_info.sps_id;
-
-	VkDeviceSize alignedNaluBufferWritten = (nalu_buffer_written + (s->decodeBufferOffsetAlignment - 1))
-						  					& ~(s->decodeBufferOffsetAlignment - 1); //alignment bit mask magic
-
-	VkVideoPictureResourceInfoKHR dstPictureInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR,
-													  .codedOffset = { 0, 0 }, // empty offset
-													  .codedExtent = videoSize,
-													  .baseArrayLayer = 0,
-													  .imageViewBinding = s->dpbViews[s->dpbDstPictureIdx] };
-	StdVideoDecodeH264ReferenceInfo h264ReferenceInfo = { .flags = { .top_field_flag = 0, .bottom_field_flag = 0 }, //TODO flags
-														  .FrameNum = slice_info.frame_num,
-														  .PicOrderCnt = { slice_info.poc, slice_info.poc } };
+	
+	// ---Inserting image barrier for synchronization and layout transfer---
 	//TODO
-	VkVideoDecodeH264DpbSlotInfoKHR h264SlotInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR,
-													 .pStdReferenceInfo = &h264ReferenceInfo };
-	VkVideoDecodeH265DpbSlotInfoKHR h265SlotInfo = {}; //TODO H.265
-	VkVideoReferenceSlotInfoKHR dstSlotInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR,
-											 .pNext = isH264 ? (void*)&h264SlotInfo : (void*)&h265SlotInfo,
-											 .slotIndex = s->dpbDstPictureIdx,
-											 .pPictureResource = &dstPictureInfo };
+	VkImageLayout srcPicLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+	VkImageMemoryBarrier2 imgBarrier = { .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+										 .srcStageMask = VK_PIPELINE_STAGE_2_VIDEO_DECODE_BIT_KHR,
+										 .srcAccessMask = VK_ACCESS_2_VIDEO_DECODE_READ_BIT_KHR  |
+										 				  VK_ACCESS_2_VIDEO_DECODE_WRITE_BIT_KHR, //TODO
+										 .dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT_KHR,
+										 .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT , //TODO
+										 //.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+										 .oldLayout = VK_IMAGE_LAYOUT_VIDEO_DECODE_DST_KHR,
+										 .newLayout = srcPicLayout,
+										 .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+										 .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+										 .image = s->dpb[s->dpbDstPictureIdx],
+										 .subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, //both planes
+										 					   .baseMipLevel = 0,
+										 					   .levelCount = 1,
+										 					   .baseArrayLayer = 0,
+										 					   .layerCount = 1 } };
+	VkDependencyInfo barrierInfo = { .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+									 .dependencyFlags = 0,
+									 .imageMemoryBarrierCount = 1,
+									 .pImageMemoryBarriers = &imgBarrier };
+	//VkDependencyInfo barrierInfo2 = { .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+	//vkCmdPipelineBarrier(s->cmdBuffer, srcStage, dstStage, 0, 0, NULL, 0, NULL, 1, &imgBarrier);
+	vkCmdPipelineBarrier2KHR(s->cmdBuffer, &barrierInfo);
 
-	StdVideoDecodeH264PictureInfo h264PicInfo = { .flags = { .is_reference = slice_info.is_reference,
-															 .field_pic_flag = 0,
-															 .is_intra = slice_info.is_intra,
-															 .IdrPicFlag = 0, //TODO
-															 },
-												  .seq_parameter_set_id = slice_info.sps_id,
-												  .pic_parameter_set_id = slice_info.pps_id,
-												  .frame_num = slice_info.frame_num,
-												  //.idr_pic_id = , //TODO
-												  .PicOrderCnt = { slice_info.poc, slice_info.poc } };
-	VkVideoDecodeH264PictureInfoKHR h264DecodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PICTURE_INFO_KHR,
-													   .pStdPictureInfo = (void*)&h264PicInfo,
-													   .sliceCount = slice_offsets_count,
-													   .pSliceOffsets = slice_offsets };
-	VkVideoDecodeH265PictureInfoKHR h265DecodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_PICTURE_INFO_KHR };
-	VkVideoDecodeInfoKHR decodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_INFO_KHR,
-										.pNext = isH264 ? (void*)&h264DecodeInfo : (void*)&h265DecodeInfo,
-										.flags = 0,
-										.srcBuffer = s->decodeBuffer,
-										.srcBufferOffset = 0,
-										.srcBufferRange = alignedNaluBufferWritten,
-										.dstPictureResource = dstPictureInfo,
-										// this must be the same as dstPictureResource when VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR
-										// otherwise must not be the same as dstPictureResource
-										.pSetupReferenceSlot = &dstSlotInfo,
-										//specifies the needed used references (but not the decoded frame)
-										//.referenceSlotCount = referencePicture_count,
-										//.pReferenceSlots = referenceSlotInfos,
-										.referenceSlotCount = 0,
-										.pReferenceSlots = NULL,
-										};
-	vkCmdDecodeVideoKHR(s->cmdBuffer, &decodeInfo);
+	// ---Copying decoded DPB image into decoded picture buffer---
+	assert(s->dstPicBuffer != VK_NULL_HANDLE);
+	assert(s->dpbFormat == VK_FORMAT_G8_B8R8_2PLANE_420_UNORM); //TODO requirement
 
-	if (!end_video_decoding(s))
+	VkDeviceSize firstPlaneSize = s->width * s->height; //TODO
+	VkDeviceSize secondPlaneSize = firstPlaneSize / 4;	//TODO
+
+	VkImageAspectFlagBits aspectFlags[2] = { VK_IMAGE_ASPECT_PLANE_0_BIT, VK_IMAGE_ASPECT_PLANE_1_BIT };
+	VkBufferImageCopy dstPicRegions[2] = { { .bufferOffset = s->dstPicBufferMemoryOffset,
+											 .imageOffset = { 0, 0, 0 }, // empty offset
+											 .imageExtent = { s->width, s->height, 1 }, //videoSize with depth == 1
+											 .imageSubresource = { .aspectMask = aspectFlags[0],
+											 					   .mipLevel = 0,
+											 					   .baseArrayLayer = 0,
+											 					   .layerCount = 1 } },
+										   { .bufferOffset = s->dstPicBufferMemoryOffset + firstPlaneSize, //TODO offset
+											 .imageOffset = { 0, 0, 0 }, // empty offset
+											 // one half because VK_FORMAT_G8_B8R8_2PLANE_420_UNORM:
+											 .imageExtent = { s->width / 2, s->height / 2, 1 }, 
+											 .imageSubresource = { .aspectMask = aspectFlags[1],
+											 					   .mipLevel = 0,
+											 					   .baseArrayLayer = 0,
+											 					   .layerCount = 1 } } };
+	vkCmdCopyImageToBuffer(s->cmdBuffer, s->dpb[s->dpbDstPictureIdx], srcPicLayout, s->dstPicBuffer, 2, dstPicRegions);
+
+	if (!end_cmd_buffer(s))
 	{
-		//relevant error printed inside of end_video_decoding
+		// relevant err msg printed inside of end_cmd_buffer
 		return res;
 	}
 
