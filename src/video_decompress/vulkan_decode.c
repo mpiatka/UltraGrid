@@ -290,6 +290,7 @@ struct state_vulkan_decompress
 	pps_t *pps_array;
 
 	// Memory related to decode picture buffer and picture queue
+	bool dpbHasDefinedLayout;					// indicates that VkImages in 'dpb' are not in undefined layout
 	VkImage dpb[MAX_REF_FRAMES + 1];			// decoded picture buffer
 	VkImageView dpbViews[MAX_REF_FRAMES + 1];	// dpb image views
 	VkDeviceMemory dpbMemory;					// backing memory for dpb - needs to be freed if valid (destroyed in destroy_dpb)
@@ -534,12 +535,11 @@ static void destroy_debug_messenger(VkInstance instance, VkDebugUtilsMessengerEX
 	#endif
 }
 
-static VkPhysicalDevice choose_physical_device(struct state_vulkan_decompress *s,
-										VkPhysicalDevice devices[], uint32_t devices_count,
-										VkQueueFlags requestedQueueFamilyFlags,
-										const char* const requiredDeviceExtensions[],
-										uint32_t *queue_family_idx, VkQueueFamilyProperties2 *queue_family,
-										VkQueueFamilyVideoPropertiesKHR *queue_video_props)
+static VkPhysicalDevice choose_physical_device(VkPhysicalDevice devices[], uint32_t devices_count,
+											   VkQueueFlags requestedQueueFamilyFlags,
+											   const char* const requiredDeviceExtensions[],
+											   uint32_t *queue_family_idx, VkQueueFamilyProperties2 *queue_family,
+											   VkQueueFamilyVideoPropertiesKHR *queue_video_props)
 {
 	// chooses the preferred physical device from array of given devices (of length atleast 1)
 	// queue_family_idx and if queue_family and queue_video_props pointers are non-NULL it will fill
@@ -868,7 +868,7 @@ static void * vulkan_decompress_init(void)
 	vkEnumeratePhysicalDevices(s->instance, &phys_devices_count, devices);
 	VkQueueFamilyProperties2 chosen_queue_family; //TODO use this?
 	VkQueueFamilyVideoPropertiesKHR chosen_queue_video_props; //TODO use this more?
-	s->physicalDevice = choose_physical_device(s, devices, phys_devices_count, requestedFamilyQueueFlags,
+	s->physicalDevice = choose_physical_device(devices, phys_devices_count, requestedFamilyQueueFlags,
 											   requiredDeviceExtensions,
 											   &s->queueFamilyIdx, &chosen_queue_family, &chosen_queue_video_props);
 	free(devices);
@@ -1050,10 +1050,13 @@ static bool configure_with(struct state_vulkan_decompress *s, struct video_desc 
 		return false;
 	}
 
+	assert(videoCodecOperation != VK_VIDEO_CODEC_OPERATION_NONE_KHR);
+
 	s->codecOperation = videoCodecOperation;
 	s->width = desc.width;
 	s->height = desc.height;
 
+	s->dpbHasDefinedLayout = false;
 	s->dpbFormat = VK_FORMAT_UNDEFINED;
 	s->dpbDstPictureIdx = 0;
 	s->referenceSlotsQueue_start = 0;
@@ -1360,7 +1363,7 @@ static bool allocate_buffers(struct state_vulkan_decompress *s, VkVideoProfileLi
 	}
 	s->decodeBufferOffsetAlignment = videoCapabilities.minBitstreamBufferOffsetAlignment;
 
-	s->dstPicBufferSize = 5 * 1024 * 1024; //TODO magic numbers, could be checked too
+	s->dstPicBufferSize = 10 * 1024 * 1024; //TODO magic numbers, could be checked too
 	VkBufferCreateInfo picBufferInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
 										 .flags = 0,
 										 .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -1561,9 +1564,142 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
 	return true;
 }
 
+static bool begin_cmd_buffer(struct state_vulkan_decompress *s)
+{
+	//maybe pointless since VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT flag
+	VkResult result = vkResetCommandBuffer(s->cmdBuffer, 0);
+	if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to reset the vulkan command buffer!\n");
+		return false;
+	}
+	
+	VkCommandBufferBeginInfo cmdBufferBeginInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+													.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
+	result = vkBeginCommandBuffer(s->cmdBuffer, &cmdBufferBeginInfo);
+	if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to begin command buffer recording!\n");
+		return false;
+	}
+
+	return true;
+}
+
+static bool end_cmd_buffer(struct state_vulkan_decompress *s)
+{
+	VkResult result = vkEndCommandBuffer(s->cmdBuffer);
+	if (result == VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR)
+	{
+		printf("[vulkan_decode] Failed to end command buffer recording - Invalid video standard parameters\n");
+		return false;
+	}
+	else if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to end command buffer recording!\n");
+		return false;
+	}
+
+	return true;
+}
+
+static void deduce_stage_and_access_from_layout(VkImageLayout layout, VkPipelineStageFlags2 *stage, VkAccessFlags2 *access)
+{
+	switch (layout)
+	{
+		case VK_IMAGE_LAYOUT_UNDEFINED: // only after the initialization of image
+			if (stage != NULL) *stage = VK_PIPELINE_STAGE_2_NONE;
+			if (access != NULL) *access = VK_ACCESS_2_NONE;
+			break;
+		case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL: // beginning of the cmd buffer or preparing for decoded picture copying
+			if (stage != NULL) *stage = VK_PIPELINE_STAGE_2_COPY_BIT_KHR;
+			if (access != NULL) *access = VK_ACCESS_2_TRANSFER_READ_BIT; //TODO
+			break;
+		/*case VK_IMAGE_LAYOUT_VIDEO_DECODE_DST_KHR: // beginning of the cmd buffer when preparing for decode, or after it
+			if (stage != NULL) *stage = VK_PIPELINE_STAGE_2_VIDEO_DECODE_BIT_KHR;
+			if (access != NULL) *access = VK_ACCESS_2_VIDEO_DECODE_READ_BIT_KHR |
+										  VK_ACCESS_2_VIDEO_DECODE_WRITE_BIT_KHR; //TODO
+			break;*/
+		case VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR: // beginning of the cmd buffer when preparing for decode, or after it
+			if (stage != NULL) *stage = VK_PIPELINE_STAGE_2_VIDEO_DECODE_BIT_KHR;
+			if (access != NULL) *access = VK_ACCESS_2_VIDEO_DECODE_READ_BIT_KHR |
+										  VK_ACCESS_2_VIDEO_DECODE_WRITE_BIT_KHR; //TODO
+			break;
+		default:
+			break;
+	}
+}
+
+static void transfer_image_layout(VkCommandBuffer cmdBuffer, VkImage image,
+								  VkImageLayout oldLayout, VkImageLayout newLayout)
+{
+	// transfers image layout (and also does the image's synchronization) using pipeline barrier
+	// it records the barrier even when oldLayout == newLayout, cmdBuffer must be in recording state!
+	assert(cmdBuffer != VK_NULL_HANDLE);
+	assert(image != VK_NULL_HANDLE);
+
+	/*VkImageLayout srcPicLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+	VkImageMemoryBarrier2 imgBarrier = { .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+										 .srcStageMask = VK_PIPELINE_STAGE_2_VIDEO_DECODE_BIT_KHR,
+										 .srcAccessMask = VK_ACCESS_2_VIDEO_DECODE_READ_BIT_KHR  |
+										 				  VK_ACCESS_2_VIDEO_DECODE_WRITE_BIT_KHR, //TODO
+										 .dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT_KHR,
+										 .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT , //TODO
+										 //.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+										 .oldLayout = VK_IMAGE_LAYOUT_VIDEO_DECODE_DST_KHR,
+										 .newLayout = srcPicLayout,
+										 .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+										 .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+										 .image = s->dpb[s->dpbDstPictureIdx],
+										 .subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, //both planes
+										 					   .baseMipLevel = 0,
+										 					   .levelCount = 1,
+										 					   .baseArrayLayer = 0,
+										 					   .layerCount = 1 } };
+	VkDependencyInfo barrierInfo = { .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+									 .dependencyFlags = 0,
+									 .imageMemoryBarrierCount = 1,
+									 .pImageMemoryBarriers = &imgBarrier };
+	//VkDependencyInfo barrierInfo2 = { .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+	//vkCmdPipelineBarrier(s->cmdBuffer, srcStage, dstStage, 0, 0, NULL, 0, NULL, 1, &imgBarrier);
+	vkCmdPipelineBarrier2KHR(s->cmdBuffer, &barrierInfo);*/
+
+	VkPipelineStageFlags2 srcStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+						  dstStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+	VkAccessFlags2 srcAccess = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+				   dstAccess = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+
+	deduce_stage_and_access_from_layout(oldLayout, &srcStage, &srcAccess);
+	deduce_stage_and_access_from_layout(newLayout, &dstStage, &dstAccess);
+
+	VkImageMemoryBarrier2 imgBarrier = { .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+										 .srcStageMask = srcStage,
+										 .srcAccessMask = srcAccess,
+										 .dstStageMask = dstStage,
+										 .dstAccessMask = dstAccess,
+										 .oldLayout = oldLayout,
+										 .newLayout = newLayout,
+										 .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+										 .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+										 .image = image,
+										 .subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, // all img planes
+										 					   .baseMipLevel = 0,
+										 					   .levelCount = 1,
+										 					   .baseArrayLayer = 0,
+										 					   .layerCount = 1 } };
+	VkDependencyInfo barrierInfo = { .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+									 .dependencyFlags = 0,
+									 .imageMemoryBarrierCount = 1,
+									 .pImageMemoryBarriers = &imgBarrier };
+	vkCmdPipelineBarrier2KHR(cmdBuffer, &barrierInfo);
+}
+
 static bool create_dpb(struct state_vulkan_decompress *s, VkVideoProfileListInfoKHR *videoProfileList)
 {
-	assert(s->device != VK_NULL_HANDLE && s->dpbFormat != VK_FORMAT_UNDEFINED);
+	// Creates the DPB (decoded picture buffer), if success then DPB must be destroyed using destroy_dpb
+	// created images are left in undefined layout
+	assert(s->device != VK_NULL_HANDLE);
+	assert(s->dpbFormat != VK_FORMAT_UNDEFINED);
 
 	const VkImageType imageType = VK_IMAGE_TYPE_2D;
 	const VkExtent3D videoSize = { s->width, s->height, 1 }; //depth must be 1 for VK_IMAGE_TYPE_2D
@@ -1703,6 +1839,7 @@ static void destroy_dpb(struct state_vulkan_decompress *s)
 	if (vkFreeMemory != NULL && s->device != VK_NULL_HANDLE) vkFreeMemory(s->device, s->dpbMemory, NULL);
 	
 	s->dpbMemory = VK_NULL_HANDLE;
+	s->dpbHasDefinedLayout = false;
 }
 
 static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
@@ -2069,45 +2206,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	return true;
 }
 
-static bool begin_cmd_buffer(struct state_vulkan_decompress *s)
-{
-	//maybe pointless since VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT flag
-	VkResult result = vkResetCommandBuffer(s->cmdBuffer, 0);
-	if (result != VK_SUCCESS)
-	{
-		printf("[vulkan_decode] Failed to reset the vulkan command buffer!\n");
-		return false;
-	}
-	
-	VkCommandBufferBeginInfo cmdBufferBeginInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-													.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
-	result = vkBeginCommandBuffer(s->cmdBuffer, &cmdBufferBeginInfo);
-	if (result != VK_SUCCESS)
-	{
-		printf("[vulkan_decode] Failed to begin command buffer recording!\n");
-		return false;
-	}
-
-	return true;
-}
-
-static bool end_cmd_buffer(struct state_vulkan_decompress *s)
-{
-	VkResult result = vkEndCommandBuffer(s->cmdBuffer);
-	if (result == VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR)
-	{
-		printf("[vulkan_decode] Failed to end command buffer recording - Invalid video standard parameters\n");
-		return false;
-	}
-	else if (result != VK_SUCCESS)
-	{
-		printf("[vulkan_decode] Failed to end command buffer recording!\n");
-		return false;
-	}
-
-	return true;
-}
-
 static void begin_video_coding_scope(struct state_vulkan_decompress *s, slice_info_t *slice_info)
 {
 	assert(slice_info->frame_num >= 0 && slice_info->poc_lsb >= 0 && slice_info->pps_id >= 0 && slice_info->sps_id >=0);
@@ -2117,10 +2215,10 @@ static void begin_video_coding_scope(struct state_vulkan_decompress *s, slice_in
 
 	assert(slice_info->sps_id < MAX_SPS_IDS); //TODO if
 	sps_t *sps = s->sps_array + slice_info->sps_id;
-	printf("\tprev_msb: %d, prev_lsb: %d\n", s->prev_poc_msb, s->prev_poc_lsb);
+	//printf("\tprev_msb: %d, prev_lsb: %d\n", s->prev_poc_msb, s->prev_poc_lsb);
 	slice_info->poc = get_picture_order_count(&s->prev_poc_msb, &s->prev_poc_lsb,
 											  sps->log2_max_pic_order_cnt_lsb_minus4, slice_info->poc_lsb);
-	printf("\tpoc: %d display_frame_seq: %d\n", slice_info->poc, slice_info->frame_seq - s->idr_frame_seq);
+	//printf("\tpoc: %d display_frame_seq: %d\n", slice_info->poc, slice_info->frame_seq - s->idr_frame_seq);
 
 	VkVideoPictureResourceInfoKHR picResourceInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR,
 													  .codedOffset = { 0, 0 }, // empty offset
@@ -2437,6 +2535,65 @@ static void end_nalu_writing(struct state_vulkan_decompress *s)
 	vkUnmapMemory(s->device, s->bufferMemory);
 }
 
+static bool write_decoded_frame(struct state_vulkan_decompress *s, VkDeviceSize buffer_len, unsigned char *dst)
+{
+	assert(s->device != VK_NULL_HANDLE);
+	assert(s->bufferMemory != VK_NULL_HANDLE);
+	//assert(buffer_len > 0);
+
+	UNUSED(buffer_len); //DEBUG
+	VkDeviceSize firstPlaneSize = s->width * s->height;
+	VkDeviceSize secondPlaneSize = firstPlaneSize / 4;
+	VkDeviceSize chroma2Offset = secondPlaneSize / 2;
+	VkDeviceSize size = firstPlaneSize + secondPlaneSize;
+
+	uint8_t *buffer_data = NULL;
+	VkResult result = vkMapMemory(s->device, s->bufferMemory, s->dstPicBufferMemoryOffset, size, 0, (void**)&buffer_data);
+	if (result != VK_SUCCESS) return false;
+
+	assert(buffer_data != NULL);
+	assert(dst != NULL);
+
+	/*for (size_t i = 0; i < size; ++i)
+	{
+		dst[i] = (unsigned char)buffer_data[i];
+	}*/
+
+	//DEBUG - attempt at translating NV12 into I420
+	for (size_t i = 0; i < firstPlaneSize; ++i)
+	{
+		dst[i] = (unsigned char)buffer_data[i];
+	}
+
+	for (size_t i = 0; i < chroma2Offset; ++i)
+	{
+		//TODO probably does not work anyway
+		unsigned char Cb = 0, Cr = 0;
+		unsigned char firstB = (unsigned char)buffer_data[firstPlaneSize + 2*i],
+					  secondB = (unsigned char)buffer_data[firstPlaneSize + 2*i + 1];
+		uint16_t bytes = ((uint16_t)firstB << 8) | (uint16_t)secondB;
+
+		for (uint16_t j = 0, mask_Cb = 1, mask_Cr = 1, mask_bytes_Cb = 2, mask_bytes_Cr = 1;
+			 j < 8; ++j)
+		{
+			Cb |= (unsigned char)(mask_Cb * ((bytes & mask_bytes_Cb) != 0));
+			Cr |= (unsigned char)(mask_Cr * ((bytes & mask_bytes_Cr) != 0));
+
+			mask_Cb <<= 1;
+			mask_Cr <<= 1;
+			mask_bytes_Cb <<= 2;
+			mask_bytes_Cr <<= 2;
+		}
+
+		dst[firstPlaneSize + i] = Cb;
+		dst[firstPlaneSize + chroma2Offset + i] = Cr;
+	}
+
+	vkUnmapMemory(s->device, s->bufferMemory);
+
+	return true;
+}
+
 static bool update_video_session_params(struct state_vulkan_decompress *s, bool isH264,
 										sps_t *added_sps,// uint32_t added_sps_count,
 										pps_t *added_pps)// uint32_t added_pps_count)
@@ -2751,7 +2908,7 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
                 unsigned int src_len, int frame_seq, struct video_frame_callbacks *callbacks,
                 struct pixfmt_desc *internal_prop)
 {
-	printf("vulkan_decode - decompress\n");
+	//printf("vulkan_decode - decompress\n");
 	UNUSED(callbacks);
 	struct state_vulkan_decompress *s = (struct state_vulkan_decompress *)state;
     //printf("\tdst: %p, src: %p, src_len: %u, frame_seq: %d\n",
@@ -2789,9 +2946,6 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 		return res;
 	}
 	s->sps_vps_found = true;
-	
-	UNUSED(dst);
-	UNUSED(frame_seq);
 
 	bool wrong_pixfmt = false;
 	if (!s->prepared && !prepare(s, &wrong_pixfmt))
@@ -2944,14 +3098,36 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	assert(s->videoSessionParams != VK_NULL_HANDLE);
 
 	//TODO maybe check for valid values of frame_num, poc_lsb, pps_id
-	printf("\tframe_seq: %d, frame_num: %d, poc_lsb: %d, pps_id: %d, is_reference: %d, is_intra: %d\n",
-			slice_info.frame_seq, slice_info.frame_num, slice_info.poc_lsb, slice_info.pps_id,
-			(int)(slice_info.is_reference), slice_info.is_intra);
+	//printf("\tframe_seq: %d, frame_num: %d, poc_lsb: %d, pps_id: %d, is_reference: %d, is_intra: %d\n",
+	//		slice_info.frame_seq, slice_info.frame_num, slice_info.poc_lsb, slice_info.pps_id,
+	//		(int)(slice_info.is_reference), slice_info.is_intra);
 
 	if (!begin_cmd_buffer(s))
 	{
 		// err msg should get printed inside of begin_cmd_buffer
 		return res;
+	}
+
+	// ---VkImage layout transfering before vido coding scope---
+	if (!s->dpbHasDefinedLayout)	// if VkImages in DPB are in undefined layout we need to transfer them into decode layout
+	{
+		for (size_t i = 0; i < MAX_REF_FRAMES + 1; ++i)
+		{
+			assert(s->dpb[i] != VK_NULL_HANDLE);
+			transfer_image_layout(s->cmdBuffer, s->dpb[i],
+								  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR);
+		}
+
+		s->dpbHasDefinedLayout = true;
+	}
+	else							// otherwise we also transfer them, but from transfer src optimal layout
+	{
+		for (size_t i = 0; i < MAX_REF_FRAMES + 1; ++i)
+		{
+			assert(s->dpb[i] != VK_NULL_HANDLE);
+			transfer_image_layout(s->cmdBuffer, s->dpb[i],
+								  VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR);
+		}
 	}
 
 	begin_video_coding_scope(s, &slice_info); //TODO decompress
@@ -3033,34 +3209,13 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	end_video_coding_scope(s);
 	
 	
-	// ---Inserting image barrier for synchronization and layout transfer---
-	//TODO
-	VkImageLayout srcPicLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-	VkImageMemoryBarrier2 imgBarrier = { .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-										 .srcStageMask = VK_PIPELINE_STAGE_2_VIDEO_DECODE_BIT_KHR,
-										 .srcAccessMask = VK_ACCESS_2_VIDEO_DECODE_READ_BIT_KHR  |
-										 				  VK_ACCESS_2_VIDEO_DECODE_WRITE_BIT_KHR, //TODO
-										 .dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT_KHR,
-										 .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT , //TODO
-										 //.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-										 .oldLayout = VK_IMAGE_LAYOUT_VIDEO_DECODE_DST_KHR,
-										 .newLayout = srcPicLayout,
-										 .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-										 .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-										 .image = s->dpb[s->dpbDstPictureIdx],
-										 .subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, //both planes
-										 					   .baseMipLevel = 0,
-										 					   .levelCount = 1,
-										 					   .baseArrayLayer = 0,
-										 					   .layerCount = 1 } };
-	VkDependencyInfo barrierInfo = { .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-									 .dependencyFlags = 0,
-									 .imageMemoryBarrierCount = 1,
-									 .pImageMemoryBarriers = &imgBarrier };
-	//VkDependencyInfo barrierInfo2 = { .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-	//vkCmdPipelineBarrier(s->cmdBuffer, srcStage, dstStage, 0, 0, NULL, 0, NULL, 1, &imgBarrier);
-	vkCmdPipelineBarrier2KHR(s->cmdBuffer, &barrierInfo);
-
+	// ---VkImage synchronization and layout transfering after vido coding scope---
+	for (size_t i = 0; i < MAX_REF_FRAMES + 1; ++i)
+	{
+		transfer_image_layout(s->cmdBuffer, s->dpb[i], //VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR
+							  VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+	}
+	
 	// ---Copying decoded DPB image into decoded picture buffer---
 	assert(s->dstPicBuffer != VK_NULL_HANDLE);
 	assert(s->dpbFormat == VK_FORMAT_G8_B8R8_2PLANE_420_UNORM); //TODO requirement
@@ -3084,7 +3239,8 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 											 					   .mipLevel = 0,
 											 					   .baseArrayLayer = 0,
 											 					   .layerCount = 1 } } };
-	vkCmdCopyImageToBuffer(s->cmdBuffer, s->dpb[s->dpbDstPictureIdx], srcPicLayout, s->dstPicBuffer, 2, dstPicRegions);
+	vkCmdCopyImageToBuffer(s->cmdBuffer, s->dpb[s->dpbDstPictureIdx], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+						   s->dstPicBuffer, 2, dstPicRegions);
 
 	if (!end_cmd_buffer(s))
 	{
@@ -3106,7 +3262,7 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	}
 
 	// ---Synchronization---
-	const uint64_t synchronizationTimeout = 5 * 1000 * 1000; // = 5ms (timeout is in nanoseconds)
+	const uint64_t synchronizationTimeout = 500 * 1000 * 1000; // = 500ms (timeout is in nanoseconds)
 
 	result = vkWaitForFences(s->device, 1, &s->fence, VK_TRUE, synchronizationTimeout);
 	if (result != VK_SUCCESS)
@@ -3126,6 +3282,16 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 		return false;
 	}
 
+	// ---Writing the decoded frame data---
+	//puts("writing the decoded frame:");
+	if (!write_decoded_frame(s, firstPlaneSize + secondPlaneSize, dst))
+	{
+		printf("[vulkan_decode] Failed to write the decoded frame into the destination buffer!\n");
+		return res;
+	}
+	else res = DECODER_GOT_FRAME;
+
+	//puts("Got frame!");
     return res;
 };
 
