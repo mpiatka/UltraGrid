@@ -241,11 +241,14 @@ static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader
 typedef struct	// structure used to pass around variables related to currently decoded frame (slice)
 {
 	bool is_intra, is_reference;
+	int idr_pic_id;
 	int sps_id;
 	int pps_id;
 	int frame_num;
 	int frame_seq; // Ultragrid's frame_seq parameter in decompress function
 	int poc, poc_lsb;
+	uint32_t dpbIndex;
+
 } slice_info_t;
 
 struct state_vulkan_decompress
@@ -290,17 +293,17 @@ struct state_vulkan_decompress
 	pps_t *pps_array;
 
 	// Memory related to decode picture buffer and picture queue
-	bool dpbHasDefinedLayout;					// indicates that VkImages in 'dpb' are not in undefined layout
-	VkImage dpb[MAX_REF_FRAMES + 1];			// decoded picture buffer
+	bool dpbHasDefinedLayout;					// indicates that VkImages in 'dpb' array are not in undefined layout
+	VkImage dpb[MAX_REF_FRAMES + 1];			// decoded picture buffer (aka dpb)
 	VkImageView dpbViews[MAX_REF_FRAMES + 1];	// dpb image views
 	VkDeviceMemory dpbMemory;					// backing memory for dpb - needs to be freed if valid (destroyed in destroy_dpb)
 	VkFormat dpbFormat;							// format of VkImages in dpb
-	uint32_t dpbDstPictureIdx;					// index (into dpb) of the slot for next to be decoded frame
-	uint32_t referenceSlotsQueue[MAX_REF_FRAMES]; // queue containing indices (into dpb) of current reference frames 
-	uint32_t referenceSlotsQueue_start;			  // index into referenceSlotsQueue where the queue starts
-	uint32_t referenceSlotsQueue_count;			  // the current length of the reference slots queue
+	//uint32_t dpbDstPictureIdx;					// index (into dpb and dpbViews) of the slot for next to be decoded frame
+	slice_info_t referenceSlotsQueue[MAX_REF_FRAMES];	// queue containing slice infos of the current reference frames 
+	uint32_t referenceSlotsQueue_start;			  		// index into referenceSlotsQueue where the queue starts
+	uint32_t referenceSlotsQueue_count;			  		// the current length of the reference slots queue
 
-	int prev_poc_lsb, prev_poc_msb, idr_frame_seq;
+	int prev_poc_lsb, prev_poc_msb, idr_frame_seq, current_frame_seq;
 
 	// UltraGrid data
 	int width, height;
@@ -955,6 +958,12 @@ static void * vulkan_decompress_init(void)
 	}
 	s->dpbMemory = VK_NULL_HANDLE;
 	s->dpbFormat = VK_FORMAT_UNDEFINED;
+	for (size_t i = 0; i < MAX_REF_FRAMES; ++i)
+	{
+		// setting the reference queue members to some unvalid value 
+		s->referenceSlotsQueue[i] = (slice_info_t){ .idr_pic_id = -1, .sps_id = -1, .pps_id = -1, .frame_num = -1, .frame_seq = -1,
+													.poc = -1, .poc_lsb = -1 };
+	}
 
 	printf("[vulkan_decode] Initialization finished successfully.\n");
 	return s;
@@ -1058,13 +1067,13 @@ static bool configure_with(struct state_vulkan_decompress *s, struct video_desc 
 
 	s->dpbHasDefinedLayout = false;
 	s->dpbFormat = VK_FORMAT_UNDEFINED;
-	s->dpbDstPictureIdx = 0;
 	s->referenceSlotsQueue_start = 0;
 	s->referenceSlotsQueue_count = 0;
 
 	s->prev_poc_lsb = 0;
 	s->prev_poc_msb = 0;
 	s->idr_frame_seq = 0;
+	s->current_frame_seq = 0;
 
 	return true;
 }
@@ -1078,7 +1087,7 @@ static int vulkan_decompress_reconfigure(void *state, struct video_desc desc,
 
 	const char *spec_name = get_codec_name_long(desc.color_spec);
 	const char *out_name = get_codec_name_long(out_codec);
-	printf("\tcodec color_spec: '%s', out_codec: '%s'\n", spec_name, out_name);
+	printf("\tcodec color_spec: '%s', out_codec: '%s', pitch: %d\n", spec_name, out_name, pitch);
 	if (out_codec == VIDEO_CODEC_NONE) printf("\tRequested probing.\n");
 
 	if (desc.tile_count != 1)
@@ -1638,32 +1647,6 @@ static void transfer_image_layout(VkCommandBuffer cmdBuffer, VkImage image,
 	assert(cmdBuffer != VK_NULL_HANDLE);
 	assert(image != VK_NULL_HANDLE);
 
-	/*VkImageLayout srcPicLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-	VkImageMemoryBarrier2 imgBarrier = { .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-										 .srcStageMask = VK_PIPELINE_STAGE_2_VIDEO_DECODE_BIT_KHR,
-										 .srcAccessMask = VK_ACCESS_2_VIDEO_DECODE_READ_BIT_KHR  |
-										 				  VK_ACCESS_2_VIDEO_DECODE_WRITE_BIT_KHR, //TODO
-										 .dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT_KHR,
-										 .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT , //TODO
-										 //.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-										 .oldLayout = VK_IMAGE_LAYOUT_VIDEO_DECODE_DST_KHR,
-										 .newLayout = srcPicLayout,
-										 .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-										 .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-										 .image = s->dpb[s->dpbDstPictureIdx],
-										 .subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, //both planes
-										 					   .baseMipLevel = 0,
-										 					   .levelCount = 1,
-										 					   .baseArrayLayer = 0,
-										 					   .layerCount = 1 } };
-	VkDependencyInfo barrierInfo = { .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-									 .dependencyFlags = 0,
-									 .imageMemoryBarrierCount = 1,
-									 .pImageMemoryBarriers = &imgBarrier };
-	//VkDependencyInfo barrierInfo2 = { .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-	//vkCmdPipelineBarrier(s->cmdBuffer, srcStage, dstStage, 0, 0, NULL, 0, NULL, 1, &imgBarrier);
-	vkCmdPipelineBarrier2KHR(s->cmdBuffer, &barrierInfo);*/
-
 	VkPipelineStageFlags2 srcStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
 						  dstStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
 	VkAccessFlags2 srcAccess = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
@@ -1932,6 +1915,20 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 		return false;
 	}
 
+	if (videoCapabilities.maxDpbSlots < MAX_REF_FRAMES + 1)
+	{
+		printf("[vulkan_decode] Chosen physical device does not support needed amount of DPB slots(%u)!\n",
+				MAX_REF_FRAMES + 1);
+		return false;
+	}
+
+	if (videoCapabilities.maxActiveReferencePictures < MAX_REF_FRAMES)
+	{
+		printf("[vulkan_decode] Chosen physical device does not support needed amount of active reference pictures(%u)!\n",
+				MAX_REF_FRAMES);
+		return false;
+	}
+
 	const VkExtent2D videoSize = { s->width, s->height };
 	if (!does_video_size_fit(videoSize, videoCapabilities.minCodedExtent, videoCapabilities.maxCodedExtent))
 	{
@@ -2099,9 +2096,8 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 												.pictureFormat = pictureFormat,
 												.maxCodedExtent = (VkExtent2D){ s->width, s->height },
 												.referencePictureFormat = referencePictureFormat,
-												.maxDpbSlots = videoCapabilities.maxDpbSlots < MAX_REF_FRAMES ?
-															   videoCapabilities.maxDpbSlots : MAX_REF_FRAMES,
-												.maxActiveReferencePictures = videoCapabilities.maxActiveReferencePictures,
+												.maxDpbSlots = MAX_REF_FRAMES + 1,
+												.maxActiveReferencePictures = MAX_REF_FRAMES,
 												.pStdHeaderVersion = &videoCapabilities.stdHeaderVersion };
 	result = vkCreateVideoSessionKHR(s->device, &sessionInfo, NULL, &s->videoSession);
 	if (result != VK_SUCCESS)
@@ -2206,49 +2202,170 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	return true;
 }
 
+static slice_info_t get_ref_slot_from_queue(struct state_vulkan_decompress *s, uint32_t index)
+{
+	// returns the member of reference frames queue on the given index
+	// correctly handles wrapping, NO bounds checks!
+	uint32_t wrappedIdx = (s->referenceSlotsQueue_start + index) % MAX_REF_FRAMES;
+	return s->referenceSlotsQueue[wrappedIdx];
+}
+
+static uint32_t smallest_dpb_index_not_in_queue(struct state_vulkan_decompress *s)
+{
+	// returns the smallest index into DPB that's not in the reference queue
+	// such index must exist as the reference queue is smaller by at least 1
+	bool checks[MAX_REF_FRAMES + 1] = { 0 };
+
+	for (uint32_t i = 0; i < s->referenceSlotsQueue_count; ++i)
+	{
+		uint32_t dpbIndex = get_ref_slot_from_queue(s, i).dpbIndex;
+		
+		assert(dpbIndex < MAX_REF_FRAMES + 1);
+		assert(!checks[dpbIndex]);
+
+		checks[dpbIndex] = true;
+	}
+
+	for (uint32_t i = 0; i < MAX_REF_FRAMES + 1; ++i)
+	{
+		if (!checks[i]) return i;
+	}
+
+	assert(!"Failed to find smallest dpb index that's not in reference picture queue!"); // should not happen
+	return 0;
+}
+
+static void insert_ref_slot_into_queue(struct state_vulkan_decompress *s, slice_info_t slice_info)
+{
+	// inserts given reference picture (it's slice info) into reference slot queue,
+	// if the queue is full then before the insertion discard the first queue member,
+	// note that the first member is the "oldest" one (aka should be the one with lowest frame_num)
+	assert(s->referenceSlotsQueue_count <= MAX_REF_FRAMES); // we also assume that MAX_REF_FRAMES is larger than zero
+
+	/*printf("\tInserting slice_info - frame_seq: %d, frame_num: %d, poc_lsb: %d, poc: %d, pps_id: %d, is_reference: %d, is_intra: %d, dpbIndex: %u\n",
+			slice_info.frame_seq, slice_info.frame_num, slice_info.poc_lsb, slice_info.poc, slice_info.pps_id,
+			(int)(slice_info.is_reference), slice_info.is_intra, slice_info.dpbIndex);*/
+
+	if (s->referenceSlotsQueue_count == MAX_REF_FRAMES) // queue full => discard the last member
+	{
+		s->referenceSlotsQueue_start = (s->referenceSlotsQueue_start + 1) % MAX_REF_FRAMES;
+		--(s->referenceSlotsQueue_count); // correct the size of the queue
+	}
+
+	uint32_t wrappedIdx = (s->referenceSlotsQueue_start + s->referenceSlotsQueue_count) % MAX_REF_FRAMES;
+	s->referenceSlotsQueue[wrappedIdx] = slice_info;
+	++(s->referenceSlotsQueue_count);
+}
+
+static void clear_the_ref_slot_queue(struct state_vulkan_decompress *s)
+{
+	s->referenceSlotsQueue_count = 0;
+}
+
+static void fill_ref_picture_infos(struct state_vulkan_decompress *s,
+								   VkVideoReferenceSlotInfoKHR refInfos[], VkVideoPictureResourceInfoKHR picInfos[],
+								   VkVideoDecodeH264DpbSlotInfoKHR h264SlotInfos[], StdVideoDecodeH264ReferenceInfo h264Infos[],								 
+								   uint32_t max_count, bool isH264, uint32_t *out_count)
+{
+	// count is a size of both given arrays (should be at most same as MAX_REF_FRAMES)
+	assert(max_count <= MAX_REF_FRAMES);
+	assert(isH264); //TODO H.265
+
+	VkExtent2D videoSize = { s->width, s->height };
+
+	uint32_t ref_count = s->referenceSlotsQueue_count;
+
+	for (uint32_t i = 0; i < max_count && i < ref_count; ++i)
+	{
+		slice_info_t slice_info = get_ref_slot_from_queue(s, i);
+		/*printf("\tGot slice_info - frame_seq: %d, frame_num: %d, poc_lsb: %d, poc: %d, pps_id: %d, is_reference: %d, is_intra: %d, dpbIndex: %u\n",
+			slice_info.frame_seq, slice_info.frame_num, slice_info.poc_lsb, slice_info.poc, slice_info.pps_id,
+			(int)(slice_info.is_reference), slice_info.is_intra, slice_info.dpbIndex);*/
+		
+		assert(slice_info.frame_num >= 0);
+		assert(slice_info.dpbIndex < MAX_REF_FRAMES + 1);
+
+		VkImageView view = s->dpbViews[slice_info.dpbIndex];
+		assert(view != VK_NULL_HANDLE);
+
+		h264Infos[i] = (StdVideoDecodeH264ReferenceInfo){ .flags = { 0 }, .FrameNum = slice_info.frame_num,
+														  .PicOrderCnt = { slice_info.poc, slice_info.poc, } };
+		h264SlotInfos[i] = (VkVideoDecodeH264DpbSlotInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR,
+															  .pStdReferenceInfo = h264Infos + i };
+		picInfos[i] = (VkVideoPictureResourceInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR,
+													   .codedOffset = { 0, 0 }, // no offset
+													   .codedExtent = videoSize,
+													   .baseArrayLayer = 0,
+													   .imageViewBinding = view };
+		refInfos[i] = (VkVideoReferenceSlotInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR,
+													 //TODO H.265
+													 //.pNext = isH264 ? (void*)&h264RefInfo : (void*)&h265RefInfo,
+													 .pNext = (void*)(h264SlotInfos + i),
+													 .slotIndex = slice_info.dpbIndex,
+													 .pPictureResource = picInfos + i };
+	}
+
+	if (out_count != NULL) *out_count = ref_count;
+}
+
 static void begin_video_coding_scope(struct state_vulkan_decompress *s, slice_info_t *slice_info)
 {
-	assert(slice_info->frame_num >= 0 && slice_info->poc_lsb >= 0 && slice_info->pps_id >= 0 && slice_info->sps_id >=0);
+	assert(slice_info->frame_num >= 0 && slice_info->poc_lsb >= 0 &&
+		   slice_info->pps_id >= 0 && slice_info->sps_id >=0);
 
 	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
 	const VkExtent2D videoSize = { s->width, s->height };
 
+	
+	// ---Filling the extisting references infos---
+	uint32_t slotInfos_count = 0;
+	StdVideoDecodeH264ReferenceInfo h264StdInfos[MAX_REF_FRAMES + 1] = { 0 };
+	VkVideoDecodeH264DpbSlotInfoKHR h264SlotInfos[MAX_REF_FRAMES + 1] = { 0 };
+	VkVideoPictureResourceInfoKHR picInfos[MAX_REF_FRAMES + 1] = { 0 };
+	VkVideoReferenceSlotInfoKHR slotInfos[MAX_REF_FRAMES + 1] = { 0 };
+
+	fill_ref_picture_infos(s, slotInfos, picInfos, h264SlotInfos, h264StdInfos, MAX_REF_FRAMES, isH264, &slotInfos_count);
+	assert(slotInfos_count <= MAX_REF_FRAMES);
+
+	// ---Filling the info of currently decoded picture---
 	assert(slice_info->sps_id < MAX_SPS_IDS); //TODO if
+
 	sps_t *sps = s->sps_array + slice_info->sps_id;
 	//printf("\tprev_msb: %d, prev_lsb: %d\n", s->prev_poc_msb, s->prev_poc_lsb);
 	slice_info->poc = get_picture_order_count(&s->prev_poc_msb, &s->prev_poc_lsb,
 											  sps->log2_max_pic_order_cnt_lsb_minus4, slice_info->poc_lsb);
-	//printf("\tpoc: %d display_frame_seq: %d\n", slice_info->poc, slice_info->frame_seq - s->idr_frame_seq);
+	//printf("\tcalculated poc: %d display_frame_seq: %d\n", slice_info->poc, slice_info->frame_seq - s->idr_frame_seq);
 
-	VkVideoPictureResourceInfoKHR picResourceInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR,
-													  .codedOffset = { 0, 0 }, // empty offset
-													  .codedExtent = videoSize,
-													  .baseArrayLayer = 0,
-													  .imageViewBinding = s->dpbViews[s->dpbDstPictureIdx] };
-	StdVideoDecodeH264ReferenceInfo h264ReferenceInfo = { .flags = { .top_field_flag = 0, .bottom_field_flag = 0 }, //TODO flags
-														  .FrameNum = slice_info->frame_num,
-														  .PicOrderCnt = { slice_info->poc, slice_info->poc } };
-	//TODO
-	VkVideoDecodeH264DpbSlotInfoKHR h264SlotInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR,
-													 .pStdReferenceInfo = &h264ReferenceInfo };
+	h264StdInfos[slotInfos_count] = (StdVideoDecodeH264ReferenceInfo){ .flags = { 0 },
+									  								   .FrameNum = slice_info->frame_num,
+									  								   .PicOrderCnt = { slice_info->poc, slice_info->poc } };
+	h264SlotInfos[slotInfos_count] = (VkVideoDecodeH264DpbSlotInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR,
+									   									.pStdReferenceInfo = h264StdInfos + slotInfos_count };
+	picInfos[slotInfos_count] = (VkVideoPictureResourceInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR,
+																 .codedOffset = { 0, 0 }, // empty offset
+																 .codedExtent = videoSize,
+																 .baseArrayLayer = 0,
+																 .imageViewBinding = s->dpbViews[slice_info->dpbIndex] };
 	VkVideoDecodeH265DpbSlotInfoKHR h265SlotInfo = {}; //TODO H.265
-	VkVideoReferenceSlotInfoKHR slotInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR,
-											 .pNext = isH264 ? (void*)&h264SlotInfo : (void*)&h265SlotInfo,
-											 .slotIndex = -1,
-											 .pPictureResource = &picResourceInfo };
-	
+	slotInfos[slotInfos_count] = (VkVideoReferenceSlotInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR,
+								   								.pNext = isH264 ? (void*)(h264SlotInfos + slotInfos_count)
+																				: (void*)&h265SlotInfo,
+								   								.slotIndex = -1, // currently decoded picture must have index -1
+								   								.pPictureResource = picInfos + slotInfos_count };
+	++slotInfos_count; // updating the count for currently added decoded picture
+
 	VkVideoBeginCodingInfoKHR beginCodingInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_BEGIN_CODING_INFO_KHR,
 												  .flags = 0,
 												  .videoSession = s->videoSession,
 												  .videoSessionParameters = s->videoSessionParams,
-												  .referenceSlotCount = 1,
-												  .pReferenceSlots = &slotInfo };
+												  .referenceSlotCount = slotInfos_count,
+												  .pReferenceSlots = slotInfos };
 	vkCmdBeginVideoCodingKHR(s->cmdBuffer, &beginCodingInfo);
 
-	if (s->resetVideoCoding)
+	if (s->resetVideoCoding) // before the first use of vulkan video session we must reset the video coding for that session
 	{
 		VkVideoCodingControlInfoKHR vidCodingControlInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_CODING_CONTROL_INFO_KHR,
-														 .flags = VK_VIDEO_CODING_CONTROL_RESET_BIT_KHR };
+															 .flags = VK_VIDEO_CODING_CONTROL_RESET_BIT_KHR }; // reset bit
 		vkCmdControlVideoCodingKHR(s->cmdBuffer, &vidCodingControlInfo);
 
 		s->resetVideoCoding = false;
@@ -2537,15 +2654,18 @@ static void end_nalu_writing(struct state_vulkan_decompress *s)
 
 static bool write_decoded_frame(struct state_vulkan_decompress *s, VkDeviceSize buffer_len, unsigned char *dst)
 {
+	assert(sizeof(unsigned char) == sizeof(uint8_t)); //DEBUG ?
 	assert(s->device != VK_NULL_HANDLE);
 	assert(s->bufferMemory != VK_NULL_HANDLE);
 	//assert(buffer_len > 0);
 
 	UNUSED(buffer_len); //DEBUG
-	VkDeviceSize firstPlaneSize = s->width * s->height;
-	VkDeviceSize secondPlaneSize = firstPlaneSize / 4;
-	VkDeviceSize chroma2Offset = secondPlaneSize / 2;
-	VkDeviceSize size = firstPlaneSize + secondPlaneSize;
+	//460800 = 640*480 + 153600 = 640*480 + 76800 + 76800 = 640*480 + 640*480/4 + 640*480/4
+	VkDeviceSize lumaSize = s->width * s->height;
+	VkDeviceSize chromaSize = lumaSize / 4;
+	VkDeviceSize size = lumaSize + 2 * chromaSize;
+
+	//printf("\t%d = %d + 2 * %d\n", size, lumaSize, chromaSize);
 
 	uint8_t *buffer_data = NULL;
 	VkResult result = vkMapMemory(s->device, s->bufferMemory, s->dstPicBufferMemoryOffset, size, 0, (void**)&buffer_data);
@@ -2554,39 +2674,27 @@ static bool write_decoded_frame(struct state_vulkan_decompress *s, VkDeviceSize 
 	assert(buffer_data != NULL);
 	assert(dst != NULL);
 
-	/*for (size_t i = 0; i < size; ++i)
+	//memset(dst, 0x99, (firstPlaneSize * sizeof(unsigned char)));
+	//memcpy(dst, buffer_data, firstPlaneSize);
+	/*for (size_t i = 0; i < firstPlaneSize; ++i)
 	{
 		dst[i] = (unsigned char)buffer_data[i];
 	}*/
+	//memset(dst + firstPlaneSize, 0xff, (secondPlaneSize * sizeof(unsigned char))/3);
+	//memcpy(dst + firstPlaneSize, buffer_data + firstPlaneSize, secondPlaneSize);
 
 	//DEBUG - attempt at translating NV12 into I420
-	for (size_t i = 0; i < firstPlaneSize; ++i)
+	// luma plane
+	for (size_t i = 0; i < lumaSize; ++i) dst[i] = (unsigned char)buffer_data[i];
+
+	// chroma plane
+	for (size_t i = 0; i < chromaSize; ++i)
 	{
-		dst[i] = (unsigned char)buffer_data[i];
-	}
+		unsigned char Cb = (unsigned char)buffer_data[lumaSize + 2*i],
+					  Cr = (unsigned char)buffer_data[lumaSize + 2*i + 1];
 
-	for (size_t i = 0; i < chroma2Offset; ++i)
-	{
-		//TODO probably does not work anyway
-		unsigned char Cb = 0, Cr = 0;
-		unsigned char firstB = (unsigned char)buffer_data[firstPlaneSize + 2*i],
-					  secondB = (unsigned char)buffer_data[firstPlaneSize + 2*i + 1];
-		uint16_t bytes = ((uint16_t)firstB << 8) | (uint16_t)secondB;
-
-		for (uint16_t j = 0, mask_Cb = 1, mask_Cr = 1, mask_bytes_Cb = 2, mask_bytes_Cr = 1;
-			 j < 8; ++j)
-		{
-			Cb |= (unsigned char)(mask_Cb * ((bytes & mask_bytes_Cb) != 0));
-			Cr |= (unsigned char)(mask_Cr * ((bytes & mask_bytes_Cr) != 0));
-
-			mask_Cb <<= 1;
-			mask_Cr <<= 1;
-			mask_bytes_Cb <<= 2;
-			mask_bytes_Cr <<= 2;
-		}
-
-		dst[firstPlaneSize + i] = Cb;
-		dst[firstPlaneSize + chroma2Offset + i] = Cr;
+		dst[lumaSize + i] = Cb;
+		dst[lumaSize + chromaSize + i] = Cr;
 	}
 
 	vkUnmapMemory(s->device, s->bufferMemory);
@@ -2793,8 +2901,10 @@ static bool handle_pps_nalu(struct state_vulkan_decompress *s, const unsigned ch
 
 static void fill_slice_info(struct state_vulkan_decompress *s, slice_info_t *si, const slice_header_t *sh)
 {
-	//bool is_intra, is_reference; int sps_id;int pps_id;int frame_num;int frame_seq; int poc;
-	si->is_intra = sh->slice_type == SH_SLICE_TYPE_I;
+	si->is_intra = sh->slice_type == SH_SLICE_TYPE_I || sh->slice_type == SH_SLICE_TYPE_I_ONLY;
+
+	assert(si->idr_pic_id == -1 || si->idr_pic_id == sh->idr_pic_id);
+	si->idr_pic_id = sh->idr_pic_id;
 
 	assert(si->pps_id == -1 || si->pps_id == sh->pic_parameter_set_id);
 	si->pps_id = sh->pic_parameter_set_id;
@@ -2847,62 +2957,98 @@ static bool handle_sh_nalu(struct state_vulkan_decompress *s, const unsigned cha
 	//print_sh(&sh);
 	fill_slice_info(s, slice_info, &sh);
 
+	//TODO this - from ITU-T H.264 Specification, 7.4.3
+	/*When present, the value of the slice header syntax elements pic_parameter_set_id, frame_num, field_pic_flag,
+	bottom_field_flag, idr_pic_id, pic_order_cnt_lsb, delta_pic_order_cnt_bottom, delta_pic_order_cnt[ 0 ],
+	delta_pic_order_cnt[ 1 ], sp_for_switch_flag, and slice_group_change_cycle shall be the same in all slice headers of a
+	coded picture. */
+
 	destroy_rbsp(rbsp);
 	return true;
 }
 
-static uint32_t get_ref_slot_from_queue(struct state_vulkan_decompress *s, uint32_t index)
+static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_info, VkDeviceSize decodeBufferSize,
+						 uint32_t slice_offsets[], uint32_t slice_offsets_count)
 {
-	uint32_t wrapped = (s->referenceSlotsQueue_start) + index % MAX_REF_FRAMES;
-	return s->referenceSlotsQueue[wrapped];
+	//TODO
+	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
+	const VkExtent2D videoSize = { s->width, s->height };
+	VkDeviceSize decodeBufferSizeAligned = (decodeBufferSize + (s->decodeBufferOffsetAlignment - 1))
+										   & ~(s->decodeBufferOffsetAlignment - 1); //alignment bit mask magic
+	//assert(slice_info.pps_id < MAX_PPS_IDS); //TODO if
+	//pps_t *pps = s->pps_array + slice_info.pps_id;
+	//assert(slice_info.sps_id < MAX_SPS_IDS); //TODO if
+	//sps_t *sps = s->sps_array + slice_info.sps_id;
+	
+	assert(decodeBufferSizeAligned <= s->decodeBufferSize);
+	assert(slice_offsets_count > 0);
+	// for IDR pictures the id must be valid
+	assert(!slice_info.is_intra || !slice_info.is_reference || slice_info.idr_pic_id >= 0);
+
+	assert(isH264); //TODO H.265
+
+	// ---Filling infos related to active reference pictures---
+	// similar to filling of infos in begin_video_coding_scope
+	uint32_t refSlotInfos_count = 0;
+	StdVideoDecodeH264ReferenceInfo h264RefStdInfos[MAX_REF_FRAMES] = { 0 };
+	VkVideoDecodeH264DpbSlotInfoKHR h264RefSlotInfos[MAX_REF_FRAMES] = { 0 };
+	VkVideoPictureResourceInfoKHR refPicInfos[MAX_REF_FRAMES] = { 0 };
+	VkVideoReferenceSlotInfoKHR refSlotInfos[MAX_REF_FRAMES] = { 0 };
+
+	fill_ref_picture_infos(s, refSlotInfos, refPicInfos, h264RefSlotInfos, h264RefStdInfos,
+						   MAX_REF_FRAMES, isH264, &refSlotInfos_count);
+
+	// ---Filling infos related to currently decoded picture---
+	VkVideoPictureResourceInfoKHR dstVideoPicInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR,
+													  .codedOffset = { 0, 0 }, // empty offset
+													  .codedExtent = videoSize,
+													  .baseArrayLayer = 0,
+													  .imageViewBinding = s->dpbViews[slice_info.dpbIndex] };
+	StdVideoDecodeH264ReferenceInfo h264DstStdInfo = { .flags = { 0 },
+													   .FrameNum = slice_info.frame_num,
+													   .PicOrderCnt = { slice_info.poc, slice_info.poc } };
+	VkVideoDecodeH264DpbSlotInfoKHR h264DstSlotInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR,
+														.pStdReferenceInfo = &h264DstStdInfo };
+	VkVideoDecodeH265DpbSlotInfoKHR h265DstSlotInfo = {}; //TODO H.265
+	VkVideoReferenceSlotInfoKHR dstSlotInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR,
+												.pNext = isH264 ? (void*)&h264DstSlotInfo : (void*)&h265DstSlotInfo,
+												.slotIndex = slice_info.dpbIndex,
+												.pPictureResource = &dstVideoPicInfo };
+
+	// ---Filling infos related to decodeBuffer---
+	StdVideoDecodeH264PictureInfo h264DecodeStdInfo = { .flags = { .field_pic_flag = 0,
+																   .is_intra = slice_info.is_intra,
+																   .is_reference = slice_info.is_reference,
+																    //TODO this could be potentially wrong,
+																	//maybe itroduce new member to slice_info_t for it
+																   .IdrPicFlag = slice_info.is_intra && slice_info.is_reference,
+																   },
+														.seq_parameter_set_id = slice_info.sps_id,
+														.pic_parameter_set_id = slice_info.pps_id,
+														.frame_num = slice_info.frame_num,
+														.idr_pic_id = slice_info.idr_pic_id,
+														.PicOrderCnt = { slice_info.poc, slice_info.poc } };
+	VkVideoDecodeH264PictureInfoKHR h264DecodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PICTURE_INFO_KHR,
+													   .pStdPictureInfo = &h264DecodeStdInfo,
+													   .sliceCount = slice_offsets_count,
+													   .pSliceOffsets = slice_offsets };
+	//TODO H.265
+	VkVideoDecodeH265PictureInfoKHR h265DecodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_PICTURE_INFO_KHR };
+	VkVideoDecodeInfoKHR decodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_INFO_KHR,
+										.pNext = isH264 ? (void*)&h264DecodeInfo : (void*)&h265DecodeInfo,
+										.flags = 0,
+										.srcBuffer = s->decodeBuffer,
+										.srcBufferOffset = 0,
+										.srcBufferRange = decodeBufferSizeAligned,
+										.dstPictureResource = dstVideoPicInfo,
+										// this must be the same as dstPictureResource when VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR
+										// otherwise must not be the same as dstPictureResource
+										.pSetupReferenceSlot = &dstSlotInfo,
+										//specifies the needed used references (but not the decoded frame)
+										.referenceSlotCount = refSlotInfos_count,
+										.pReferenceSlots = refSlotInfos };
+	vkCmdDecodeVideoKHR(s->cmdBuffer, &decodeInfo);
 }
-
-/*static VkVideoPictureResourceInfoKHR get_dst_picture_info(struct state_vulkan_decompress *s)
-{
-	VkExtent2D videoSize = { s->width, s->height };
-
-	VkVideoPictureResourceInfoKHR info = { .sType = VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR,
-										   .codedOffset = { 0, 0 }, // no offset
-										   .codedExtent = videoSize,
-										   .baseArrayLayer = 0,
-										   .imageViewBinding = s->dpbView[s->dpbDstPictureIdx] };
-	return info;
-}
-
-static bool fill_ref_picture_infos(VkVideoReferenceSlotInfoKHR refInfos[], VkVideoPictureResourceInfoKHR picInfos[],
-								   uint32_t count, bool isH264)
-{
-	// count is a size of both given arrays (should be at most same as MAX_REF_FRAMES)
-	assert(count <= MAX_REF_FRAMES);
-
-	VkExtent2D videoSize = { s->width, s->height };
-
-	for (uint32_t i = 0; i < count; ++i)
-	{
-		uint32_t slotIndex = get_ref_slot_from_queue(i);
-		assert(slotIndex < MAX_REF_FRAMES + 1);
-		VkImageView view = s->dpbView[slotIndex];
-		assert(view != VK_NULL_HANDLE);
-
-		//TODO infos mustnt be local variables!
-		StdVideoDecodeH264ReferenceInfo h264StdRefInfo = { .flags = ,
-														   .FrameNum = };
-		VkVideoDecodeH264DpbSlotInfoKHR h264RefInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR,
-														.pStdReferenceInfo = &h264StdRefInfo }; //TODO
-		VkVideoDecodeH265DpbSlotInfoKHR h265RefInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_DPB_SLOT_INFO_KHR }; //TODO
-		picInfos[i] = (VkVideoPictureResourceInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR,
-													   .codedOffset = { 0, 0 }, // no offset
-													   .codedExtent = videoSize,
-													   .baseArrayLayer = 0,
-													   .imageViewBinding = view };
-		refInfos[i] = (VkVideoReferenceSlotInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR,
-													 .pNext = isH264 ? (void*)&h264RefInfo : (void*)&h265RefInfo,
-													 .slotIndex = slotIndex, //TODO is it the same slot index?
-													 .pPictureResource = picInfos + i };
-	}
-
-	return true;
-}*/
 
 static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsigned char *src,
                 unsigned int src_len, int frame_seq, struct video_frame_callbacks *callbacks,
@@ -2961,11 +3107,20 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	}
 	s->prepared = true;
 
+	int prev_frame_seq = s->current_frame_seq;
+	s->current_frame_seq = frame_seq;
+	if (frame_seq > prev_frame_seq + 1)
+	{
+		puts("Missed frame!");
+		clear_the_ref_slot_queue(s);
+	}
+
 	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
 	// we hope to fill those values from NAL slice units
-	slice_info_t slice_info = { .is_reference = false, .is_intra = false, .sps_id = -1, .pps_id = -1,
-								.frame_num = -1, .frame_seq = frame_seq, .poc = -1, .poc_lsb = -1 };
-	uint32_t slice_offsets[MAX_SLICES];
+	slice_info_t slice_info = { .is_reference = false, .is_intra = false, .idr_pic_id = -1, .sps_id = -1, .pps_id = -1,
+								.frame_num = -1, .frame_seq = frame_seq, .poc_lsb = -1,
+								.dpbIndex = smallest_dpb_index_not_in_queue(s) };
+	uint32_t slice_offsets[MAX_SLICES]; //TODO check those
 	uint32_t slice_offsets_count = 0; 
 
 	// ---Copying NAL units into s->decodeBuffer---
@@ -3024,6 +3179,7 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 						s->prev_poc_lsb = 0;
 						s->prev_poc_msb = 0;
 						s->idr_frame_seq = frame_seq;
+						clear_the_ref_slot_queue(s); // we dont need those references anymore
 
 						bool sh_ret = handle_sh_nalu(s, nal_payload, nal_payload_len, nalu_type, nalu_idc, &slice_info);
 						UNUSED(sh_ret); //TODO maybe error?
@@ -3108,7 +3264,7 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 		return res;
 	}
 
-	// ---VkImage layout transfering before vido coding scope---
+	// ---VkImage layout transfering before video coding scope---
 	if (!s->dpbHasDefinedLayout)	// if VkImages in DPB are in undefined layout we need to transfer them into decode layout
 	{
 		for (size_t i = 0; i < MAX_REF_FRAMES + 1; ++i)
@@ -3130,84 +3286,10 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 		}
 	}
 
-	begin_video_coding_scope(s, &slice_info); //TODO decompress
-	{
-		/*VkVideoPictureResourceInfoKHR dstPictureInfo = get_dst_picture_info(s);
-		VkVideoPictureResourceInfoKHR referencePictureInfos[MAX_REF_FRAMES] = { 0 };
-		VkVideoReferenceSlotInfoKHR dstSlotInfo = {}; //TODO
-		VkVideoReferenceSlotInfoKHR referenceSlotInfos[MAX_REF_FRAMES] = { 0 };
-		uint32_t referencePicture_count = s->referenceSlotsQueue_count;
-		
-		assert(referencePicture_count <= MAX_REF_FRAMES);
-		if (!fill_ref_picture_infos(referenceSlotInfos, referencePictureInfos, referencePicture_count, isH264))
-		{
-			//TODO err
-			return res;
-		}*/
-
-		//TODO test
-		const VkExtent2D videoSize = { s->width, s->height };
-
-		assert(slice_info.pps_id < MAX_PPS_IDS); //TODO if
-		pps_t *pps = s->pps_array + slice_info.pps_id;
-		assert(slice_info.sps_id < MAX_SPS_IDS); //TODO if
-		sps_t *sps = s->sps_array + slice_info.sps_id;
-
-		VkDeviceSize alignedNaluBufferWritten = (nalu_buffer_written + (s->decodeBufferOffsetAlignment - 1))
-												& ~(s->decodeBufferOffsetAlignment - 1); //alignment bit mask magic
-
-		VkVideoPictureResourceInfoKHR dstPictureInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR,
-														.codedOffset = { 0, 0 }, // empty offset
-														.codedExtent = videoSize,
-														.baseArrayLayer = 0,
-														.imageViewBinding = s->dpbViews[s->dpbDstPictureIdx] };
-		StdVideoDecodeH264ReferenceInfo h264ReferenceInfo = { .flags = { .top_field_flag = 0, .bottom_field_flag = 0 }, //TODO flags
-															.FrameNum = slice_info.frame_num,
-															.PicOrderCnt = { slice_info.poc, slice_info.poc } };
-		//TODO
-		VkVideoDecodeH264DpbSlotInfoKHR h264SlotInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR,
-														.pStdReferenceInfo = &h264ReferenceInfo };
-		VkVideoDecodeH265DpbSlotInfoKHR h265SlotInfo = {}; //TODO H.265
-		VkVideoReferenceSlotInfoKHR dstSlotInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR,
-												.pNext = isH264 ? (void*)&h264SlotInfo : (void*)&h265SlotInfo,
-												.slotIndex = s->dpbDstPictureIdx,
-												.pPictureResource = &dstPictureInfo };
-
-		StdVideoDecodeH264PictureInfo h264PicInfo = { .flags = { .is_reference = slice_info.is_reference,
-																.field_pic_flag = 0,
-																.is_intra = slice_info.is_intra,
-																.IdrPicFlag = 0, //TODO
-																},
-													.seq_parameter_set_id = slice_info.sps_id,
-													.pic_parameter_set_id = slice_info.pps_id,
-													.frame_num = slice_info.frame_num,
-													//.idr_pic_id = , //TODO
-													.PicOrderCnt = { slice_info.poc, slice_info.poc } };
-		VkVideoDecodeH264PictureInfoKHR h264DecodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PICTURE_INFO_KHR,
-														.pStdPictureInfo = (void*)&h264PicInfo,
-														.sliceCount = slice_offsets_count,
-														.pSliceOffsets = slice_offsets };
-		VkVideoDecodeH265PictureInfoKHR h265DecodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_PICTURE_INFO_KHR };
-		VkVideoDecodeInfoKHR decodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_INFO_KHR,
-											.pNext = isH264 ? (void*)&h264DecodeInfo : (void*)&h265DecodeInfo,
-											.flags = 0,
-											.srcBuffer = s->decodeBuffer,
-											.srcBufferOffset = 0,
-											.srcBufferRange = alignedNaluBufferWritten,
-											.dstPictureResource = dstPictureInfo,
-											// this must be the same as dstPictureResource when VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR
-											// otherwise must not be the same as dstPictureResource
-											.pSetupReferenceSlot = &dstSlotInfo,
-											//specifies the needed used references (but not the decoded frame)
-											//.referenceSlotCount = referencePicture_count,
-											//.pReferenceSlots = referenceSlotInfos,
-											.referenceSlotCount = 0,
-											.pReferenceSlots = NULL,
-											};
-		vkCmdDecodeVideoKHR(s->cmdBuffer, &decodeInfo);
-	}
+	// ---Video coding scope---
+	begin_video_coding_scope(s, &slice_info);
+	decode_frame(s, slice_info, nalu_buffer_written, slice_offsets, slice_offsets_count);
 	end_video_coding_scope(s);
-	
 	
 	// ---VkImage synchronization and layout transfering after vido coding scope---
 	for (size_t i = 0; i < MAX_REF_FRAMES + 1; ++i)
@@ -3220,18 +3302,19 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	assert(s->dstPicBuffer != VK_NULL_HANDLE);
 	assert(s->dpbFormat == VK_FORMAT_G8_B8R8_2PLANE_420_UNORM); //TODO requirement
 
-	VkDeviceSize firstPlaneSize = s->width * s->height; //TODO
-	VkDeviceSize secondPlaneSize = firstPlaneSize / 4;	//TODO
+	VkDeviceSize firstPlaneSize = s->width * s->height;
+	VkDeviceSize secondPlaneSize = firstPlaneSize / 4;
 
 	VkImageAspectFlagBits aspectFlags[2] = { VK_IMAGE_ASPECT_PLANE_0_BIT, VK_IMAGE_ASPECT_PLANE_1_BIT };
 	VkBufferImageCopy dstPicRegions[2] = { { .bufferOffset = s->dstPicBufferMemoryOffset,
 											 .imageOffset = { 0, 0, 0 }, // empty offset
-											 .imageExtent = { s->width, s->height, 1 }, //videoSize with depth == 1
+											 // videoSize with depth == 1:
+											 .imageExtent = { s->width, s->height, 1 },
 											 .imageSubresource = { .aspectMask = aspectFlags[0],
 											 					   .mipLevel = 0,
 											 					   .baseArrayLayer = 0,
 											 					   .layerCount = 1 } },
-										   { .bufferOffset = s->dstPicBufferMemoryOffset + firstPlaneSize, //TODO offset
+										   { .bufferOffset = s->dstPicBufferMemoryOffset + firstPlaneSize, //TODO check this
 											 .imageOffset = { 0, 0, 0 }, // empty offset
 											 // one half because VK_FORMAT_G8_B8R8_2PLANE_420_UNORM:
 											 .imageExtent = { s->width / 2, s->height / 2, 1 }, 
@@ -3239,7 +3322,8 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 											 					   .mipLevel = 0,
 											 					   .baseArrayLayer = 0,
 											 					   .layerCount = 1 } } };
-	vkCmdCopyImageToBuffer(s->cmdBuffer, s->dpb[s->dpbDstPictureIdx], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+	//TODO this expects display order to be the same as decode order
+	vkCmdCopyImageToBuffer(s->cmdBuffer, s->dpb[slice_info.dpbIndex], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 						   s->dstPicBuffer, 2, dstPicRegions);
 
 	if (!end_cmd_buffer(s))
@@ -3259,6 +3343,14 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	{
 		printf("[vulkan_decode] Failed to submit the decode cmd buffer into queue!\n");
 		return res;
+	}
+
+	// ---Reference queue management---
+	// can be done before synchronization as we only work with slice_infos
+	if (slice_info.is_reference) // however insert only if the decoded frame actually is a reference
+	{
+		// new value for s->dpbDstPictureIdx gets set in insert_ref_slot_into_queue!
+		insert_ref_slot_into_queue(s, slice_info);
 	}
 
 	// ---Synchronization---
@@ -3283,8 +3375,7 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	}
 
 	// ---Writing the decoded frame data---
-	//puts("writing the decoded frame:");
-	if (!write_decoded_frame(s, firstPlaneSize + secondPlaneSize, dst))
+	if (!write_decoded_frame(s, firstPlaneSize + 2 * secondPlaneSize, dst))
 	{
 		printf("[vulkan_decode] Failed to write the decoded frame into the destination buffer!\n");
 		return res;
