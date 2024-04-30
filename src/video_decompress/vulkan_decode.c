@@ -2970,7 +2970,6 @@ static bool handle_sh_nalu(struct state_vulkan_decompress *s, const unsigned cha
 static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_info, VkDeviceSize decodeBufferSize,
 						 uint32_t slice_offsets[], uint32_t slice_offsets_count)
 {
-	//TODO
 	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
 	const VkExtent2D videoSize = { s->width, s->height };
 	VkDeviceSize decodeBufferSizeAligned = (decodeBufferSize + (s->decodeBufferOffsetAlignment - 1))
@@ -3306,7 +3305,7 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	VkDeviceSize secondPlaneSize = firstPlaneSize / 4;
 
 	VkImageAspectFlagBits aspectFlags[2] = { VK_IMAGE_ASPECT_PLANE_0_BIT, VK_IMAGE_ASPECT_PLANE_1_BIT };
-	VkBufferImageCopy dstPicRegions[2] = { { .bufferOffset = s->dstPicBufferMemoryOffset,
+	VkBufferImageCopy dstPicRegions[2] = { { .bufferOffset = 0,
 											 .imageOffset = { 0, 0, 0 }, // empty offset
 											 // videoSize with depth == 1:
 											 .imageExtent = { s->width, s->height, 1 },
@@ -3314,7 +3313,7 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 											 					   .mipLevel = 0,
 											 					   .baseArrayLayer = 0,
 											 					   .layerCount = 1 } },
-										   { .bufferOffset = s->dstPicBufferMemoryOffset + firstPlaneSize, //TODO check this
+										   { .bufferOffset = firstPlaneSize, //TODO check this
 											 .imageOffset = { 0, 0, 0 }, // empty offset
 											 // one half because VK_FORMAT_G8_B8R8_2PLANE_420_UNORM:
 											 .imageExtent = { s->width / 2, s->height / 2, 1 }, 
