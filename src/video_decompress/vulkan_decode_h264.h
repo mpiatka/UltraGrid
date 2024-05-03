@@ -348,8 +348,8 @@ static void print_sps(sps_t *sps) //DEBUG
 
 static void print_sh(slice_header_t *sh) //DEBUG
 {
-	printf("frame_num: %d, idr_pic_id: %d, slice_type: %d, pic_parameter_set_id: %d, poc_lsb: %d\n",
-			sh->frame_num, sh->idr_pic_id, sh->slice_type, sh->pic_parameter_set_id, sh->pic_order_cnt_lsb);
+	printf("frame_num: %d, idr_pic_id: %d, slice_type: %d, pic_parameter_set_id: %d, poc_lsb: %d, long term: %d\n",
+			sh->frame_num, sh->idr_pic_id, sh->slice_type, sh->pic_parameter_set_id, sh->pic_order_cnt_lsb, sh->drpm.long_term_reference_flag);
 }
 
 static int intlog2(int x) //TODO check if its not already provided
@@ -1030,39 +1030,52 @@ static bool read_slice_header(slice_header_t *sh, int nal_type, int nal_idc,
 	return true;
 }
 
-static int32_t get_picture_order_count(int *prev_poc_msb, int *prev_poc_lsb,
-									   int sps_log2_max_pic_order_cnt_lsb_minus4, int sh_pic_order_cnt_lsb)
+static int32_t get_picture_order_count(const sps_t *sps, int sh_pic_order_cnt_lsb, int sh_frame_num, bool sh_is_reference,
+									   int *prev_poc_msb, int *prev_poc_lsb)
 {
-	// Type 0 POC value calculation
+	// calculates picture order count (POC) for given slice header
+	// reference: Section 3 at https://www.vcodex.com/h264avc-picture-management/
+	//NOTE: prev_poc_msb and prev_poc_lsb are only relevant and updated when POC is of Type 0
+	assert(sps->pic_order_cnt_type == 0 || sps->pic_order_cnt_type == 2); //TODO handle other types as well
 
-	// For each slice, do the following:
-	int prev_pic_order_cnt_msb = *prev_poc_msb;
-	int prev_pic_order_cnt_lsb = *prev_poc_lsb;
-
-	// Rec. ITU-T H.264 (08/2021) page 77
-	int max_pic_order_cnt_lsb = 1 << (sps_log2_max_pic_order_cnt_lsb_minus4 + 4);
-	int pic_order_cnt_lsb = sh_pic_order_cnt_lsb;
-
-	// Rec. ITU-T H.264 (08/2021) page 115
-	// from https://videonerd.website/frames-with-negative-pocs/
-	int pic_order_cnt_msb = 0;
-	if (pic_order_cnt_lsb < prev_pic_order_cnt_lsb && (prev_pic_order_cnt_lsb - pic_order_cnt_lsb) >= max_pic_order_cnt_lsb / 2)
+	if (sps->pic_order_cnt_type == 0)
 	{
-		pic_order_cnt_msb = prev_pic_order_cnt_msb + max_pic_order_cnt_lsb; // pic_order_cnt_lsb wrapped around
-	}
-	else if (pic_order_cnt_lsb > prev_pic_order_cnt_lsb && (pic_order_cnt_lsb - prev_pic_order_cnt_lsb) > max_pic_order_cnt_lsb / 2)
-	{
-		pic_order_cnt_msb = prev_pic_order_cnt_msb - max_pic_order_cnt_lsb; // here negative POC might occur
+		// Type 0 POC value calculation:
+		// For each slice, do the following:
+		int prev_pic_order_cnt_msb = *prev_poc_msb;
+		int prev_pic_order_cnt_lsb = *prev_poc_lsb;
+
+		// Rec. ITU-T H.264 (08/2021) page 77
+		int max_pic_order_cnt_lsb = 1 << (sps->log2_max_pic_order_cnt_lsb_minus4 + 4);
+		int pic_order_cnt_lsb = sh_pic_order_cnt_lsb;
+
+		// Rec. ITU-T H.264 (08/2021) page 115
+		// from https://videonerd.website/frames-with-negative-pocs/
+		int pic_order_cnt_msb = 0;
+		if (pic_order_cnt_lsb < prev_pic_order_cnt_lsb && (prev_pic_order_cnt_lsb - pic_order_cnt_lsb) >= max_pic_order_cnt_lsb / 2)
+		{
+			pic_order_cnt_msb = prev_pic_order_cnt_msb + max_pic_order_cnt_lsb; // pic_order_cnt_lsb wrapped around
+		}
+		else if (pic_order_cnt_lsb > prev_pic_order_cnt_lsb && (pic_order_cnt_lsb - prev_pic_order_cnt_lsb) > max_pic_order_cnt_lsb / 2)
+		{
+			pic_order_cnt_msb = prev_pic_order_cnt_msb - max_pic_order_cnt_lsb; // here negative POC might occur
+		}
+		else
+		{
+			pic_order_cnt_msb = prev_pic_order_cnt_msb;
+		}
+		*prev_poc_lsb = pic_order_cnt_lsb;
+		*prev_poc_msb = pic_order_cnt_msb;
+
+		// final value of PicOrderCnt:
+		//printf("\teturning poc: %d\n", (int32_t)(pic_order_cnt_msb + pic_order_cnt_lsb));
+		return (int32_t)(pic_order_cnt_msb + pic_order_cnt_lsb);
 	}
 	else
 	{
-		pic_order_cnt_msb = prev_pic_order_cnt_msb;
+		// Type 2 POC value calculation:
+		return (int32_t)(sh_is_reference ? 2*sh_frame_num : 2*sh_frame_num - 1);
 	}
-	*prev_poc_lsb = pic_order_cnt_lsb;
-	*prev_poc_msb = pic_order_cnt_msb;
-
-	// final value of PicOrderCnt:
-	return (int32_t)(pic_order_cnt_msb + pic_order_cnt_lsb);
 }
 
 
