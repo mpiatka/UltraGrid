@@ -314,11 +314,13 @@ struct state_vulkan_decompress
 	int pitch; //TODO
 	codec_t out_codec;
 
-	VkImage outputImage;	// output decoded image in outputImageFormat, must be destroyed if valid
-	VkFormat outputImageFormat;
+	VkImage outputLumaPlane, outputChromaPlane;	// planes for output decoded image, must be destroyed if valid
+	VkDeviceMemory outputImageMemory;
+	VkDeviceSize outputChromaPlaneOffset;
 };
 
 static void free_buffers(struct state_vulkan_decompress *s);
+static void destroy_output_image(struct state_vulkan_decompress *s);
 static void destroy_dpb(struct state_vulkan_decompress *s);
 
 static bool check_for_instance_extensions(const char * const requiredInstanceextensions[])
@@ -972,8 +974,10 @@ static void * vulkan_decompress_init(void)
 													.poc = -1, .poc_lsb = -1 };
 	}
 
-	s->outputImage = VK_NULL_HANDLE;
-	s->outputImageFormat = VK_FORMAT_UNDEFINED;
+	s->outputLumaPlane = VK_NULL_HANDLE;
+	s->outputChromaPlane = VK_NULL_HANDLE;
+	s->outputImageMemory = VK_NULL_HANDLE;
+	s->outputChromaPlaneOffset = 0;
 
 	printf("[vulkan_decode] Initialization finished successfully.\n");
 	return s;
@@ -1007,6 +1011,8 @@ static void vulkan_decompress_done(void *state)
 			vkDestroyVideoSessionKHR(s->device, s->videoSession, NULL);
 	
 	free_video_session_memory(s);
+
+	destroy_output_image(s);
 
 	destroy_dpb(s);
 	
@@ -1092,8 +1098,6 @@ static bool configure_with(struct state_vulkan_decompress *s, struct video_desc 
 	s->prev_poc_msb = 0;
 	s->idr_frame_seq = 0;
 	s->current_frame_seq = 0;
-
-	s->outputImageFormat = VK_FORMAT_UNDEFINED;
 
 	return true;
 }
@@ -1710,6 +1714,138 @@ static void transfer_image_layout(VkCommandBuffer cmdBuffer, VkImage image,
 	vkCmdPipelineBarrier2KHR(cmdBuffer, &barrierInfo);
 }
 
+static bool create_output_image(struct state_vulkan_decompress *s)
+{
+	assert(s->device != VK_NULL_HANDLE);
+	assert(s->outputLumaPlane == VK_NULL_HANDLE);
+	assert(s->outputChromaPlane == VK_NULL_HANDLE);
+	assert(s->outputImageMemory == VK_NULL_HANDLE);
+
+	const VkExtent3D videoSize = { s->width, s->height, 1 }; //depth must be 1 for VK_IMAGE_TYPE_2D
+
+	// ---Creating the luma plane---
+	VkImageCreateInfo lumaPlaneInfo = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+									 	.pNext = NULL,
+									 	.flags = 0,
+									 	.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+									 			 VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+									 	.imageType = VK_IMAGE_TYPE_2D,
+									 	.mipLevels = 1,
+									 	.samples = VK_SAMPLE_COUNT_1_BIT,
+									 	.format = VK_FORMAT_R8_UNORM, //TODO
+									 	.extent = videoSize,
+									 	.arrayLayers = 1,
+									 	.tiling = VK_IMAGE_TILING_LINEAR,
+									 	.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+									 	.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+									 	.queueFamilyIndexCount = 1,
+									 	.pQueueFamilyIndices = &s->queueFamilyIdx };
+	VkResult result = vkCreateImage(s->device, &lumaPlaneInfo, NULL, &s->outputLumaPlane);
+	if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to create vulkan image for the output frame (luma plane)!\n");
+		destroy_output_image(s);
+		return false;
+	}
+
+	// ---Creating the chroma plane---
+	VkImageCreateInfo chromaPlaneInfo = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+									 	   .pNext = NULL,
+									 	   .flags = 0,
+									 	   .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+									 	   			VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+									 	   .imageType = VK_IMAGE_TYPE_2D,
+									 	   .mipLevels = 1,
+									 	   .samples = VK_SAMPLE_COUNT_1_BIT,
+									 	   .format = VK_FORMAT_R8G8_UNORM, //TODO
+									 	   .extent = { videoSize.width / 2, videoSize.height / 2, 1 },
+									 	   .arrayLayers = 1,
+									 	   .tiling = VK_IMAGE_TILING_LINEAR,
+									 	   .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+									 	   .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+									 	   .queueFamilyIndexCount = 1,
+									 	   .pQueueFamilyIndices = &s->queueFamilyIdx };
+	result = vkCreateImage(s->device, &chromaPlaneInfo, NULL, &s->outputChromaPlane);
+	if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to create vulkan image for the output frame (chroma plane)!\n");
+		destroy_output_image(s);
+		return false;
+	}
+
+	// ---Getting wanted memory requirements and memory type---
+	VkMemoryRequirements lumaMemReq, chromaMemReq;
+	vkGetImageMemoryRequirements(s->device, s->outputLumaPlane, &lumaMemReq);
+	vkGetImageMemoryRequirements(s->device, s->outputChromaPlane, &chromaMemReq);
+
+	VkDeviceSize chromaAlignment = chromaMemReq.alignment;
+	s->outputChromaPlaneOffset = (lumaMemReq.size + (chromaAlignment - 1)) & ~(chromaAlignment - 1); //alignment bit mask magic
+
+	printf("\tluma size: %u, chroma size: %u, chroma offset: %u\n",
+			lumaMemReq.size, chromaMemReq.size, s->outputChromaPlaneOffset);
+
+	uint32_t imgMemoryTypeIdx = 0;
+	if (!find_memory_type(s, lumaMemReq.memoryTypeBits & chromaMemReq.memoryTypeBits, // taking the susbet
+						  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+						  &imgMemoryTypeIdx))
+	{
+		printf("[vulkan_decode] Failed to find required memory type for output image!\n");
+		destroy_output_image(s);
+		return false;
+	}
+	
+	// ---Allocating memory for both planes---
+	VkMemoryAllocateInfo allocInfo = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+									   .allocationSize = s->outputChromaPlaneOffset + chromaMemReq.size,
+									   .memoryTypeIndex = imgMemoryTypeIdx };
+	result = vkAllocateMemory(s->device, &allocInfo, NULL, &s->outputImageMemory);
+	if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to allocate device memory for output image!\n");
+		destroy_output_image(s);
+		return false;
+	}
+
+	// ---Binding memory for each plane---
+	result = vkBindImageMemory(s->device, s->outputLumaPlane, s->outputImageMemory, 0);
+	if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to bind vulkan device memory to output image (luma plane)!\n");
+		destroy_output_image(s);
+		return false;
+	}
+
+	result = vkBindImageMemory(s->device, s->outputChromaPlane, s->outputImageMemory, s->outputChromaPlaneOffset);
+	if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to bind vulkan device memory to output image (chroma plane)!\n");
+		destroy_output_image(s);
+		return false;
+	}
+
+	//TODO outputImage views for each plane?
+
+	return true;
+}
+
+static void destroy_output_image(struct state_vulkan_decompress *s)
+{
+	// freeing both planes
+	if (vkDestroyImage != NULL && s->device != VK_NULL_HANDLE)
+	{
+		vkDestroyImage(s->device, s->outputLumaPlane, NULL);
+		vkDestroyImage(s->device, s->outputChromaPlane, NULL);
+	}
+
+	s->outputLumaPlane = VK_NULL_HANDLE;
+	s->outputChromaPlane = VK_NULL_HANDLE;
+
+	// freeing backing device memory
+	if (vkFreeMemory != NULL && s->device != VK_NULL_HANDLE) vkFreeMemory(s->device, s->outputImageMemory, NULL);
+	
+	s->outputImageMemory = VK_NULL_HANDLE;
+}
+
 static bool create_dpb(struct state_vulkan_decompress *s, VkVideoProfileListInfoKHR *videoProfileList)
 {
 	// Creates the DPB (decoded picture buffer) images and output image for decoded result,
@@ -1758,41 +1894,12 @@ static bool create_dpb(struct state_vulkan_decompress *s, VkVideoProfileListInfo
 		}
 	}
 
-	// ---Creating output VkImage---
-	VkImageCreateInfo outputImgInfo = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-									 	.pNext = NULL,
-									 	.flags = 0,
-									 	.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-									 			 VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-									 	.imageType = imageType,
-									 	.mipLevels = 1,
-									 	.samples = VK_SAMPLE_COUNT_1_BIT,
-									 	.format = s->outputImageFormat,
-									 	.extent = videoSize,
-									 	.arrayLayers = 1,
-									 	.tiling = VK_IMAGE_TILING_LINEAR,
-									 	.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-									 	.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-									 	.queueFamilyIndexCount = 1,
-									 	.pQueueFamilyIndices = &s->queueFamilyIdx };
-	VkResult result = vkCreateImage(s->device, &outputImgInfo, NULL, &s->outputImage);
-	if (result != VK_SUCCESS)
-	{
-		printf("[vulkan_decode] Failed to create vulkan image for the output frame!\n");
-		destroy_dpb(s);
-		return false;
-	}
-
 	// ---Device memory allocation---
 	VkMemoryRequirements dpbImgMemoryRequirements;
 	vkGetImageMemoryRequirements(s->device, s->dpb[0], &dpbImgMemoryRequirements);
 
-	VkMemoryRequirements outputImgMemoryRequirements;
-	vkGetImageMemoryRequirements(s->device, s->outputImage, &outputImgMemoryRequirements);
-
 	uint32_t imgMemoryTypeIdx = 0;
-	if (!find_memory_type(s, dpbImgMemoryRequirements.memoryTypeBits & outputImgMemoryRequirements.memoryTypeBits, // take the intersection
-						  0, &imgMemoryTypeIdx))
+	if (!find_memory_type(s, dpbImgMemoryRequirements.memoryTypeBits, 0, &imgMemoryTypeIdx))
 	{
 		printf("[vulkan_decode] Failed to find required memory type for DPB!\n");
 		destroy_dpb(s);
@@ -1804,19 +1911,11 @@ static bool create_dpb(struct state_vulkan_decompress *s, VkVideoProfileListInfo
 									 & ~(dpbImgAlignment - 1); //alignment bit mask magic
 	VkDeviceSize dpbSize = dpbImgAlignedSize * dpb_len;
 
-	VkDeviceSize outputImgAlignment = outputImgMemoryRequirements.alignment;
-	VkDeviceSize outputImgMemoryOffset = (dpbSize + (outputImgAlignment - 1))
-										 & ~(outputImgAlignment - 1); //alignment bit mask magic
-	VkDeviceSize outputImgAlignedSize = (outputImgMemoryRequirements.size + (outputImgAlignment - 1))
-										& ~(outputImgAlignment - 1); //alignment bit mask magic
-
-	assert(outputImgMemoryOffset >= dpbSize);
 	VkMemoryAllocateInfo allocInfo = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-									   // enough space for dpbSize and outputImgAlignedSize:
-									   .allocationSize = outputImgMemoryOffset + outputImgAlignedSize,
+									   .allocationSize = dpbSize,
 									   .memoryTypeIndex = imgMemoryTypeIdx };
 
-	result = vkAllocateMemory(s->device, &allocInfo, NULL, &s->dpbMemory);
+	VkResult result = vkAllocateMemory(s->device, &allocInfo, NULL, &s->dpbMemory);
 	if (result != VK_SUCCESS)
 	{
 		printf("[vulkan_decode] Failed to allocate vulkan device memory for DPB!\n");
@@ -1834,15 +1933,6 @@ static bool create_dpb(struct state_vulkan_decompress *s, VkVideoProfileListInfo
 			destroy_dpb(s);
 			return false;
 		}
-	}
-
-	// ---Binding memory for output image---
-	result = vkBindImageMemory(s->device, s->outputImage, s->dpbMemory, outputImgMemoryOffset);
-	if (result != VK_SUCCESS)
-	{
-		printf("[vulkan_decode] Failed to bind vulkan device memory to output image!\n");
-		destroy_dpb(s);
-		return false;
 	}
 
 	// ---Creating DPB image views---
@@ -1873,8 +1963,6 @@ static bool create_dpb(struct state_vulkan_decompress *s, VkVideoProfileListInfo
 		}
 	}
 
-	//TODO outputImage views for each plane?
-
 	return true;
 }
 
@@ -1901,18 +1989,11 @@ static void destroy_dpb(struct state_vulkan_decompress *s)
 		}
 	}
 
-	// freeing output image
-	if (vkDestroyImage != NULL && s->device != VK_NULL_HANDLE)
-	{
-		vkDestroyImage(s->device, s->outputImage, NULL);
-	}
-
 	for (size_t i = 0; i < dpb_len; ++i)
 	{
 		s->dpb[i] = VK_NULL_HANDLE;
 		s->dpbViews[i] = VK_NULL_HANDLE;
 	}
-	s->outputImage = VK_NULL_HANDLE;
 
 	// freeing backing device memory
 	if (vkFreeMemory != NULL && s->device != VK_NULL_HANDLE) vkFreeMemory(s->device, s->dpbMemory, NULL);
@@ -2100,9 +2181,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	assert(pictureFormat == referencePictureFormat);
 	s->dpbFormat = referencePictureFormat;
 
-	//s->outputImageFormat = VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM; //TODO - I420 format for now
-	s->outputImageFormat = VK_FORMAT_G8_B8R8_2PLANE_420_UNORM; //TODO - I420 format for now
-	
 	// ---Creating synchronization fence---
 	assert(s->device != VK_NULL_HANDLE);
 	assert(s->fence == VK_NULL_HANDLE);
@@ -2191,6 +2269,25 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 		return false;
 	}
 
+	if (!create_output_image(s))
+	{
+		// err msg should get printed inside of create_output_image
+		destroy_dpb(s);
+		if (vkDestroyCommandPool != NULL)
+		{
+			vkDestroyCommandPool(s->device, s->commandPool, NULL);
+			s->commandPool = VK_NULL_HANDLE;
+		}
+		free_buffers(s);
+		if (vkDestroyFence != NULL)
+		{
+			vkDestroyFence(s->device, s->fence, NULL);
+			s->fence = VK_NULL_HANDLE;
+		}
+
+		return false;
+	}
+
 	// ---Creating video session---
 	assert(s->videoSession == VK_NULL_HANDLE);
 
@@ -2209,6 +2306,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	if (result != VK_SUCCESS)
 	{
 		printf("[vulkan_decode] Failed to create vulkan video session!\n");
+		destroy_output_image(s);
 		destroy_dpb(s);
 		if (vkDestroyCommandPool != NULL)
 		{
@@ -2257,6 +2355,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 			vkDestroyVideoSessionKHR(s->device, s->videoSession, NULL);
 			s->videoSession = VK_NULL_HANDLE;
 		}
+		destroy_output_image(s);
 		destroy_dpb(s);
 		if (vkDestroyCommandPool != NULL)
 		{
@@ -2288,6 +2387,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 			vkDestroyVideoSessionKHR(s->device, s->videoSession, NULL);
 			s->videoSession = VK_NULL_HANDLE;
 		}
+		destroy_output_image(s);
 		destroy_dpb(s);
 		if (vkDestroyCommandPool != NULL)
 		{
@@ -2770,72 +2870,40 @@ static void end_bitstream_writing(struct state_vulkan_decompress *s)
 	vkUnmapMemory(s->device, s->bufferMemory);
 }
 
-static void copy_decoded_image(struct state_vulkan_decompress *s, VkImage srcDpbImage, VkImage dstImage)
+static void copy_decoded_image(struct state_vulkan_decompress *s, VkImage srcDpbImage)
 {
 	assert(s->cmdBuffer != VK_NULL_HANDLE);
+	assert(s->outputLumaPlane != VK_NULL_HANDLE);
+	assert(s->outputLumaPlane != VK_NULL_HANDLE);
+	assert(srcDpbImage != VK_NULL_HANDLE);
 
-	/*VkImageCopy regions[3] = { // Y plane
-							   { .srcSubresource = { .aspectMask = VK_IMAGE_ASPECT_PLANE_0_BIT,
-													 .mipLevel = 0,
-													 .baseArrayLayer = 0,
-													 .layerCount = 1 },
+	VkImageCopy lumaRegion = { .srcSubresource = { .aspectMask = VK_IMAGE_ASPECT_PLANE_0_BIT,
+												   .mipLevel = 0,
+												   .baseArrayLayer = 0,
+												   .layerCount = 1 },
+							   .srcOffset = { 0, 0, 0 },
+							   .dstSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+						   						   .mipLevel = 0,
+						   						   .baseArrayLayer = 0,
+						   						   .layerCount = 1 },
+							   .dstOffset = { 0, 0, 0 },
+							   .extent = { s->width, s->height, 1 } };
+	VkImageCopy chromaRegion = { .srcSubresource = { .aspectMask = VK_IMAGE_ASPECT_PLANE_1_BIT,
+												   	 .mipLevel = 0,
+												   	 .baseArrayLayer = 0,
+												   	 .layerCount = 1 },
 								 .srcOffset = { 0, 0, 0 },
-								 .dstSubresource = { .aspectMask = VK_IMAGE_ASPECT_PLANE_0_BIT,
-													 .mipLevel = 0,
-													 .baseArrayLayer = 0,
-													 .layerCount = 1 },
+								 .dstSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+						   							 .mipLevel = 0,
+						   							 .baseArrayLayer = 0,
+						   							 .layerCount = 1 },
 								 .dstOffset = { 0, 0, 0 },
-								 .extent = { s->width, s->height, 1 } },
-							   // Cb part
-							   { .srcSubresource = { .aspectMask = VK_IMAGE_ASPECT_PLANE_1_BIT,
-													 .mipLevel = 0,
-													 .baseArrayLayer = 0,
-													 .layerCount = 1 },
-								 .srcOffset = { 0, 0, 0 },
-								 .dstSubresource = { .aspectMask = VK_IMAGE_ASPECT_PLANE_1_BIT,
-													 .mipLevel = 0,
-													 .baseArrayLayer = 0,
-													 .layerCount = 1 },
-								 .dstOffset = { 0, 0, 0 },
-								 .extent = { s->width / 2, s->height / 2, 1 } },
-							   // Cr part
-							   { .srcSubresource = { .aspectMask = VK_IMAGE_ASPECT_PLANE_1_BIT,
-													 .mipLevel = 0,
-													 .baseArrayLayer = 0,
-													 .layerCount = 1 },
-								 .srcOffset = { 0, 0, 0 },
-								 .dstSubresource = { .aspectMask = VK_IMAGE_ASPECT_PLANE_2_BIT,
-													 .mipLevel = 0,
-													 .baseArrayLayer = 0,
-													 .layerCount = 1 },
-								 .dstOffset = { 0, 0, 0 },
-								 .extent = { s->width / 2, s->height / 2, 1 } } };*/
-	VkImageCopy regions[2] = { // Y plane
-							   { .srcSubresource = { .aspectMask = VK_IMAGE_ASPECT_PLANE_0_BIT,
-													 .mipLevel = 0,
-													 .baseArrayLayer = 0,
-													 .layerCount = 1 },
-								 .srcOffset = { 0, 0, 0 },
-								 .dstSubresource = { .aspectMask = VK_IMAGE_ASPECT_PLANE_0_BIT,
-													 .mipLevel = 0,
-													 .baseArrayLayer = 0,
-													 .layerCount = 1 },
-								 .dstOffset = { 0, 0, 0 },
-								 .extent = { s->width, s->height, 1 } },
-							   // CbCr plane
-							   { .srcSubresource = { .aspectMask = VK_IMAGE_ASPECT_PLANE_1_BIT,
-													 .mipLevel = 0,
-													 .baseArrayLayer = 0,
-													 .layerCount = 1 },
-								 .srcOffset = { 0, 0, 0 },
-								 .dstSubresource = { .aspectMask = VK_IMAGE_ASPECT_PLANE_1_BIT,
-													 .mipLevel = 0,
-													 .baseArrayLayer = 0,
-													 .layerCount = 1 },
-								 .dstOffset = { 0, 0, 0 },
-								 .extent = { s->width / 2, s->height / 2, 1 } } };
+								 .extent = { s->width / 2, s->height / 2, 1 } };
+	
 	vkCmdCopyImage(s->cmdBuffer, srcDpbImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-				   dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 2, regions);
+				   s->outputLumaPlane, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &lumaRegion);
+	vkCmdCopyImage(s->cmdBuffer, srcDpbImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+				   s->outputChromaPlane, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &chromaRegion);
 }
 
 static bool write_decoded_frame(struct state_vulkan_decompress *s, unsigned char *dst)
@@ -2873,6 +2941,48 @@ static bool write_decoded_frame(struct state_vulkan_decompress *s, unsigned char
 	}
 
 	vkUnmapMemory(s->device, s->bufferMemory);
+
+	return true;
+}
+
+static bool write_decoded_frame2(struct state_vulkan_decompress *s, unsigned char *dst)
+{
+	assert(sizeof(unsigned char) == sizeof(uint8_t)); //DEBUG ?
+	assert(s->device != VK_NULL_HANDLE);
+	assert(s->outputImageMemory != VK_NULL_HANDLE);
+	assert(dst != NULL);
+
+	//460800 = 640*480 + 153600 = 640*480 + 76800 + 76800 = 640*480 + 640*480/4 + 640*480/4
+	VkDeviceSize lumaSize = s->lumaSize;		// using local variable, otherwise would get bad performance
+	VkDeviceSize chromaSize = s->chromaSize;	// using local variable, otherwise would get bad performance
+	VkDeviceSize size = lumaSize + 2 * chromaSize;
+	//printf("\t%d = %d + 2 * %d\n", size, lumaSize, chromaSize);
+
+	assert(lumaSize <= s->outputChromaPlaneOffset);
+
+	uint8_t *memory = NULL;
+	VkResult result = vkMapMemory(s->device, s->outputImageMemory, 0, s->outputChromaPlaneOffset + chromaSize,
+								  0, (void**)&memory);
+	if (result != VK_SUCCESS) return false;
+	assert(memory != NULL);
+
+	//DEBUG - attempt at translating NV12 into I420
+	// luma plane
+	const uint8_t *luma = memory;
+	for (size_t i = 0; i < lumaSize; ++i) dst[i] = (unsigned char)luma[i]; // could be memcpy I guess
+
+	// chroma plane
+	const uint8_t *chroma = memory + s->outputChromaPlaneOffset;
+	for (size_t i = 0; i < chromaSize; ++i)
+	{
+		unsigned char Cb = (unsigned char)chroma[2*i],
+					  Cr = (unsigned char)chroma[2*i + 1];
+
+		dst[lumaSize + i] = Cb;
+		dst[lumaSize + chromaSize + i] = Cr;
+	}
+
+	vkUnmapMemory(s->device, s->outputImageMemory);
 
 	return true;
 }
@@ -3107,7 +3217,8 @@ static void handle_vcl(struct state_vulkan_decompress *s, uint8_t *bitstream, Vk
 				bitstream[*bitstream_written + 0], bitstream[*bitstream_written + 1],
 				bitstream[*bitstream_written + 2], bitstream[*bitstream_written + 3]);*/
 
-		slice_offsets[*slice_offsets_count] = *bitstream_written; // pointing at the written startcode
+		uint32_t offset = *bitstream_written >= 0 ? 0 : 3; //TODO
+		slice_offsets[*slice_offsets_count] = *bitstream_written + offset; // pointing at the written startcode
 		*slice_offsets_count += 1;
 
 		VkDeviceSize writtenAligned = (written + (s->decodeBufferOffsetAlignment - 1))
@@ -3420,9 +3531,11 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 								  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR);
 		}
 
-		// also transfer the output image into defined layout
-		assert(s->outputImage != VK_NULL_HANDLE);
-		transfer_image_layout(s->cmdBuffer, s->outputImage,
+		// also transfer the output image planes into defined layout
+		assert(s->outputLumaPlane != VK_NULL_HANDLE && s->outputChromaPlane != VK_NULL_HANDLE);
+		transfer_image_layout(s->cmdBuffer, s->outputLumaPlane,
+							  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+		transfer_image_layout(s->cmdBuffer, s->outputChromaPlane,
 							  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
 		s->dpbHasDefinedLayout = true;
@@ -3435,8 +3548,10 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 								  VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR);
 		}
 
-		// also transfer the output image into tranfer dst layout
-		transfer_image_layout(s->cmdBuffer, s->outputImage,
+		// also transfer the output image planes into tranfer dst layout
+		transfer_image_layout(s->cmdBuffer, s->outputLumaPlane,
+							  VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+		transfer_image_layout(s->cmdBuffer, s->outputChromaPlane,
 							  VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 	}
 
@@ -3454,14 +3569,14 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	
 	// ---Copying decoded DPB image into output image---
 	assert(s->dpbFormat == VK_FORMAT_G8_B8R8_2PLANE_420_UNORM); //TODO requirement
-	//assert(s->outputImageFormat == VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM); //TODO requirement
-	assert(s->outputImageFormat == VK_FORMAT_G8_B8R8_2PLANE_420_UNORM); //TODO requirement
-	copy_decoded_image(s, s->dpb[slice_info.dpbIndex], s->outputImage); //TODO copy
-	transfer_image_layout(s->cmdBuffer, s->outputImage,
+	copy_decoded_image(s, s->dpb[slice_info.dpbIndex]);
+	transfer_image_layout(s->cmdBuffer, s->outputLumaPlane,
+						  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+	transfer_image_layout(s->cmdBuffer, s->outputChromaPlane,
 						  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
 	// ---Copying decoded output image into decoded picture buffer---
-	{
+	/*{
 		assert(s->dstPicBuffer != VK_NULL_HANDLE);
 		//assert(s->dpbFormat == VK_FORMAT_G8_B8R8_2PLANE_420_UNORM); //TODO requirement
 
@@ -3487,7 +3602,7 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 		//TODO this expects display order to be the same as decode order
 		vkCmdCopyImageToBuffer(s->cmdBuffer, s->outputImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 							   s->dstPicBuffer, 2, dstPicRegions);
-	}
+	}*/
 
 	if (!end_cmd_buffer(s))
 	{
@@ -3538,7 +3653,7 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	}
 
 	// ---Writing the decoded frame data---
-	if (!write_decoded_frame(s, dst))
+	if (!write_decoded_frame2(s, dst))
 	{
 		printf("[vulkan_decode] Failed to write the decoded frame into the destination buffer!\n");
 		return res;
