@@ -106,6 +106,10 @@ static PFN_vkCmdPipelineBarrier2KHR vkCmdPipelineBarrier2KHR = NULL;
 static PFN_vkCmdCopyImageToBuffer vkCmdCopyImageToBuffer = NULL;
 static PFN_vkCmdCopyImage vkCmdCopyImage = NULL;
 static PFN_vkGetPhysicalDeviceFormatProperties2 vkGetPhysicalDeviceFormatProperties2 = NULL;
+static PFN_vkCreateQueryPool vkCreateQueryPool = NULL;
+static PFN_vkDestroyQueryPool vkDestroyQueryPool = NULL;
+static PFN_vkCmdResetQueryPool vkCmdResetQueryPool = NULL;
+static PFN_vkGetQueryPoolResults vkGetQueryPoolResults = NULL;
 
 static bool load_vulkan_functions_globals(PFN_vkGetInstanceProcAddr loader)
 {
@@ -201,6 +205,10 @@ static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader
 	vkCmdPipelineBarrier2KHR = (PFN_vkCmdPipelineBarrier2)loader(instance, "vkCmdPipelineBarrier2KHR");
 	vkGetPhysicalDeviceFormatProperties2 = (PFN_vkGetPhysicalDeviceFormatProperties2)
 												loader(instance, "vkGetPhysicalDeviceFormatProperties2");
+	vkCreateQueryPool = (PFN_vkCreateQueryPool)loader(instance, "vkCreateQueryPool");
+	vkDestroyQueryPool = (PFN_vkDestroyQueryPool)loader(instance, "vkDestroyQueryPool");
+	vkCmdResetQueryPool = (PFN_vkCmdResetQueryPool)loader(instance, "vkCmdResetQueryPool");
+	vkGetQueryPoolResults = (PFN_vkGetQueryPoolResults)loader(instance, "vkGetQueryPoolResults");
 
 	return vkDestroyInstance &&
 	#ifdef VULKAN_VALIDATE
@@ -238,7 +246,9 @@ static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader
 		   vkCreateImageView && vkDestroyImageView &&
 		   vkCmdDecodeVideoKHR &&
 		   vkCmdCopyImageToBuffer && vkCmdCopyImage &&
-		   vkCmdPipelineBarrier2KHR && vkGetPhysicalDeviceFormatProperties2;
+		   vkCmdPipelineBarrier2KHR && vkGetPhysicalDeviceFormatProperties2 &&
+		   vkCreateQueryPool && vkDestroyQueryPool &&
+		   vkCmdResetQueryPool && vkGetQueryPoolResults;
 }
 
 typedef struct	// structure used to pass around variables related to currently decoded frame (slice)
@@ -273,6 +283,7 @@ struct state_vulkan_decompress
 	VkBuffer decodeBuffer;						// needs to be destroyed if valid
 	VkDeviceSize decodeBufferSize;
 	VkDeviceSize decodeBufferOffsetAlignment;
+	//USELESS - dstPicBuffer and related stuff
 	VkBuffer dstPicBuffer;						// needs to be destroyed if valid
 	VkDeviceSize dstPicBufferSize;
 	VkDeviceSize dstPicBufferMemoryOffset;		// offset of dstPicBuffer in the bufferMemory
@@ -284,13 +295,13 @@ struct state_vulkan_decompress
 	// array of size videoSessionMemory_count, needs to be freed and VkvideoSessionMemory deallocated
 	VkDeviceMemory *videoSessionMemory;
 
-	// Parameters of the video:
+	// Parameters of the incoming video:
 	int depth_chroma, depth_luma;
 	int subsampling; // in the Ultragrid format
 	StdVideoH264ProfileIdc profileIdc; //TODO H.265
 	VkVideoSessionParametersKHR videoSessionParams; // needs to be destroyed if valid
-	//uint32_t videoSessionParams_update_count;
-	// pointers to arrays of sps (length MAX_SPS_IDS), pps (length MAX_PPS_IDS)
+
+	// Pointers to arrays of sps (length MAX_SPS_IDS), pps (length MAX_PPS_IDS)
 	// could be static arrays but that would take too much memory of this struct
 	sps_t *sps_array; //TODO maybe better to store already converted vulkan version?
 	pps_t *pps_array;
@@ -308,20 +319,25 @@ struct state_vulkan_decompress
 
 	int prev_poc_lsb, prev_poc_msb, idr_frame_seq, current_frame_seq;
 
-	// output video description data
+	// Output video description data
 	int width, height;
 	VkDeviceSize lumaSize, chromaSize;
 	int pitch; //TODO
 	codec_t out_codec;
 
+	// Output frame data
 	VkImage outputLumaPlane, outputChromaPlane;	// planes for output decoded image, must be destroyed if valid
 	VkDeviceMemory outputImageMemory;
 	VkDeviceSize outputChromaPlaneOffset;
+
+	// vulkan queries
+	VkQueryPool queryPool;
 };
 
 static void free_buffers(struct state_vulkan_decompress *s);
 static void destroy_output_image(struct state_vulkan_decompress *s);
 static void destroy_dpb(struct state_vulkan_decompress *s);
+static void destroy_queries(struct state_vulkan_decompress *s);
 
 static bool check_for_instance_extensions(const char * const requiredInstanceextensions[])
 {
@@ -550,6 +566,7 @@ static void destroy_debug_messenger(VkInstance instance, VkDebugUtilsMessengerEX
 static VkPhysicalDevice choose_physical_device(VkPhysicalDevice devices[], uint32_t devices_count,
 											   VkQueueFlags requestedQueueFamilyFlags,
 											   const char* const requiredDeviceExtensions[],
+											   bool requireQueries,
 											   uint32_t *queue_family_idx, VkQueueFamilyProperties2 *queue_family,
 											   VkQueueFamilyVideoPropertiesKHR *queue_video_props)
 {
@@ -573,15 +590,18 @@ static VkPhysicalDevice choose_physical_device(VkPhysicalDevice devices[], uint3
 			continue;
 		}
 
-		VkPhysicalDeviceVulkan13Features deviceFeatures13 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
+		VkPhysicalDeviceVideoMaintenance1FeaturesKHR videoFeatures1 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_MAINTENANCE_1_FEATURES_KHR };
+		VkPhysicalDeviceVulkan13Features deviceFeatures13 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+															  .pNext = (void*)&videoFeatures1 };
 		VkPhysicalDeviceFeatures2 deviceFeatures = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
 													 .pNext = (void*)&deviceFeatures13 };
 		vkGetPhysicalDeviceFeatures2(devices[i], &deviceFeatures);
 
 		//TODO better check, maybe make it a parameter?
-		if (!deviceFeatures13.synchronization2 || !deviceFeatures13.maintenance4)
+		if (!deviceFeatures13.synchronization2 || !deviceFeatures13.maintenance4 ||
+			(requireQueries && !videoFeatures1.videoMaintenance1))
 		{
-			printf("\tDevice does not have required features (synchronization2 and maintenance4)!\n");
+			printf("\tDevice does not have required features!\n");
 			continue;
 		}
 
@@ -597,7 +617,9 @@ static VkPhysicalDevice choose_physical_device(VkPhysicalDevice devices[], uint3
 		//IDEA maybe we can use MAX_QUEUE_FAMILIES (6?) instead of dynamic allocation
 		VkQueueFamilyProperties2 *properties = (VkQueueFamilyProperties2*)calloc(queues_count, sizeof(VkQueueFamilyProperties2));
 		VkQueueFamilyVideoPropertiesKHR *video_properties = (VkQueueFamilyVideoPropertiesKHR*)calloc(queues_count, sizeof(VkQueueFamilyVideoPropertiesKHR));
-		if (properties == NULL || video_properties == NULL) //TODO probably return error?
+		VkQueueFamilyQueryResultStatusPropertiesKHR *query_properties = (VkQueueFamilyQueryResultStatusPropertiesKHR*)
+																		calloc(queues_count, sizeof(VkQueueFamilyQueryResultStatusPropertiesKHR));
+		if (properties == NULL || video_properties == NULL || query_properties == NULL) //TODO probably return error?
 		{
 			printf("[vulkan_decode] Failed to allocate properties and/or video_properties arrays!\n");
 			free(properties);
@@ -607,10 +629,11 @@ static VkPhysicalDevice choose_physical_device(VkPhysicalDevice devices[], uint3
 
 		for (uint32_t j = 0; j < queues_count; ++j)
 		{
+			query_properties[j] = (VkQueueFamilyQueryResultStatusPropertiesKHR){ .sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_QUERY_RESULT_STATUS_PROPERTIES_KHR };
 			video_properties[j] = (VkQueueFamilyVideoPropertiesKHR){ .sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_VIDEO_PROPERTIES_KHR,
-																	 .pNext = NULL };
+																	 .pNext = (void*)(query_properties + j) };
 			properties[j] = (VkQueueFamilyProperties2){ .sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2,
-														.pNext = (void*)&video_properties[j] };
+														.pNext = (void*)(video_properties + j) };
 		}
 
 		vkGetPhysicalDeviceQueueFamilyProperties2(devices[i], &queues_count, properties);
@@ -644,8 +667,10 @@ static VkPhysicalDevice choose_physical_device(VkPhysicalDevice devices[], uint3
 			//int av1_de = videoFlags & VK_VIDEO_CODEC_OPERATION_DECODE_AV1_BIT_KHR ? 1 : 0;
 			printf("\tvideo flags: %d, h264: %d %d, h265: %d %d\n",
 					  videoFlags, h264_en, h264_de, h265_en, h265_de);*/
+			//printf("\tquery support: %d\n", query_properties[j].queryResultStatusSupport);
 
-			if (requestedQueueFamilyFlags == (flags & requestedQueueFamilyFlags) && videoFlags)
+			if (requestedQueueFamilyFlags == (flags & requestedQueueFamilyFlags) && videoFlags &&
+				(!requireQueries || query_properties[j].queryResultStatusSupport))
 			{
 				preferred_queue_family = j;
 				approved = true;
@@ -660,13 +685,18 @@ static VkPhysicalDevice choose_physical_device(VkPhysicalDevice devices[], uint3
 			if (queue_family)
 			{
 				*queue_family = properties[preferred_queue_family];
-				queue_family->pNext = NULL;
+				queue_family->pNext = NULL; // prevent dangling pointer
 			}
-			if (queue_video_props) *queue_video_props = video_properties[preferred_queue_family];	
+			if (queue_video_props)
+			{
+				*queue_video_props = video_properties[preferred_queue_family];
+				queue_video_props->pNext = NULL; // prevent dangling pointer
+			}
 		}
 
 		free(properties);
 		free(video_properties);
+		free(query_properties);
 	}
 
 	return chosen;
@@ -834,7 +864,7 @@ static void * vulkan_decompress_init(void)
 	#endif
 
 	// ---Choosing of physical device---
-	VkQueueFlags requestedFamilyQueueFlags = VK_QUEUE_VIDEO_DECODE_BIT_KHR | VK_QUEUE_TRANSFER_BIT;
+	const VkQueueFlags requestedFamilyQueueFlags = VK_QUEUE_VIDEO_DECODE_BIT_KHR | VK_QUEUE_TRANSFER_BIT;
 	const char* const requiredDeviceExtensions[] = {
 	//#if defined(__linux) || defined(__linux__) || defined(linux)
     //    VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,	//?
@@ -848,6 +878,7 @@ static void * vulkan_decompress_init(void)
 		VK_KHR_VIDEO_MAINTENANCE_1_EXTENSION_NAME,
 		VK_KHR_MAINTENANCE_4_EXTENSION_NAME,		//maxBuffSize
         NULL };
+	const bool requireQueries = true;
 
 	uint32_t phys_devices_count = 0;
 	vkEnumeratePhysicalDevices(s->instance, &phys_devices_count, NULL);
@@ -881,7 +912,7 @@ static void * vulkan_decompress_init(void)
 	VkQueueFamilyProperties2 chosen_queue_family; //TODO use this?
 	VkQueueFamilyVideoPropertiesKHR chosen_queue_video_props; //TODO use this more?
 	s->physicalDevice = choose_physical_device(devices, phys_devices_count, requestedFamilyQueueFlags,
-											   requiredDeviceExtensions,
+											   requiredDeviceExtensions, requireQueries,
 											   &s->queueFamilyIdx, &chosen_queue_family, &chosen_queue_video_props);
 	free(devices);
 	if (s->physicalDevice == VK_NULL_HANDLE)
@@ -916,13 +947,17 @@ static void * vulkan_decompress_init(void)
 				physDeviceProperties.properties.deviceName, s->physDeviceMaxBuffSize, s->queueFamilyIdx);
 
 	// ---Creating a logical device---
+	VkPhysicalDeviceVideoMaintenance1FeaturesKHR enabledDeviceVideoFeatures1 =
+							{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_MAINTENANCE_1_FEATURES_KHR,
+							  .videoMaintenance1 = VK_TRUE };
+	VkPhysicalDeviceVulkan13Features enabledDeviceFeatures13 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+																 .pNext = requireQueries ? (void*)&enabledDeviceVideoFeatures1 : NULL,
+																 .synchronization2 = 1, .maintenance4 = 1 };
 	float queue_priorities = 1.0f;
 	VkDeviceQueueCreateInfo queueCreateInfo = { .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
 												.queueFamilyIndex = s->queueFamilyIdx,
 												.queueCount = 1,
 												.pQueuePriorities = &queue_priorities };
-	VkPhysicalDeviceVulkan13Features enabledDeviceFeatures13 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-																 .synchronization2 = 1, .maintenance4 = 1 };
 	VkDeviceCreateInfo createDeviceInfo = { .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
 											.pNext = (void*)&enabledDeviceFeatures13,
 											.flags = 0,
@@ -979,6 +1014,8 @@ static void * vulkan_decompress_init(void)
 	s->outputImageMemory = VK_NULL_HANDLE;
 	s->outputChromaPlaneOffset = 0;
 
+	s->queryPool = VK_NULL_HANDLE;
+
 	printf("[vulkan_decode] Initialization finished successfully.\n");
 	return s;
 }
@@ -1003,6 +1040,8 @@ static void vulkan_decompress_done(void *state)
 	printf("vulkan_decode - done\n");
 	struct state_vulkan_decompress *s = (struct state_vulkan_decompress *)state;
 	if (!s) return;
+
+	destroy_queries(s);
 
 	if (vkDestroyVideoSessionParametersKHR != NULL && s->device != VK_NULL_HANDLE)
 			vkDestroyVideoSessionParametersKHR(s->device, s->videoSessionParams, NULL);
@@ -2002,6 +2041,36 @@ static void destroy_dpb(struct state_vulkan_decompress *s)
 	s->dpbHasDefinedLayout = false;
 }
 
+static bool create_queries(struct state_vulkan_decompress *s, VkVideoProfileInfoKHR *profile)
+{
+	assert(s->device != VK_NULL_HANDLE);
+	assert(s->queryPool == VK_NULL_HANDLE);
+
+	// Creating query pool for wanted decode query
+	VkQueryPoolCreateInfo createInfo = { .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+										 .pNext = (void*)profile,
+										 .flags = 0,
+										 .queryType = VK_QUERY_TYPE_RESULT_STATUS_ONLY_KHR,
+										 .queryCount = 1 };
+	VkResult result = vkCreateQueryPool(s->device, &createInfo, NULL, &s->queryPool);
+	if (result != VK_SUCCESS)
+	{
+		printf("[vulkan_decode] Failed to create vulkan query pool!\n");
+		destroy_queries(s); // probably useless
+		return false;
+	}
+
+	return true;
+}
+
+static void destroy_queries(struct state_vulkan_decompress *s)
+{
+	if (vkDestroyQueryPool != NULL && s->device != VK_NULL_HANDLE)
+				vkDestroyQueryPool(s->device, s->queryPool, NULL);
+	
+	s->queryPool = VK_NULL_HANDLE;
+}
+
 static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 {
 	printf("vulkan_decode - prepare\n");
@@ -2269,6 +2338,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 		return false;
 	}
 
+	// ---Creating the decoded output image---
 	if (!create_output_image(s))
 	{
 		// err msg should get printed inside of create_output_image
@@ -2288,13 +2358,17 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 		return false;
 	}
 
+	// ---Creating query pool---
+	bool query_ret = create_queries(s, &videoProfile);
+	//printf("\tquery_ret: %d\n", (int)query_ret);
+
 	// ---Creating video session---
 	assert(s->videoSession == VK_NULL_HANDLE);
 
 	VkVideoSessionCreateInfoKHR sessionInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_SESSION_CREATE_INFO_KHR,
 												.pNext = NULL,
 												.queueFamilyIndex = s->queueFamilyIdx,
-												.flags = 0,
+												.flags = query_ret ? VK_VIDEO_SESSION_CREATE_INLINE_QUERIES_BIT_KHR : 0,
 												.pVideoProfile = &videoProfile,
 												.pictureFormat = pictureFormat,
 												.maxCodedExtent = (VkExtent2D){ s->width, s->height },
@@ -2306,6 +2380,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	if (result != VK_SUCCESS)
 	{
 		printf("[vulkan_decode] Failed to create vulkan video session!\n");
+		destroy_queries(s);
 		destroy_output_image(s);
 		destroy_dpb(s);
 		if (vkDestroyCommandPool != NULL)
@@ -2355,6 +2430,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 			vkDestroyVideoSessionKHR(s->device, s->videoSession, NULL);
 			s->videoSession = VK_NULL_HANDLE;
 		}
+		destroy_queries(s);
 		destroy_output_image(s);
 		destroy_dpb(s);
 		if (vkDestroyCommandPool != NULL)
@@ -2387,6 +2463,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 			vkDestroyVideoSessionKHR(s->device, s->videoSession, NULL);
 			s->videoSession = VK_NULL_HANDLE;
 		}
+		destroy_queries(s);
 		destroy_output_image(s);
 		destroy_dpb(s);
 		if (vkDestroyCommandPool != NULL)
@@ -3217,8 +3294,8 @@ static void handle_vcl(struct state_vulkan_decompress *s, uint8_t *bitstream, Vk
 				bitstream[*bitstream_written + 0], bitstream[*bitstream_written + 1],
 				bitstream[*bitstream_written + 2], bitstream[*bitstream_written + 3]);*/
 
-		uint32_t offset = *bitstream_written >= 0 ? 0 : 3; //TODO
-		slice_offsets[*slice_offsets_count] = *bitstream_written + offset; // pointing at the written startcode
+		//uint32_t offset = *bitstream_written >= 0 ? 0 : 0;
+		slice_offsets[*slice_offsets_count] = *bitstream_written; // pointing at the written startcode
 		*slice_offsets_count += 1;
 
 		VkDeviceSize writtenAligned = (written + (s->decodeBufferOffsetAlignment - 1))
@@ -3297,8 +3374,17 @@ static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_i
 													   .pSliceOffsets = slice_offsets };
 	//TODO H.265
 	VkVideoDecodeH265PictureInfoKHR h265DecodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_PICTURE_INFO_KHR };
+
+	bool enable_queries = s->queryPool != VK_NULL_HANDLE;
+	VkVideoInlineQueryInfoKHR queryInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_INLINE_QUERY_INFO_KHR,
+											.pNext = isH264 ? (void*)&h264DecodeInfo : (void*)&h265DecodeInfo,
+											.queryPool = s->queryPool,
+											.firstQuery = 0,
+											.queryCount = 1 };
+	
 	VkVideoDecodeInfoKHR decodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_INFO_KHR,
-										.pNext = isH264 ? (void*)&h264DecodeInfo : (void*)&h265DecodeInfo,
+										.pNext = enable_queries ? (void*)&queryInfo :
+												 (isH264 ? (void*)&h264DecodeInfo : (void*)&h265DecodeInfo),
 										.flags = 0,
 										.srcBuffer = s->decodeBuffer,
 										.srcBufferOffset = 0,
@@ -3521,6 +3607,13 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 		return res;
 	}
 
+	// ---Resetting queries if they are enabled---
+	bool enable_queries = s->queryPool != VK_NULL_HANDLE;
+	if (enable_queries)
+	{
+		vkCmdResetQueryPool(s->cmdBuffer, s->queryPool, 0, 1);
+	}
+
 	// ---VkImage layout transfering before video coding scope---
 	if (!s->dpbHasDefinedLayout)	// if VkImages in DPB are in undefined layout we need to transfer them into decode layout
 	{
@@ -3650,6 +3743,30 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 		//should happen only when out of memory
 		printf("[vulkan_decode] Failed to reset vulkan fence!\n");
 		return false;
+	}
+
+	// ---Getting potential query results---
+	if (enable_queries)
+	{
+		int32_t queryResult[1] = { 0 };
+		size_t queryResult_size = sizeof(queryResult);
+
+		result = vkGetQueryPoolResults(s->device, s->queryPool, 0, 1,
+									   queryResult_size, (void*)queryResult, queryResult_size,
+									   VK_QUERY_RESULT_WITH_STATUS_BIT_KHR);
+		if (result != VK_SUCCESS)
+		{
+			printf("vkGetQueryPoolResults error: %d!\n", result); //TODO err
+		}
+		else
+		{
+			/*for (size_t i = 0; i < queryResult_size / sizeof(queryResult[0]); ++i)
+					printf("%d ", queryResult[i]);
+			putchar('\n');*/
+
+			VkQueryResultStatusKHR *status = (VkQueryResultStatusKHR*)queryResult;
+			printf("query result: %d\n", *status);
+		}
 	}
 
 	// ---Writing the decoded frame data---
