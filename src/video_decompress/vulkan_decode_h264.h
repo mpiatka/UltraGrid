@@ -348,8 +348,9 @@ static void print_sps(sps_t *sps) //DEBUG
 
 static void print_sh(slice_header_t *sh) //DEBUG
 {
-	printf("frame_num: %d, idr_pic_id: %d, slice_type: %d, pic_parameter_set_id: %d, poc_lsb: %d, long term: %d\n",
-			sh->frame_num, sh->idr_pic_id, sh->slice_type, sh->pic_parameter_set_id, sh->pic_order_cnt_lsb, sh->drpm.long_term_reference_flag);
+	printf("field_pic_flag: %d, bottom_field_flag: %d\n", sh->field_pic_flag, sh->bottom_field_flag);
+	//printf("frame_num: %d, idr_pic_id: %d, slice_type: %d, pic_parameter_set_id: %d, poc_lsb: %d, long term: %d\n",
+	//		sh->frame_num, sh->idr_pic_id, sh->slice_type, sh->pic_parameter_set_id, sh->pic_order_cnt_lsb, sh->drpm.long_term_reference_flag);
 }
 
 static int intlog2(int x) //TODO check if its not already provided
