@@ -2889,7 +2889,7 @@ static void * begin_bitstream_writing(struct state_vulkan_decompress *s)
 	return memoryPtr;
 }
 
-static VkDeviceSize write_bitstream(uint8_t *bitstream, size_t bitstream_len,
+static VkDeviceSize write_bitstream(uint8_t *bitstream, VkDeviceSize bitstream_len, VkDeviceSize bitstream_capacity,
 					    			const uint8_t *rbsp, int len, unsigned char nal_header)
 {
 	// writes one given NAL unit into NAL buffer, if error (not enough space in buffer) returns 0
@@ -2897,17 +2897,20 @@ static VkDeviceSize write_bitstream(uint8_t *bitstream, size_t bitstream_len,
 
 	const uint8_t startcode[] = { BITSTREAM_STARTCODE };
 	size_t startcode_len = sizeof(startcode) / sizeof(startcode[0]);
+
+	//printf("writing bitstream - rbsp_len: %u, bs_len: %u, bs_cap: %u\n",
+	//		len, bitstream_len, bitstream_capacity);
 	
 	//TODO check if the cast is correct
 	VkDeviceSize result_len = (VkDeviceSize)startcode_len + 1 + (VkDeviceSize)len;
 	
-	// check if enough space for nal unit in the buffer, return zero if not
-	// (zero => error as we always want to write at least 4 bytes anyway)
-	if (bitstream_len < (size_t)result_len) return 0;
+	// check if enough space for rbsp in the buffer, return zero if not
+	// (zero => error as we always want to write at least the startcode length anyway)
+	if (bitstream_len + result_len > bitstream_capacity) return 0;
 
-	memcpy(bitstream, startcode, startcode_len);		// writing the nal start code
-	bitstream[startcode_len] = (uint8_t)nal_header;		// writing the nal header
-	memcpy(bitstream + startcode_len + 1, rbsp, len);	// writing the rbsp data
+	memcpy(bitstream + bitstream_len, startcode, startcode_len);		// writing the nal start code
+	bitstream[bitstream_len + startcode_len] = (uint8_t)nal_header;		// writing the nal header
+	memcpy(bitstream + bitstream_len + startcode_len + 1, rbsp, len);	// writing the rbsp data
 
 	return result_len;
 }
@@ -3241,7 +3244,7 @@ static bool handle_sh_nalu(struct state_vulkan_decompress *s, uint8_t *rbsp, int
 	return true;
 }
 
-static void handle_vcl(struct state_vulkan_decompress *s, uint8_t *bitstream, VkDeviceSize bitstream_size, VkDeviceSize *bitstream_written,
+static void handle_vcl(struct state_vulkan_decompress *s, uint8_t *bitstream, VkDeviceSize bitstream_capacity, VkDeviceSize *bitstream_written,
 					   uint8_t *rbsp, int rbsp_len, unsigned char nal_header, slice_info_t *slice_info,
 					   uint32_t slice_offsets[], uint32_t *slice_offsets_count)
 {
@@ -3253,8 +3256,7 @@ static void handle_vcl(struct state_vulkan_decompress *s, uint8_t *bitstream, Vk
 	bool sh_ret = handle_sh_nalu(s, rbsp, rbsp_len, nal_type, nal_idc, slice_info);
 	UNUSED(sh_ret); //TODO maybe error?
 
-	VkDeviceSize written = write_bitstream(bitstream + *bitstream_written,
-										   bitstream_size - *bitstream_written,
+	VkDeviceSize written = write_bitstream(bitstream, *bitstream_written, bitstream_capacity,
 										   rbsp, rbsp_len, nal_header);
 	if (written > 0 && *slice_offsets_count < MAX_SLICES)
 	{
@@ -3266,7 +3268,6 @@ static void handle_vcl(struct state_vulkan_decompress *s, uint8_t *bitstream, Vk
 				bitstream[*bitstream_written + 0], bitstream[*bitstream_written + 1],
 				bitstream[*bitstream_written + 2], bitstream[*bitstream_written + 3]);*/
 
-		//uint32_t offset = *bitstream_written >= 0 ? 0 : 0;
 		slice_offsets[*slice_offsets_count] = *bitstream_written; // pointing at the written startcode
 		*slice_offsets_count += 1;
 
