@@ -38,6 +38,7 @@
 
 // one of value from enum VkDebugUtilsMessageSeverityFlagBitsEXT included from vulkan.h
 // (definition in vulkan_core.h)
+//#define VULKAN_VALIDATE_SHOW_SEVERITY VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT
 #define VULKAN_VALIDATE_SHOW_SEVERITY VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
 //#define VULKAN_VALIDATE_SHOW_SEVERITY VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT
 //#define VULKAN_VALIDATE_SHOW_SEVERITY VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
@@ -284,7 +285,7 @@ struct state_vulkan_decompress
 	VkFence fence;
 	VkBuffer bitstreamBuffer;					// needs to be destroyed if valid
 	VkDeviceSize bitstreamBufferSize;
-	VkDeviceSize bitstreamBufferOffsetAlignment;
+	VkDeviceSize bitstreambufferSizeAlignment;
 	//USELESS - dstPicBuffer and related stuff
 	VkDeviceMemory bitstreamBufferMemory;		// allocated memory for bitstreamBuffer, needs to be freed if valid
 	VkCommandPool commandPool;					// needs to be destroyed if valid
@@ -985,6 +986,7 @@ static void * vulkan_decompress_init(void)
 	s->fence = VK_NULL_HANDLE;
 	s->bitstreamBuffer = VK_NULL_HANDLE; //buffer gets created in allocate_buffers function
 	s->bitstreamBufferMemory = VK_NULL_HANDLE;
+	s->bitstreambufferSizeAlignment = 0;
 	s->commandPool = VK_NULL_HANDLE;  	 //command pool gets created in prepare function
 	s->cmdBuffer = VK_NULL_HANDLE;	  	 //same
 	s->videoSession = VK_NULL_HANDLE; 	 //video session gets created in prepare function
@@ -1421,8 +1423,9 @@ static bool allocate_buffers(struct state_vulkan_decompress *s, VkVideoProfileLi
 	assert(s->bitstreamBufferMemory == VK_NULL_HANDLE);
 
 	const VkDeviceSize wantedBitstreamBufferSize = 10 * 1024 * 1024; //TODO magic number, check if smaller than allowed amount
-	VkDeviceSize sizeAlignment = videoCapabilities.minBitstreamBufferSizeAlignment;
-	s->bitstreamBufferSize = (wantedBitstreamBufferSize + (sizeAlignment - 1)) & ~(sizeAlignment - 1); //alignment bit mask magic
+	s->bitstreambufferSizeAlignment = videoCapabilities.minBitstreamBufferSizeAlignment;
+	s->bitstreamBufferSize = (wantedBitstreamBufferSize + (s->bitstreambufferSizeAlignment - 1))
+							 & ~(s->bitstreambufferSizeAlignment - 1); //alignment bit mask magic
 	VkBufferCreateInfo bitstreamBufferInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
 									  		   .pNext = (void*)&videoProfileList,
 									  		   .flags = 0,
@@ -1439,7 +1442,6 @@ static bool allocate_buffers(struct state_vulkan_decompress *s, VkVideoProfileLi
 
 		return false;
 	}
-	s->bitstreamBufferOffsetAlignment = videoCapabilities.minBitstreamBufferOffsetAlignment;
 
 	assert(s->bitstreamBuffer != VK_NULL_HANDLE);
 
@@ -1491,7 +1493,7 @@ static void free_buffers(struct state_vulkan_decompress *s)
 
 	s->bitstreamBuffer = VK_NULL_HANDLE;
 	s->bitstreamBufferSize = 0;
-	s->bitstreamBufferOffsetAlignment = 0;
+	s->bitstreambufferSizeAlignment = 0;
 
 	if (vkFreeMemory != NULL && s->device != VK_NULL_HANDLE)
 				vkFreeMemory(s->device, s->bitstreamBufferMemory, NULL);
@@ -2898,11 +2900,14 @@ static VkDeviceSize write_bitstream(uint8_t *bitstream, VkDeviceSize bitstream_l
 	const uint8_t startcode[] = { BITSTREAM_STARTCODE };
 	size_t startcode_len = sizeof(startcode) / sizeof(startcode[0]);
 
+	/*printf("header: %u startcode: %u %u %u, rbsp: %u %u %u %u\n", nal_header,
+			startcode[0], startcode[1], startcode[2],
+			rbsp[0], rbsp[1], rbsp[2], rbsp[3]);*/
 	//printf("writing bitstream - rbsp_len: %u, bs_len: %u, bs_cap: %u\n",
 	//		len, bitstream_len, bitstream_capacity);
 	
 	//TODO check if the cast is correct
-	VkDeviceSize result_len = (VkDeviceSize)startcode_len + 1 + (VkDeviceSize)len;
+	VkDeviceSize result_len = (VkDeviceSize)startcode_len + 1 + (VkDeviceSize)len; // startcode + header + rbsp data
 	
 	// check if enough space for rbsp in the buffer, return zero if not
 	// (zero => error as we always want to write at least the startcode length anyway)
@@ -3263,17 +3268,14 @@ static void handle_vcl(struct state_vulkan_decompress *s, uint8_t *bitstream, Vk
 		//printf("\t\tWriting success.\n");
 		//if (nal_type == NAL_H264_IDR) printf("slice offset IDR: %u\n", *bitstream_written);
 		//else printf("slice offset: %u\n", *bitstream_written);
-		/*printf("slice count: %u, slice offset: %u, header: %u, startcode: %u %u %u %u\n",
-				*slice_offsets_count, *bitstream_written, nal_header,
+		/*printf("slice count: %u, slice offset: %u, slice len: %u, header: %u, startcode: %u %u %u %u\n",
+				*slice_offsets_count, *bitstream_written, written, nal_header,
 				bitstream[*bitstream_written + 0], bitstream[*bitstream_written + 1],
 				bitstream[*bitstream_written + 2], bitstream[*bitstream_written + 3]);*/
 
 		slice_offsets[*slice_offsets_count] = *bitstream_written; // pointing at the written startcode
 		*slice_offsets_count += 1;
-
-		VkDeviceSize writtenAligned = (written + (s->bitstreamBufferOffsetAlignment - 1))
-									   & ~(s->bitstreamBufferOffsetAlignment - 1); //alignment bit mask magic
-		*bitstream_written += writtenAligned; // the result is kept aligned by adding only aligned values
+		*bitstream_written += written;
 
 		slice_info->is_reference = nal_idc > 0;
 	}
@@ -3285,14 +3287,14 @@ static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_i
 {
 	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
 	const VkExtent2D videoSize = { s->width, s->height };
-	VkDeviceSize bitstreamBufferWrittenAligned = (bitstreamBufferWritten + (s->bitstreamBufferOffsetAlignment - 1))
-											  & ~(s->bitstreamBufferOffsetAlignment - 1); //alignment bit mask magic
+	VkDeviceSize bitstreamBufferWrittenAligned = (bitstreamBufferWritten + (s->bitstreambufferSizeAlignment - 1))
+												 & ~(s->bitstreambufferSizeAlignment - 1); //alignment bit mask magic
+	
 	//assert(slice_info.pps_id < MAX_PPS_IDS); //TODO if
 	//pps_t *pps = s->pps_array + slice_info.pps_id;
 	//assert(slice_info.sps_id < MAX_SPS_IDS); //TODO if
 	//sps_t *sps = s->sps_array + slice_info.sps_id;
 	
-	assert(bitstreamBufferWritten == bitstreamBufferWrittenAligned);
 	assert(bitstreamBufferWrittenAligned <= s->bitstreamBufferSize);
 	assert(slice_offsets_count > 0);
 	// for IDR pictures the id must be valid
@@ -3493,7 +3495,7 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 			int nalu_type = NALU_HDR_GET_TYPE(nalu_header, !isH264);
 			//int nalu_idc = H264_NALU_HDR_GET_NRI(nalu_header);
 
-			/*printf("\tNALU - input idx: %u, header %u: (", nal - src, nal_payload[0]);
+			/*printf("\tNALU - input idx: %u, len: %u, header %u: (", nal - src, nal_len, nal_payload[0]);
 			print_nalu_header(nal_payload[0]);
 			printf(") type name - ");
 			print_nalu_name(nalu_type);
