@@ -332,6 +332,9 @@ struct state_vulkan_decompress
 
 	// vulkan queries
 	VkQueryPool queryPool;
+
+	//DEBUG
+	FILE *bs_file, *bs_file2, *bs_file3;
 };
 
 static void free_buffers(struct state_vulkan_decompress *s);
@@ -1016,6 +1019,10 @@ static void * vulkan_decompress_init(void)
 
 	s->queryPool = VK_NULL_HANDLE;
 
+	s->bs_file = NULL; //DEBUG
+	s->bs_file2 = NULL; //DEBUG
+	s->bs_file3 = NULL; //DEBUG
+
 	printf("[vulkan_decode] Initialization finished successfully.\n");
 	return s;
 }
@@ -1040,6 +1047,10 @@ static void vulkan_decompress_done(void *state)
 	printf("vulkan_decode - done\n");
 	struct state_vulkan_decompress *s = (struct state_vulkan_decompress *)state;
 	if (!s) return;
+
+	fclose(s->bs_file); //DEBUG
+	fclose(s->bs_file2); //DEBUG
+	fclose(s->bs_file3); //DEBUG
 
 	destroy_queries(s);
 
@@ -1125,8 +1136,8 @@ static bool configure_with(struct state_vulkan_decompress *s, struct video_desc 
 	//s->lumaSize = s->width * s->height;
 	//s->chromaSize = s->lumaSize / 4;
 	//TODO pitch
-	s->lumaSize = s->pitch * s->height;
-	s->chromaSize = (s->pitch / 2) * (s->height / 2);
+	s->lumaSize = s->width * s->height;
+	s->chromaSize = (s->width / 2) * (s->height / 2);
 
 	s->dpbHasDefinedLayout = false;
 	s->dpbFormat = VK_FORMAT_UNDEFINED;
@@ -2446,6 +2457,22 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 		return false;
 	}
 
+	//DEBUG
+	const char *bs_file_name = "bitstream.h264";
+	s->bs_file = fopen(bs_file_name, "wb");
+	if (s->bs_file == NULL) puts("[DEBUG] Opening debug bitstream output file failed!");
+	else puts("[DEBUG] Debug bitstream output file opened!");
+
+	const char *bs_file2_name = "bitstream2.h264";
+	s->bs_file2 = fopen(bs_file2_name, "wb");
+	if (s->bs_file2 == NULL) puts("[DEBUG] Opening debug bitstream output file2 failed!");
+	else puts("[DEBUG] Debug bitstream output file2 opened!");
+
+	const char *bs_file3_name = "bitstream3.h264";
+	s->bs_file3 = fopen(bs_file3_name, "wb");
+	if (s->bs_file3 == NULL) puts("[DEBUG] Opening debug bitstream output file3 failed!");
+	else puts("[DEBUG] Debug bitstream output file3 opened!");
+
 	printf("Preparation successful.\n");
 	return true;
 }
@@ -2566,54 +2593,8 @@ static void fill_ref_picture_infos(struct state_vulkan_decompress *s,
 	if (out_count != NULL) *out_count = ref_count;
 }
 
-static void begin_video_coding_scope(struct state_vulkan_decompress *s, slice_info_t *slice_info)
+static void begin_video_coding_scope(struct state_vulkan_decompress *s, VkVideoReferenceSlotInfoKHR *slotInfos, uint32_t slotInfos_count)
 {
-	assert(slice_info->frame_num >= 0 && slice_info->poc_lsb >= 0 &&
-		   slice_info->pps_id >= 0 && slice_info->sps_id >=0);
-
-	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
-	const VkExtent2D videoSize = { s->width, s->height };
-
-	
-	// ---Filling the extisting references infos---
-	uint32_t slotInfos_count = 0;
-	StdVideoDecodeH264ReferenceInfo h264StdInfos[MAX_REF_FRAMES + 1] = { 0 };
-	VkVideoDecodeH264DpbSlotInfoKHR h264SlotInfos[MAX_REF_FRAMES + 1] = { 0 };
-	VkVideoPictureResourceInfoKHR picInfos[MAX_REF_FRAMES + 1] = { 0 };
-	VkVideoReferenceSlotInfoKHR slotInfos[MAX_REF_FRAMES + 1] = { 0 };
-
-	fill_ref_picture_infos(s, slotInfos, picInfos, h264SlotInfos, h264StdInfos, MAX_REF_FRAMES, isH264, &slotInfos_count);
-	assert(slotInfos_count <= MAX_REF_FRAMES);
-
-	// ---Filling the info of currently decoded picture---
-	assert(slice_info->sps_id < MAX_SPS_IDS); //TODO if
-
-	sps_t *sps = s->sps_array + slice_info->sps_id;
-	//printf("\tprev_msb: %d, prev_lsb: %d, lsb: %d\n", s->prev_poc_msb, s->prev_poc_lsb, slice_info->poc_lsb);
-	slice_info->poc = get_picture_order_count(sps, slice_info->poc_lsb, slice_info->frame_num, slice_info->is_reference,
-											  &s->prev_poc_msb, &s->prev_poc_lsb);
-	
-	//if (slice_info->is_intra && slice_info->is_reference)
-	//printf("\tcalculated poc: %d display_frame_seq: %d\n", slice_info->poc, slice_info->frame_seq - s->idr_frame_seq);
-
-	h264StdInfos[slotInfos_count] = (StdVideoDecodeH264ReferenceInfo){ .flags = { 0 },
-									  								   .FrameNum = slice_info->frame_num,
-									  								   .PicOrderCnt = { slice_info->poc, slice_info->poc } };
-	h264SlotInfos[slotInfos_count] = (VkVideoDecodeH264DpbSlotInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR,
-									   									.pStdReferenceInfo = h264StdInfos + slotInfos_count };
-	picInfos[slotInfos_count] = (VkVideoPictureResourceInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR,
-																 .codedOffset = { 0, 0 }, // empty offset
-																 .codedExtent = videoSize,
-																 .baseArrayLayer = 0,
-																 .imageViewBinding = s->dpbViews[slice_info->dpbIndex] };
-	VkVideoDecodeH265DpbSlotInfoKHR h265SlotInfo = {}; //TODO H.265
-	slotInfos[slotInfos_count] = (VkVideoReferenceSlotInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR,
-								   								.pNext = isH264 ? (void*)(h264SlotInfos + slotInfos_count)
-																				: (void*)&h265SlotInfo,
-								   								.slotIndex = -1, // currently decoded picture must have index -1
-								   								.pPictureResource = picInfos + slotInfos_count };
-	++slotInfos_count; // updating the count for currently added decoded picture
-
 	VkVideoBeginCodingInfoKHR beginCodingInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_BEGIN_CODING_INFO_KHR,
 												  .flags = 0,
 												  .videoSession = s->videoSession,
@@ -2883,7 +2864,7 @@ static void * begin_bitstream_writing(struct state_vulkan_decompress *s)
 {
 	void *memoryPtr = NULL;
 
-	VkResult result = vkMapMemory(s->device, s->bitstreamBufferMemory, 0, s->bitstreamBufferSize, 0, &memoryPtr);
+	VkResult result = vkMapMemory(s->device, s->bitstreamBufferMemory, 0, VK_WHOLE_SIZE, 0, &memoryPtr);
 	if (result != VK_SUCCESS) return NULL;
 
 	memset(memoryPtr, 0, s->bitstreamBufferSize);
@@ -2892,19 +2873,18 @@ static void * begin_bitstream_writing(struct state_vulkan_decompress *s)
 }
 
 static VkDeviceSize write_bitstream(uint8_t *bitstream, VkDeviceSize bitstream_len, VkDeviceSize bitstream_capacity,
-					    			const uint8_t *rbsp, int len, unsigned char nal_header)
+					    			const uint8_t *rbsp, int len, unsigned char nal_header, FILE *file, bool long_startcode)
 {
 	// writes one given NAL unit into NAL buffer, if error (not enough space in buffer) returns 0
 	assert(bitstream != NULL && rbsp != NULL && len > 0);
 
-	const uint8_t startcode[] = { BITSTREAM_STARTCODE };
-	size_t startcode_len = sizeof(startcode) / sizeof(startcode[0]);
+	const uint8_t startcode_long[] = { 0, BITSTREAM_STARTCODE };
+	const uint8_t startcode_short[] = { BITSTREAM_STARTCODE };
 
-	/*printf("header: %u startcode: %u %u %u, rbsp: %u %u %u %u\n", nal_header,
-			startcode[0], startcode[1], startcode[2],
-			rbsp[0], rbsp[1], rbsp[2], rbsp[3]);*/
-	//printf("writing bitstream - rbsp_len: %u, bs_len: %u, bs_cap: %u\n",
-	//		len, bitstream_len, bitstream_capacity);
+	const uint8_t *startcode = long_startcode ? startcode_long : startcode_short;
+	size_t startcode_len = long_startcode ?
+						   sizeof(startcode_long) / sizeof(startcode_long[0]) :
+						   sizeof(startcode_short) / sizeof(startcode_short[0]);
 	
 	//TODO check if the cast is correct
 	VkDeviceSize result_len = (VkDeviceSize)startcode_len + 1 + (VkDeviceSize)len; // startcode + header + rbsp data
@@ -2917,14 +2897,33 @@ static VkDeviceSize write_bitstream(uint8_t *bitstream, VkDeviceSize bitstream_l
 	bitstream[bitstream_len + startcode_len] = (uint8_t)nal_header;		// writing the nal header
 	memcpy(bitstream + bitstream_len + startcode_len + 1, rbsp, len);	// writing the rbsp data
 
+	if (file != NULL)
+	{
+		fwrite(startcode, 1, startcode_len, file);
+		putc(nal_header, file);
+		fwrite(rbsp, 1, len, file);
+	}
+
 	return result_len;
 }
 
-static void end_bitstream_writing(struct state_vulkan_decompress *s)
+static void end_bitstream_writing(struct state_vulkan_decompress *s, uint8_t *bitstream, VkDeviceSize bitstream_written)
 {
 	if (vkUnmapMemory == NULL || s->device == VK_NULL_HANDLE) return;
 
+	if (bitstream_written > 0) //DEBUG
+	{
+		fwrite(bitstream, 1, bitstream_written, s->bs_file3);
+	}
+
 	vkUnmapMemory(s->device, s->bitstreamBufferMemory);
+}
+
+//DEBUG
+static void write_bitstream_file(struct state_vulkan_decompress *s, const unsigned char *src, size_t src_len)
+{
+	size_t written = fwrite(src, 1, src_len, s->bs_file);
+	if (written < src_len) printf("[DEBUG] Not the whole input(%u) was successfully written(%u)!\n", src_len, written);
 }
 
 static void copy_decoded_image(struct state_vulkan_decompress *s, VkImage srcDpbImage)
@@ -3012,7 +3011,7 @@ static bool write_decoded_frame(struct state_vulkan_decompress *s, unsigned char
 	//460800 = 640*480 + 153600 = 640*480 + 76800 + 76800 = 640*480 + 640*480/4 + 640*480/4
 	VkDeviceSize lumaSize = s->lumaSize;		// using local variable, otherwise would get bad performance
 	VkDeviceSize chromaSize = s->chromaSize;	// using local variable, otherwise would get bad performance
-	VkDeviceSize size = lumaSize + 2 * chromaSize;
+	//VkDeviceSize size = lumaSize + 2 * chromaSize;
 	//printf("\t%d = %d + 2 * %d\n", size, lumaSize, chromaSize);
 
 	assert(lumaSize <= s->outputChromaPlaneOffset);
@@ -3027,6 +3026,13 @@ static bool write_decoded_frame(struct state_vulkan_decompress *s, unsigned char
 	// luma plane
 	const uint8_t *luma = memory;
 	for (size_t i = 0; i < lumaSize; ++i) dst[i] = (unsigned char)luma[i]; // could be memcpy I guess
+	/*for (int row = 0; row < s->height; ++row)
+	{
+		for (int col = 0; col < s->width; ++col)
+		{
+			dst[row * s->pitch + col] = (unsigned char)luma[row * s->width + col];
+		}
+	}*/
 
 	// chroma plane
 	const uint8_t *chroma = memory + s->outputChromaPlaneOffset;
@@ -3035,10 +3041,14 @@ static bool write_decoded_frame(struct state_vulkan_decompress *s, unsigned char
 		unsigned char Cb = (unsigned char)chroma[2*i],
 					  Cr = (unsigned char)chroma[2*i + 1];
 
+		//int col = i % (s->width / 2);
+		//int row = i / (s->width / 2);
+		//printf("i: %u, row: %d, col: %d\n", i, row, col);
+
 		dst[lumaSize + i] = Cb;
 		dst[lumaSize + chromaSize + i] = Cr;
 	}
-
+	
 	vkUnmapMemory(s->device, s->outputImageMemory);
 
 	return true;
@@ -3249,9 +3259,10 @@ static bool handle_sh_nalu(struct state_vulkan_decompress *s, uint8_t *rbsp, int
 	return true;
 }
 
-static void handle_vcl(struct state_vulkan_decompress *s, uint8_t *bitstream, VkDeviceSize bitstream_capacity, VkDeviceSize *bitstream_written,
-					   uint8_t *rbsp, int rbsp_len, unsigned char nal_header, slice_info_t *slice_info,
-					   uint32_t slice_offsets[], uint32_t *slice_offsets_count)
+static VkDeviceSize handle_vcl(struct state_vulkan_decompress *s,
+							   uint8_t *bitstream, VkDeviceSize bitstream_written, VkDeviceSize bitstream_capacity,
+							   uint8_t *rbsp, int rbsp_len, unsigned char nal_header, slice_info_t *slice_info,
+							   uint32_t slice_offsets[], uint32_t *slice_offsets_count, bool long_startcode)
 {
 	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
 	assert(isH264); //TODO H.265
@@ -3261,78 +3272,47 @@ static void handle_vcl(struct state_vulkan_decompress *s, uint8_t *bitstream, Vk
 	bool sh_ret = handle_sh_nalu(s, rbsp, rbsp_len, nal_type, nal_idc, slice_info);
 	UNUSED(sh_ret); //TODO maybe error?
 
-	VkDeviceSize written = write_bitstream(bitstream, *bitstream_written, bitstream_capacity,
-										   rbsp, rbsp_len, nal_header);
+	VkDeviceSize written = write_bitstream(bitstream, bitstream_written, bitstream_capacity,
+										   rbsp, rbsp_len, nal_header, s->bs_file2, long_startcode);
 	if (written > 0 && *slice_offsets_count < MAX_SLICES)
 	{
 		//printf("\t\tWriting success.\n");
 		//if (nal_type == NAL_H264_IDR) printf("slice offset IDR: %u\n", *bitstream_written);
 		//else printf("slice offset: %u\n", *bitstream_written);
 		/*printf("slice count: %u, slice offset: %u, slice len: %u, header: %u, startcode: %u %u %u %u\n",
-				*slice_offsets_count, *bitstream_written, written, nal_header,
-				bitstream[*bitstream_written + 0], bitstream[*bitstream_written + 1],
-				bitstream[*bitstream_written + 2], bitstream[*bitstream_written + 3]);*/
+				*slice_offsets_count, bitstream_written, written, nal_header,
+				bitstream[bitstream_written + 0], bitstream[bitstream_written + 1],
+				bitstream[bitstream_written + 2], bitstream[bitstream_written + 3]);*/
 
-		slice_offsets[*slice_offsets_count] = *bitstream_written; // pointing at the written startcode
+		slice_offsets[*slice_offsets_count] = bitstream_written; // pointing at the written startcode
 		*slice_offsets_count += 1;
-		*bitstream_written += written;
 
 		slice_info->is_reference = nal_idc > 0;
 	}
-	else printf("NAL writing fail!\n");
+	else printf("\tNAL writing fail!\n");
+
+	return written;
 }
 
 static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_info, VkDeviceSize bitstreamBufferWritten,
-						 uint32_t slice_offsets[], uint32_t slice_offsets_count)
+						 uint32_t slice_offsets[], uint32_t slice_offsets_count,
+						 VkVideoReferenceSlotInfoKHR refSlotInfos[], uint32_t refSlotInfos_count,
+						 VkVideoReferenceSlotInfoKHR *dstSlotInfo, VkVideoPictureResourceInfoKHR *dstVideoPicInfo)
 {
 	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
-	const VkExtent2D videoSize = { s->width, s->height };
 	VkDeviceSize bitstreamBufferWrittenAligned = (bitstreamBufferWritten + (s->bitstreambufferSizeAlignment - 1))
 												 & ~(s->bitstreambufferSizeAlignment - 1); //alignment bit mask magic
-	
-	//assert(slice_info.pps_id < MAX_PPS_IDS); //TODO if
-	//pps_t *pps = s->pps_array + slice_info.pps_id;
-	//assert(slice_info.sps_id < MAX_SPS_IDS); //TODO if
-	//sps_t *sps = s->sps_array + slice_info.sps_id;
 	
 	assert(bitstreamBufferWrittenAligned <= s->bitstreamBufferSize);
 	assert(slice_offsets_count > 0);
 	// for IDR pictures the id must be valid
 	assert(!slice_info.is_intra || !slice_info.is_reference || slice_info.idr_pic_id >= 0);
-
 	assert(isH264); //TODO H.265
-
-	// ---Filling infos related to active reference pictures---
-	// similar to filling of infos in begin_video_coding_scope
-	uint32_t refSlotInfos_count = 0;
-	StdVideoDecodeH264ReferenceInfo h264RefStdInfos[MAX_REF_FRAMES] = { 0 };
-	VkVideoDecodeH264DpbSlotInfoKHR h264RefSlotInfos[MAX_REF_FRAMES] = { 0 };
-	VkVideoPictureResourceInfoKHR refPicInfos[MAX_REF_FRAMES] = { 0 };
-	VkVideoReferenceSlotInfoKHR refSlotInfos[MAX_REF_FRAMES] = { 0 };
-
-	fill_ref_picture_infos(s, refSlotInfos, refPicInfos, h264RefSlotInfos, h264RefStdInfos,
-						   MAX_REF_FRAMES, isH264, &refSlotInfos_count);
-
-	// ---Filling infos related to currently decoded picture---
-	VkVideoPictureResourceInfoKHR dstVideoPicInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR,
-													  .codedOffset = { 0, 0 }, // empty offset
-													  .codedExtent = videoSize,
-													  .baseArrayLayer = 0,
-													  .imageViewBinding = s->dpbViews[slice_info.dpbIndex] };
-	StdVideoDecodeH264ReferenceInfo h264DstStdInfo = { .flags = { 0 },
-													   .FrameNum = slice_info.frame_num,
-													   .PicOrderCnt = { slice_info.poc, slice_info.poc } };
-	VkVideoDecodeH264DpbSlotInfoKHR h264DstSlotInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR,
-														.pStdReferenceInfo = &h264DstStdInfo };
-	VkVideoDecodeH265DpbSlotInfoKHR h265DstSlotInfo = {}; //TODO H.265
-	VkVideoReferenceSlotInfoKHR dstSlotInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR,
-												.pNext = isH264 ? (void*)&h264DstSlotInfo : (void*)&h265DstSlotInfo,
-												.slotIndex = slice_info.dpbIndex,
-												.pPictureResource = &dstVideoPicInfo };
 
 	// ---Filling infos related to bitstream---
 	//print_sps(&s->sps_array[slice_info.sps_id]);
 	//print_pps(&s->pps_array[slice_info.pps_id]);
+	//printf("is_intra: %d, is_reference: %d, IdrPicFlag: %d\n", slice_info.is_intra, slice_info.is_reference, slice_info.is_intra && slice_info.is_reference);
 	StdVideoDecodeH264PictureInfo h264DecodeStdInfo = { .flags = { .field_pic_flag = 0,
 																   .is_intra = slice_info.is_intra,
 																   .is_reference = slice_info.is_reference,
@@ -3345,6 +3325,12 @@ static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_i
 														.frame_num = slice_info.frame_num,
 														.idr_pic_id = slice_info.idr_pic_id,
 														.PicOrderCnt = { slice_info.poc, slice_info.poc } };
+	/*printf("offsets(%u): ", slice_offsets_count);
+	for (uint32_t i = 0; i < slice_offsets_count; ++i)
+	{
+		printf("%u ", slice_offsets[i]);
+	}
+	putchar('\n');*/
 	VkVideoDecodeH264PictureInfoKHR h264DecodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PICTURE_INFO_KHR,
 													   .pStdPictureInfo = &h264DecodeStdInfo,
 													   .sliceCount = slice_offsets_count,
@@ -3366,10 +3352,10 @@ static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_i
 										.srcBuffer = s->bitstreamBuffer,
 										.srcBufferOffset = 0,
 										.srcBufferRange = bitstreamBufferWrittenAligned,
-										.dstPictureResource = dstVideoPicInfo,
+										.dstPictureResource = *dstVideoPicInfo,
 										// this must be the same as dstPictureResource when VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR
 										// otherwise must not be the same as dstPictureResource
-										.pSetupReferenceSlot = &dstSlotInfo,
+										.pSetupReferenceSlot = dstSlotInfo,
 										//specifies the needed used references (but not the decoded frame)
 										.referenceSlotCount = refSlotInfos_count,
 										.pReferenceSlots = refSlotInfos };
@@ -3396,7 +3382,7 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 		return DECODER_GOT_CODEC;
 	}
 
-	if (src_len <= 5)
+	if (src_len <= 5) //TODO check this
 	{
 		printf("[vulkan_decode] Source buffer too short!\n");
 		return res;
@@ -3442,6 +3428,7 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	}
 
 	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
+	const VkExtent2D videoSize = { s->width, s->height };
 	// we hope to fill those values from NAL slice units
 	slice_info_t slice_info = { .is_reference = false, .is_intra = false, .idr_pic_id = -1, .sps_id = -1, .pps_id = -1,
 								.frame_num = -1, .frame_seq = frame_seq, .poc_lsb = -1,
@@ -3454,9 +3441,14 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	uint32_t slice_offsets_count = 0; 
 
 	// ---Copying NAL units into s->bitstreamBuffer---
+	const bool filter_nal = false, convert_to_rbsp = true; //DEBUG
 	VkDeviceSize bitstream_written = 0;
 	const VkDeviceSize bitstream_max_size = s->bitstreamBufferSize;
 	assert(bitstream_max_size > 0);
+
+	//DEBUG
+	//VkResult result_wait = vkWaitForFences(s->device, 1, &s->fence, VK_TRUE, 0);
+	//printf("[DEBUG] Wait result: %d!\n", result_wait);
 
 	uint8_t *bitstream = (uint8_t*)begin_bitstream_writing(s);
 	if (bitstream == NULL)
@@ -3490,6 +3482,7 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 			
 			size_t nal_startcode_len = nal_payload - nal;
 			size_t nal_payload_len = nal_len - nal_startcode_len; //should be non-zero now
+			bool long_startcode = nal_len - nal_payload_len > 3;
 
 			unsigned char nalu_header = nal_payload[0];
 			int nalu_type = NALU_HDR_GET_TYPE(nalu_header, !isH264);
@@ -3512,6 +3505,38 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 			assert(rbsp != NULL);
 			assert(rbsp_len > 0);
 
+			if (!filter_nal &&
+				(nalu_type == NAL_H264_IDR ||
+				 nalu_type == NAL_H264_NONIDR ||
+				 nalu_type == NAL_H264_PPS ||
+				 nalu_type == NAL_H264_SPS))
+			{
+				//DEBUG
+				write_bitstream_file(s, nal, nal_len); //s->bs_file
+			}
+
+			if (!filter_nal && nalu_type != NAL_H264_IDR && nalu_type != NAL_H264_NONIDR)
+			{
+				VkDeviceSize written = 0;
+				if (convert_to_rbsp)
+				{
+					written = write_bitstream(bitstream, bitstream_written, bitstream_max_size,
+											  rbsp, rbsp_len, nalu_header,
+											  s->bs_file2, long_startcode);
+				}
+				else //DEBUG version without conversion to rbsp:
+				{
+					written = write_bitstream(bitstream, bitstream_written, bitstream_max_size,
+											  (uint8_t*)(nal_payload + 1), (int)(nal_payload_len - 1), nalu_header,
+											  s->bs_file2, long_startcode);
+				}
+				
+				if (written > 0) printf("other NAL written: %u at %u\n", written, bitstream_written);
+				else printf("\tNAL writing fail!\n");
+				
+				bitstream_written += written;
+			}
+
 			switch(nalu_type)
 			{
 				case NAL_H264_SEI:
@@ -3519,47 +3544,41 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 					break; //switch break
 				case NAL_H264_IDR:
 					{
-						//puts("\t\tIDR => Decode.");
 						s->prev_poc_lsb = 0;
 						s->prev_poc_msb = 0;
 						s->idr_frame_seq = frame_seq;
 						clear_the_ref_slot_queue(s); // we dont need those references anymore
-
-						handle_vcl(s, bitstream, bitstream_max_size, &bitstream_written,
-								   rbsp, rbsp_len, nalu_header, &slice_info,
-								   slice_offsets, &slice_offsets_count);
-						//DEBUG version without conversion to rbsp:
-						/*handle_vcl(s, bitstream, bitstream_max_size, &bitstream_written,
-								   (uint8_t*)(nal_payload + 1), (int)(nal_payload_len - 1), nalu_header, &slice_info,
-								   slice_offsets, &slice_offsets_count);*/
 					}
-					break; //switch break
+					// intentional fallthrough
 				case NAL_H264_NONIDR:
 					{
-						//puts("\t\tNon-IDR => Decode.");
-						handle_vcl(s, bitstream, bitstream_max_size, &bitstream_written,
-								   rbsp, rbsp_len, nalu_header, &slice_info,
-								   slice_offsets, &slice_offsets_count);
-						//DEBUG version without conversion to rbsp:
-						/*handle_vcl(s, bitstream, bitstream_max_size, &bitstream_written,
-								   (uint8_t*)(nal_payload + 1), (int)(nal_payload_len - 1), nalu_header, &slice_info,
-								   slice_offsets, &slice_offsets_count);*/
+						VkDeviceSize written = 0;
+						if (convert_to_rbsp)
+						{
+							written = handle_vcl(s, bitstream, bitstream_written, bitstream_max_size,
+								   				 rbsp, rbsp_len, nalu_header, &slice_info,
+								   				 slice_offsets, &slice_offsets_count, long_startcode);
+						}
+						else //DEBUG version without conversion to rbsp:
+						{
+							written = handle_vcl(s, bitstream, bitstream_written, bitstream_max_size,
+												 (uint8_t*)(nal_payload + 1), (int)(nal_payload_len - 1), nalu_header, &slice_info,
+												 slice_offsets, &slice_offsets_count, long_startcode);
+						}
+						bitstream_written += written;
 					}
 					break; //switch break
 				case NAL_H264_SPS:
 					{
-						//puts("\t\tSPS => Load SPS.");
 						bool sps_ret = handle_sps_nalu(s, rbsp, rbsp_len);
 						UNUSED(sps_ret); //TODO maybe error?
 					}
 					break; //switch break
 				case NAL_H264_PPS:
 					{
-						//puts("\t\tPPS => Load PPS.");
 						bool pps_ret = handle_pps_nalu(s, rbsp, rbsp_len);
 						UNUSED(pps_ret); //TODO maybe error?
 					}
-					
 					break; //switch break
 
 				//TODO H.265 NAL unit types
@@ -3573,14 +3592,15 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 			nal = next_nal;
 		}
 	}
-	end_bitstream_writing(s); //TODO check for err flag here
+	//TODO check for err flag here
+	end_bitstream_writing(s, bitstream, bitstream_written);
 	bitstream = NULL; // just to be sure
  	assert(bitstream_written <= bitstream_max_size);
 
 	if (slice_info.is_intra && slice_info.is_reference)
 	{
 		printf("Got IDR frame - %d\n", slice_info.idr_pic_id);
-	}
+	};
 
 	assert(s->cmdBuffer != VK_NULL_HANDLE);
 	assert(s->videoSession != VK_NULL_HANDLE);
@@ -3638,9 +3658,56 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	}
 
 	// ---Video coding scope---
-	begin_video_coding_scope(s, &slice_info);
-	decode_frame(s, slice_info, bitstream_written, slice_offsets, slice_offsets_count);
-	end_video_coding_scope(s);
+	{
+		assert(slice_info.frame_num >= 0 && slice_info.poc_lsb >= 0 &&
+		   	   slice_info.pps_id >= 0 && slice_info.sps_id >= 0);
+		
+		// Filling the references infos
+		uint32_t slotInfos_ref_count = 0;
+		StdVideoDecodeH264ReferenceInfo h264StdInfos[MAX_REF_FRAMES + 1] = { 0 };
+		VkVideoDecodeH264DpbSlotInfoKHR h264SlotInfos[MAX_REF_FRAMES + 1] = { 0 };
+		VkVideoPictureResourceInfoKHR picInfos[MAX_REF_FRAMES + 1] = { 0 };
+		VkVideoReferenceSlotInfoKHR slotInfos[MAX_REF_FRAMES + 1] = { 0 };
+
+		fill_ref_picture_infos(s, slotInfos, picInfos, h264SlotInfos, h264StdInfos, MAX_REF_FRAMES, isH264, &slotInfos_ref_count);
+		assert(slotInfos_ref_count <= MAX_REF_FRAMES);
+
+		// Filling the decoded frame info
+		assert(slice_info.sps_id < MAX_SPS_IDS); //TODO if
+
+		sps_t *sps = s->sps_array + slice_info.sps_id;
+		//printf("\tprev_msb: %d, prev_lsb: %d, lsb: %d\n", s->prev_poc_msb, s->prev_poc_lsb, slice_info->poc_lsb);
+		slice_info.poc = get_picture_order_count(sps, slice_info.poc_lsb, slice_info.frame_num, slice_info.is_reference,
+												 &s->prev_poc_msb, &s->prev_poc_lsb);
+		
+		//if (slice_info->is_intra && slice_info->is_reference)
+		//printf("\tcalculated poc: %d display_frame_seq: %d\n", slice_info->poc, slice_info->frame_seq - s->idr_frame_seq);
+
+		h264StdInfos[slotInfos_ref_count] = (StdVideoDecodeH264ReferenceInfo){ .flags = { 0 },
+																		   	   .FrameNum = slice_info.frame_num,
+																		   	   .PicOrderCnt = { slice_info.poc, slice_info.poc } };
+		h264SlotInfos[slotInfos_ref_count] = (VkVideoDecodeH264DpbSlotInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR,
+																				.pStdReferenceInfo = h264StdInfos + slotInfos_ref_count };
+		picInfos[slotInfos_ref_count] = (VkVideoPictureResourceInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR,
+																		 .codedOffset = { 0, 0 }, // empty offset
+																		 .codedExtent = videoSize,
+																		 .baseArrayLayer = 0,
+																		 .imageViewBinding = s->dpbViews[slice_info.dpbIndex] };
+		VkVideoDecodeH265DpbSlotInfoKHR h265SlotInfo = {}; //TODO H.265
+		slotInfos[slotInfos_ref_count] = (VkVideoReferenceSlotInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR,
+																		.pNext = isH264 ? (void*)(h264SlotInfos + slotInfos_ref_count)
+																						: (void*)&h265SlotInfo,
+																		.slotIndex = -1, // currently decoded picture must have index -1
+																		.pPictureResource = picInfos + slotInfos_ref_count };
+
+		begin_video_coding_scope(s, slotInfos, slotInfos_ref_count + 1);
+		slotInfos[slotInfos_ref_count].slotIndex = slice_info.dpbIndex;
+		decode_frame(s, slice_info, bitstream_written, slice_offsets, slice_offsets_count,
+					 slotInfos, slotInfos_ref_count,
+					 slotInfos + slotInfos_ref_count, picInfos + slotInfos_ref_count);
+		end_video_coding_scope(s);
+
+	}
 	
 	// ---VkImage synchronization and layout transfering after video coding scope---
 	for (size_t i = 0; i < MAX_REF_FRAMES + 1; ++i)
@@ -3723,15 +3790,15 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 		else if (result == VK_ERROR_DEVICE_LOST) printf("[vulkan_decode] Vulkan can't synchronize! -> Device lost.\n");
 		else printf("[vulkan_decode] Vulkan can't synchronize! -> Not enough memory.\n");
 		
-		return false;
+		return res;
 	}
 
 	result = vkResetFences(s->device, 1, &s->fence);
 	if (result != VK_SUCCESS)
 	{
-		//should happen only when out of memory
+		// should happen only when out of memory
 		printf("[vulkan_decode] Failed to reset vulkan fence!\n");
-		return false;
+		return res;
 	}
 
 	// ---Getting potential query results---
