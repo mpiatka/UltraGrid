@@ -19,7 +19,11 @@
 #include "rtp/rtpdec_h264.h"	//?
 #include "rtp/rtpenc_h264.h"	//?
 
-//#include <windows.h> //LoadLibrary
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+//#include <windows.h>	//LoadLibrary
+#else
+#include <dlfcn.h>		//dlopen, dlsym, dlclose
+#endif
 
 #ifndef VK_NO_PROTOTYPES
 #define VK_NO_PROTOTYPES
@@ -269,7 +273,11 @@ typedef struct	// structure used to pass around variables related to currently d
 
 struct state_vulkan_decompress
 {
+#ifdef VK_USE_PLATFORM_WIN32_KHR
 	HMODULE vulkanLib;							// needs to be destroyed if valid
+#else
+	void *vulkanLib;
+#endif
 	VkInstance instance; 						// needs to be destroyed if valid
 	PFN_vkGetInstanceProcAddr loader;
 	//maybe this could be present only when VULKAN_VALIDATE is defined?
@@ -342,29 +350,58 @@ static void destroy_output_image(struct state_vulkan_decompress *s);
 static void destroy_dpb(struct state_vulkan_decompress *s);
 static void destroy_queries(struct state_vulkan_decompress *s);
 
+static bool load_vulkan(struct state_vulkan_decompress *s)
+{
+#ifdef VK_USE_PLATFORM_WIN32_KHR // windows
+	const char vulkan_lib_filename[] = "vulkan-1.dll";
+	const char vulkan_proc_name[] = "vkGetInstanceProcAddr";
+
+    s->vulkanLib = LoadLibrary(vulkan_lib_filename);
+	if (s->vulkanLib == NULL)
+	{
+		printf("[vulkan_decode] Vulkan loader file '%s' not found!\n", vulkan_lib_filename);
+		return false;
+	}
+
+	s->loader = (PFN_vkGetInstanceProcAddr)GetProcAddress(s->vulkanLib, vulkan_proc_name);
+    if (s->loader == NULL) {
+
+		printf("[vulkan_decode] Vulkan function '%s' not found!\n", vulkan_proc_name);
+        return false;
+    }
+#else // non windows
+	const char vulkan_lib_filename[] = "libvulkan.so.1";
+	const char vulkan_proc_name[] = "vkGetInstanceProcAddr";
+
+	s->vulkanLib = dlopen(vulkan_lib_filename, RTLD_LAZY);
+	if (s->vulkanLib == NULL)
+	{
+		printf("[vulkan_decode] Vulkan loader file '%s' not found!\n", vulkan_lib_filename);
+		return false;
+	}
+	
+	s->loader = (PFN_vkGetInstanceProcAddr)dlsym(s->vulkanLib, vulkan_proc_name);
+    if (s->loader == NULL) {
+
+		printf("[vulkan_decode] Vulkan function '%s' not found!\n", vulkan_proc_name);
+        return false;
+    }
+#endif
+
+	return true;
+}
+
+static void unload_vulkan(struct state_vulkan_decompress *s)
+{
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+	FreeLibrary(s->vulkanLib);
+#else
+	dlclose(s->vulkanLib);
+#endif
+}
+
 static bool check_for_instance_extensions(const char * const requiredInstanceextensions[])
 {
-	/*const char* const requiredInstanceLayerExtensions[] = {
-								"VK_LAYER_KHRONOS_validation",
-								NULL };
-
-    const char* const requiredWsiInstanceExtensions[] = {
-								// Required generic WSI extensions
-								VK_KHR_SURFACE_EXTENSION_NAME,
-								NULL };*/
-	
-	/*const char* const requiredWsiDeviceExtension[] = {
-							// Add the WSI required device extensions
-							VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-							NULL };
-
-    static const char* const optinalDeviceExtension[] = {
-								VK_EXT_YCBCR_2PLANE_444_FORMATS_EXTENSION_NAME,
-								VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME,
-								VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
-								VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
-								NULL };*/
-
 	uint32_t extensions_count = 0;
 	vkEnumerateInstanceExtensionProperties(NULL, &extensions_count, NULL);
 	printf("instance extensions_count: %d\n", extensions_count);
@@ -737,37 +774,21 @@ static void * vulkan_decompress_init(void)
 	s->sps_array = sps_array;
 	s->pps_array = pps_array;
 
-	// ---Dynamic loading of the vulkan loader library---
-	const char vulkan_lib_filename[] = "vulkan-1.dll"; //TODO .so
-    s->vulkanLib = LoadLibrary(vulkan_lib_filename);
-	if (s->vulkanLib == NULL)
+	// ---Dynamic loading of the vulkan loader library and loader function---
+	if (!load_vulkan(s))
 	{
-		printf("[vulkan_decode] Vulkan loader file '%s' not found!\n", vulkan_lib_filename);
+		// err msg printed inside of load_vulkan
 		free(pps_array);
 		free(sps_array);
 		free(s);
-		return NULL;
+		return false;
 	}
 
-	// ---Getting the loader function---
-	const char vulkan_proc_name[] = "vkGetInstanceProcAddr";
-	PFN_vkGetInstanceProcAddr getInstanceProcAddr = (PFN_vkGetInstanceProcAddr)GetProcAddress(s->vulkanLib, vulkan_proc_name);
-    if (getInstanceProcAddr == NULL) {
-
-		printf("[vulkan_decode] Vulkan function '%s' not found!\n", vulkan_proc_name);
-        FreeLibrary(s->vulkanLib);
-		free(pps_array);
-		free(sps_array);
-		free(s);
-        return NULL;
-    }
-	s->loader = getInstanceProcAddr;
-
 	// ---Loading function pointers where the instance is not needed---
-	if (!load_vulkan_functions_globals(getInstanceProcAddr))
+	if (!load_vulkan_functions_globals(s->loader))
 	{
 		printf("[vulkan_decode] Failed to load all vulkan functions!\n");
-		FreeLibrary(s->vulkanLib);
+		unload_vulkan(s);
 		free(pps_array);
 		free(sps_array);
 		free(s);
@@ -784,7 +805,7 @@ static void * vulkan_decompress_init(void)
 	if (!check_for_validation_layers(validationLayers))
 	{
 		printf("[vulkan_deconde] Required vulkan validation layers not found!\n");
-		FreeLibrary(s->vulkanLib);
+		unload_vulkan(s);
 		free(pps_array);
 		free(sps_array);
 		free(s);
@@ -804,7 +825,7 @@ static void * vulkan_decompress_init(void)
 	if (!check_for_instance_extensions(requiredInstanceExtensions))
 	{
 		//error msg should be printed inside of check_for_extensions
-		FreeLibrary(s->vulkanLib);
+		unload_vulkan(s);
 		free(pps_array);
 		free(sps_array);
 		free(s);
@@ -833,18 +854,18 @@ static void * vulkan_decompress_init(void)
 	if (result != VK_SUCCESS)
 	{
 		printf("[vulkan_decode] Failed to create vulkan instance! Error: %d\n", result);
-        FreeLibrary(s->vulkanLib);
+        unload_vulkan(s);
 		free(pps_array);
 		free(sps_array);
 		free(s);
 		return NULL;
 	}
 
-	if (!load_vulkan_functions_with_instance(getInstanceProcAddr, s->instance))
+	if (!load_vulkan_functions_with_instance(s->loader, s->instance))
 	{
 		printf("[vulkan_decode] Failed to load all instance related vulkan functions!\n");
 		if (vkDestroyInstance != NULL) vkDestroyInstance(s->instance, NULL);
-		FreeLibrary(s->vulkanLib);
+		unload_vulkan(s);
 		free(pps_array);
 		free(sps_array);
 		free(s);
@@ -858,7 +879,7 @@ static void * vulkan_decompress_init(void)
 	{
 		printf("[vulkan_decode] Failed to setup debug messenger!\n");
 		vkDestroyInstance(s->instance, NULL);
-        FreeLibrary(s->vulkanLib);
+        unload_vulkan(s);
 		free(pps_array);
 		free(sps_array);
 		free(s);
@@ -891,7 +912,7 @@ static void * vulkan_decompress_init(void)
 		printf("[vulkan_decode] No physical devices found!\n");
 		destroy_debug_messenger(s->instance, s->debugMessenger);
 		vkDestroyInstance(s->instance, NULL);
-        FreeLibrary(s->vulkanLib);
+        unload_vulkan(s);
 		free(pps_array);
 		free(sps_array);
 		free(s);
@@ -904,7 +925,7 @@ static void * vulkan_decompress_init(void)
 		printf("[vulkan_decode] Failed to allocate array for devices!\n");
 		destroy_debug_messenger(s->instance, s->debugMessenger);
 		vkDestroyInstance(s->instance, NULL);
-        FreeLibrary(s->vulkanLib);
+        unload_vulkan(s);
 		free(pps_array);
 		free(sps_array);
 		free(s);
@@ -923,7 +944,7 @@ static void * vulkan_decompress_init(void)
 		printf("[vulkan_decode] Failed to choose a appropriate physical device!\n");
 		destroy_debug_messenger(s->instance, s->debugMessenger);
 		vkDestroyInstance(s->instance, NULL);
-        FreeLibrary(s->vulkanLib);
+        unload_vulkan(s);
 		free(pps_array);
 		free(sps_array);
 		free(s);
@@ -977,7 +998,7 @@ static void * vulkan_decompress_init(void)
 		printf("[vulkan_decode] Failed to create a appropriate vulkan logical device!\n");
 		destroy_debug_messenger(s->instance, s->debugMessenger);
 		vkDestroyInstance(s->instance, NULL);
-        FreeLibrary(s->vulkanLib);
+        unload_vulkan(s);
 		free(pps_array);
 		free(sps_array);
 		free(s);
@@ -1080,7 +1101,7 @@ static void vulkan_decompress_done(void *state)
 
 	if (vkDestroyInstance != NULL) vkDestroyInstance(s->instance, NULL);
 
-	FreeLibrary(s->vulkanLib);
+	unload_vulkan(s);
 
 	free(s->pps_array);
 	free(s->sps_array);
