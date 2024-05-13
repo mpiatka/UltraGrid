@@ -9,6 +9,11 @@
 #include "config_win32.h"
 #endif // HAVE_CONFIG_H
 
+// copied from vulkan_sdl2.cpp
+#ifdef __MINGW32__
+#define VK_USE_PLATFORM_WIN32_KHR
+#endif
+
 #include "debug.h"
 #include "host.h"				//?
 #include "lib_common.h"
@@ -352,7 +357,7 @@ static void destroy_queries(struct state_vulkan_decompress *s);
 
 static bool load_vulkan(struct state_vulkan_decompress *s)
 {
-#ifdef VK_USE_PLATFORM_WIN32_KHR // windows
+	#ifdef VK_USE_PLATFORM_WIN32_KHR // windows
 	const char vulkan_lib_filename[] = "vulkan-1.dll";
 	const char vulkan_proc_name[] = "vkGetInstanceProcAddr";
 
@@ -369,7 +374,7 @@ static bool load_vulkan(struct state_vulkan_decompress *s)
 		printf("[vulkan_decode] Vulkan function '%s' not found!\n", vulkan_proc_name);
         return false;
     }
-#else // non windows
+	#else // non windows
 	const char vulkan_lib_filename[] = "libvulkan.so.1";
 	const char vulkan_proc_name[] = "vkGetInstanceProcAddr";
 
@@ -386,18 +391,18 @@ static bool load_vulkan(struct state_vulkan_decompress *s)
 		printf("[vulkan_decode] Vulkan function '%s' not found!\n", vulkan_proc_name);
         return false;
     }
-#endif
+	#endif
 
 	return true;
 }
 
 static void unload_vulkan(struct state_vulkan_decompress *s)
 {
-#ifdef VK_USE_PLATFORM_WIN32_KHR
+	#ifdef VK_USE_PLATFORM_WIN32_KHR
 	FreeLibrary(s->vulkanLib);
-#else
+	#else
 	dlclose(s->vulkanLib);
-#endif
+	#endif
 }
 
 static bool check_for_instance_extensions(const char * const requiredInstanceextensions[])
