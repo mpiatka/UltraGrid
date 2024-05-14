@@ -7,7 +7,6 @@
 // https://github.com/turanszkij/WickedEngine/blob/master/WickedEngine/Utility/h264.h
 // and from utils/h264_stream.c file (nal_to_rbsp function)
 
-//TODO useless check?
 #ifndef VULKAN_DECODE_H264_H
 #define VULKAN_DECODE_H264_H
 
@@ -353,7 +352,7 @@ static void print_sh(slice_header_t *sh) //DEBUG
 	//		sh->frame_num, sh->idr_pic_id, sh->slice_type, sh->pic_parameter_set_id, sh->pic_order_cnt_lsb, sh->drpm.long_term_reference_flag);
 }
 
-static int intlog2(int x) //TODO check if its not already provided
+static int intlog2(int x)
 {
     int log = 0;
     if (x < 0) { x = 0; }
@@ -1041,7 +1040,7 @@ static int32_t get_picture_order_count(const sps_t *sps, int sh_pic_order_cnt_ls
 	// calculates picture order count (POC) for given slice header
 	// reference: Section 3 at https://www.vcodex.com/h264avc-picture-management/
 	//NOTE: prev_poc_msb and prev_poc_lsb are only relevant and updated when POC is of Type 0
-	assert(sps->pic_order_cnt_type == 0 || sps->pic_order_cnt_type == 2); //TODO handle other types as well
+	assert(sps->pic_order_cnt_type == 0 || sps->pic_order_cnt_type == 2); //TODO handle type 1 as well
 
 	if (sps->pic_order_cnt_type == 0)
 	{
@@ -1087,23 +1086,26 @@ static int32_t get_picture_order_count(const sps_t *sps, int sh_pic_order_cnt_ls
 // ---Convert functions---
 static StdVideoH264ProfileIdc profile_idc_to_h264_flag(int profile_idc)
 {
-	//TODO switch instead?
+	switch (profile_idc)
+	{
+		case 66:
+			return STD_VIDEO_H264_PROFILE_IDC_BASELINE;
 
-	if (profile_idc == 66) return STD_VIDEO_H264_PROFILE_IDC_BASELINE;
+		case 77:
+		case 88:	// Extended profile (A.2.3), there's no h264 flag for it however => returning main profile
+			return STD_VIDEO_H264_PROFILE_IDC_MAIN;
 
-	if (profile_idc == 77) return STD_VIDEO_H264_PROFILE_IDC_MAIN;
-	// Extended profile (A.2.3), there's no h264 flag for it however => returning main profile
-	if (profile_idc == 88) return STD_VIDEO_H264_PROFILE_IDC_MAIN;
+		case 100:
+		case 110:	// High 10 profile (A.2.5), there's no h264 flag for it however => returning high profile
+		case 122:	// High 4:2:2 profile (A.2.6), there's no h264 flag for it however => returning high profile
+			return STD_VIDEO_H264_PROFILE_IDC_HIGH;
 
-	if (profile_idc == 100) return STD_VIDEO_H264_PROFILE_IDC_HIGH;
-	// High 10 profile (A.2.5), there's no h264 flag for it however => returning high profile
-	if (profile_idc == 110) return STD_VIDEO_H264_PROFILE_IDC_HIGH;
-	// High 4:2:2 profile (A.2.6), there's no h264 flag for it however => returning high profile
-	if (profile_idc == 122) return STD_VIDEO_H264_PROFILE_IDC_HIGH;
+		case 244:
+			return STD_VIDEO_H264_PROFILE_IDC_HIGH_444_PREDICTIVE;
 
-	if (profile_idc == 244) return STD_VIDEO_H264_PROFILE_IDC_HIGH_444_PREDICTIVE;
-
-	return STD_VIDEO_H264_PROFILE_IDC_INVALID;
+		default:
+			return STD_VIDEO_H264_PROFILE_IDC_INVALID;
+	}
 }
 
 // Following convert functions sps_to_vk_sps and pps_to_vk_pps were copied and modified also from WickedEngine project:
