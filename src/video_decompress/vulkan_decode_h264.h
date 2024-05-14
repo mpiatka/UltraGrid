@@ -435,17 +435,21 @@ static int nal_to_rbsp(const uint8_t *nal_buf, int *nal_size, uint8_t *rbsp_buf,
     return j;
 }
 
-static int more_rbsp_data(bs_t *b) //TODO rewrite
+// copied from h264bitstream project
+// https://github.com/aizvorski/h264bitstream/blob/ae72f7395f328876199a7e928d3b4a6dc6a7ce14/h264_stream.c#L62
+static int more_rbsp_data(bs_t *bs)
 {
     // no more data
-    if (bs_eof(b)) { return 0; }
+    if (bs_eof(bs)) { return 0; }
 
-    bs_t bs_tmp = *b; // make copy
+	// no rbsp_stop_bit yet
+    if (bs_peek_u1(bs) == 0) { return 1; }
 
-    // no rbsp_stop_bit yet
-    if (bs_read_u1(&bs_tmp) == 0) { return 1; }
-
-    while (bs_eof(&bs_tmp))
+	// next bit is 1, is it the rsbp_stop_bit? only if the rest of bits are 0
+    bs_t bs_tmp;
+    bs_clone(&bs_tmp, bs);
+    bs_skip_u1(&bs_tmp);
+    while(!bs_eof(&bs_tmp))
     {
         // A later bit was 1, it wasn't the rsbp_stop_bit
         if (bs_read_u1(&bs_tmp) == 1) { return 1; }

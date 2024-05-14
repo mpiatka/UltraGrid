@@ -52,6 +52,11 @@
 //#define VULKAN_VALIDATE_SHOW_SEVERITY VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT
 //#define VULKAN_VALIDATE_SHOW_SEVERITY VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
 
+// activates vukan queries if defined
+// query prints result value for each decode command (one per decoded frame)
+// typical query result values are: -1 => error, 1 => success, 1000331003 => ???
+#define VULKAN_QUERIES
+
 #define MAX_REF_FRAMES 16
 #define MAX_SLICES 128
 #define BITSTREAM_STARTCODE 0, 0, 1
@@ -344,7 +349,7 @@ struct state_vulkan_decompress
 	VkDeviceSize outputChromaPlaneOffset;
 
 	// vulkan queries
-	VkQueryPool queryPool;
+	VkQueryPool queryPool; // needs to be destroyed if valid, should be always VK_NULL_HANDLE when VULKAN_QUERIES is not defined
 
 	//DEBUG
 	FILE *bs_file, *bs_file2, *bs_file3;
@@ -2039,6 +2044,14 @@ static void destroy_dpb(struct state_vulkan_decompress *s)
 
 static bool create_queries(struct state_vulkan_decompress *s, VkVideoProfileInfoKHR *profile)
 {
+	// returns false when VULKAN_QUERIES macro not defined,
+	// otherwise attempts to create query pool with 1 query for decode command,
+	// returns whether the creation was successful
+	#ifndef VULKAN_QUERIES
+	UNUSED(s);
+	UNUSED(profile);
+	return false;
+	#else
 	assert(s->device != VK_NULL_HANDLE);
 	assert(s->queryPool == VK_NULL_HANDLE);
 
@@ -2057,14 +2070,19 @@ static bool create_queries(struct state_vulkan_decompress *s, VkVideoProfileInfo
 	}
 
 	return true;
+	#endif
 }
 
 static void destroy_queries(struct state_vulkan_decompress *s)
 {
+	#ifndef VULKAN_QUERIES
+	UNUSED(s);
+	#else
 	if (vkDestroyQueryPool != NULL && s->device != VK_NULL_HANDLE)
 				vkDestroyQueryPool(s->device, s->queryPool, NULL);
 	
 	s->queryPool = VK_NULL_HANDLE;
+	#endif
 }
 
 static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
@@ -2361,6 +2379,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	}
 
 	// ---Creating query pool---
+	// is true when VULKAN_QUERIES defined and queries were created successfully
 	bool query_ret = create_queries(s, &videoProfile);
 	//printf("\tquery_ret: %d\n", (int)query_ret);
 
@@ -2403,7 +2422,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	s->resetVideoCoding = true;
 
 	// ---Creating video session parameters---
-	//TODO probably useless to create them in prepare
+	//TODO probably not needed to create them in prepare
 	assert(s->videoSession != VK_NULL_HANDLE);
 
 	VkVideoDecodeH264SessionParametersCreateInfoKHR h264SessionParamsInfo =
@@ -2904,13 +2923,18 @@ static VkDeviceSize write_bitstream(uint8_t *bitstream, VkDeviceSize bitstream_l
 	// writes one given NAL unit into NAL buffer, if error (not enough space in buffer) returns 0
 	assert(bitstream != NULL && rbsp != NULL && len > 0);
 
-	const uint8_t startcode_long[] = { 0, BITSTREAM_STARTCODE };
 	const uint8_t startcode_short[] = { BITSTREAM_STARTCODE };
+	/*const uint8_t startcode_long[] = { 0, BITSTREAM_STARTCODE };
 
 	const uint8_t *startcode = long_startcode ? startcode_long : startcode_short;
 	size_t startcode_len = long_startcode ?
 						   sizeof(startcode_long) / sizeof(startcode_long[0]) :
-						   sizeof(startcode_short) / sizeof(startcode_short[0]);
+						   sizeof(startcode_short) / sizeof(startcode_short[0]);*/
+	
+	//DEBUG
+	UNUSED(long_startcode);
+	const uint8_t *startcode = startcode_short;
+	size_t startcode_len = sizeof(startcode_short) / sizeof(startcode_short[0]);
 	
 	//TODO check if the cast is correct
 	VkDeviceSize result_len = (VkDeviceSize)startcode_len + 1 + (VkDeviceSize)len; // startcode + header + rbsp data
@@ -2987,45 +3011,6 @@ static void copy_decoded_image(struct state_vulkan_decompress *s, VkImage srcDpb
 	vkCmdCopyImage(s->cmdBuffer, srcDpbImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 				   s->outputChromaPlane, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &chromaRegion);
 }
-
-/*static bool write_decoded_frame(struct state_vulkan_decompress *s, unsigned char *dst)
-{
-	assert(sizeof(unsigned char) == sizeof(uint8_t)); //DEBUG ?
-	assert(s->device != VK_NULL_HANDLE);
-	assert(s->bitstreamBufferMemory != VK_NULL_HANDLE);
-
-	//460800 = 640*480 + 153600 = 640*480 + 76800 + 76800 = 640*480 + 640*480/4 + 640*480/4
-	VkDeviceSize lumaSize = s->lumaSize;		// using local variable, otherwise would get bad performance
-	VkDeviceSize chromaSize = s->chromaSize;	// using local variable, otherwise would get bad performance
-	VkDeviceSize size = lumaSize + 2 * chromaSize;
-	//printf("\t%d = %d + 2 * %d\n", size, lumaSize, chromaSize);
-
-	uint8_t *buffer_data = NULL;
-	VkResult result = vkMapMemory(s->device, s->bufferMemory, s->dstPicBufferMemoryOffset, size, 0, (void**)&buffer_data);
-	if (result != VK_SUCCESS) return false;
-
-	assert(buffer_data != NULL);
-	assert(dst != NULL);
-
-	//DEBUG - attempt at translating NV12 into I420
-	// luma plane
-	for (size_t i = 0; i < lumaSize; ++i) dst[i] = (unsigned char)buffer_data[i]; // could be memcpy I guess
-	//for (size_t i = 0; i < lumaSize; ++i) dst[i] = (unsigned char)0;
-
-	// chroma plane
-	for (size_t i = 0; i < chromaSize; ++i)
-	{
-		unsigned char Cb = (unsigned char)buffer_data[lumaSize + 2*i],
-					  Cr = (unsigned char)buffer_data[lumaSize + 2*i + 1];
-
-		dst[lumaSize + i] = Cb;
-		dst[lumaSize + chromaSize + i] = Cr;
-	}
-
-	vkUnmapMemory(s->device, s->bufferMemory);
-
-	return true;
-}*/
 
 static bool write_decoded_frame(struct state_vulkan_decompress *s, unsigned char *dst)
 {
@@ -3467,7 +3452,7 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	uint32_t slice_offsets_count = 0; 
 
 	// ---Copying NAL units into s->bitstreamBuffer---
-	const bool filter_nal = false, convert_to_rbsp = true; //DEBUG
+	const bool filter_nal = true, convert_to_rbsp = true; //DEBUG - in release both should be true
 	VkDeviceSize bitstream_written = 0;
 	const VkDeviceSize bitstream_max_size = s->bitstreamBufferSize;
 	assert(bitstream_max_size > 0);
@@ -3522,7 +3507,7 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 
 			uint8_t *rbsp = NULL;
 			int rbsp_len = 0;
-			if (!create_rbsp(nal_payload, nal_payload_len, &rbsp, &rbsp_len)) //TODO maybe nal_payload + 1?
+			if (!create_rbsp(nal_payload, nal_payload_len, &rbsp, &rbsp_len))
 			{
 				//err should get printed inside of create_rbsp
 				//TODO err flag
@@ -3557,8 +3542,9 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 											  s->bs_file2, long_startcode);
 				}
 				
-				if (written > 0) printf("other NAL written: %u at %u\n", written, bitstream_written);
-				else printf("\tNAL writing fail!\n");
+				//DEBUG
+				//if (written > 0) printf("other NAL written: %u at %u\n", written, bitstream_written);
+				//else printf("\tNAL writing fail!\n");
 				
 				bitstream_written += written;
 			}
@@ -3623,10 +3609,11 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	bitstream = NULL; // just to be sure
  	assert(bitstream_written <= bitstream_max_size);
 
-	if (slice_info.is_intra && slice_info.is_reference)
+	//DEBUG
+	/*if (slice_info.is_intra && slice_info.is_reference)
 	{
 		printf("Got IDR frame - %d\n", slice_info.idr_pic_id);
-	};
+	};*/
 
 	assert(s->cmdBuffer != VK_NULL_HANDLE);
 	assert(s->videoSession != VK_NULL_HANDLE);
@@ -3749,35 +3736,6 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 						  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 	transfer_image_layout(s->cmdBuffer, s->outputChromaPlane,
 						  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-
-	// ---Copying decoded output image into decoded picture buffer---
-	/*{
-		assert(s->dstPicBuffer != VK_NULL_HANDLE);
-		//assert(s->dpbFormat == VK_FORMAT_G8_B8R8_2PLANE_420_UNORM); //TODO requirement
-
-		VkImageAspectFlagBits aspectFlags[2] = { VK_IMAGE_ASPECT_PLANE_0_BIT, VK_IMAGE_ASPECT_PLANE_1_BIT };
-		VkBufferImageCopy dstPicRegions[2] = { { .bufferOffset = 0,
-												 .bufferRowLength = s->pitch, //TODO pitch
-												 .imageOffset = { 0, 0, 0 }, // empty offset
-												 // videoSize with depth == 1:
-												 .imageExtent = { s->width, s->height, 1 },
-												 .imageSubresource = { .aspectMask = aspectFlags[0],
-												 					   .mipLevel = 0,
-												 					   .baseArrayLayer = 0,
-												 					   .layerCount = 1 } },
-											   { .bufferOffset = s->lumaSize,
-											     .bufferRowLength = s->pitch / 2, //TODO pitch
-												 .imageOffset = { 0, 0, 0 }, // empty offset
-												 // one half because format is VK_FORMAT_G8_B8R8_2PLANE_420_UNORM:
-												 .imageExtent = { s->width / 2, s->height / 2, 1 }, 
-												 .imageSubresource = { .aspectMask = aspectFlags[1],
-																	   .mipLevel = 0,
-																	   .baseArrayLayer = 0,
-																	   .layerCount = 1 } } };
-		//TODO this expects display order to be the same as decode order
-		vkCmdCopyImageToBuffer(s->cmdBuffer, s->outputImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-							   s->dstPicBuffer, 2, dstPicRegions);
-	}*/
 
 	if (!end_cmd_buffer(s))
 	{
