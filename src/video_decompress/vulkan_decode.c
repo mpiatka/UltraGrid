@@ -61,8 +61,6 @@
 #define MAX_SLICES 128
 #define MAX_OUTPUT_FRAMES_QUEUE_SIZE 32
 #define BITSTREAM_STARTCODE 0, 0, 1
-//TODO check if poc step is really valid strategy (maybe only for progressive frames?)
-#define POC_STEP 2
 
 static PFN_vkCreateInstance vkCreateInstance = NULL;
 static PFN_vkDestroyInstance vkDestroyInstance = NULL;
@@ -274,6 +272,7 @@ static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader
 typedef struct	// structure used to pass around variables related to currently decoded frame (slice)
 {
 	bool is_intra, is_reference;
+	int nal_idc;
 	int idr_pic_id;
 	int sps_id;
 	int pps_id;
@@ -2188,6 +2187,7 @@ static size_t output_queue_bubble_index_forward(struct state_vulkan_decompress *
 	// bubbles queue frame on given index forwards in the queue with respect to display order
 	// (lower display order is closer to the queue start than higher display order)
 	// returns the new bubbled index of this frame
+
 	frame_data_t bubbled = get_frame_from_output_queue(s, index);
 	while (index > 0)
 	{
@@ -2205,7 +2205,7 @@ static size_t output_queue_bubble_index_forward(struct state_vulkan_decompress *
 	return index;
 }
 
-static frame_data_t *make_new_entry_in_output_queue(struct state_vulkan_decompress *s, slice_info_t slice_info)
+static frame_data_t * make_new_entry_in_output_queue(struct state_vulkan_decompress *s, slice_info_t slice_info)
 {
 	assert(s->outputFrameQueue_count <= s->outputFrameQueue_capacity);
 
@@ -2255,7 +2255,7 @@ static frame_data_t * output_queue_get_next_frame(struct state_vulkan_decompress
 
 	if (s->outputFrameQueue_count == 0)
 	{
-		puts("no frame - queue empty");
+		//puts("no frame - queue empty");
 		return NULL; // empty queue case
 	}
 
@@ -2266,27 +2266,17 @@ static frame_data_t * output_queue_get_next_frame(struct state_vulkan_decompress
 	//		(smaller than current GOP size) So maybe could be commented out
 	if (s->outputFrameQueue_count == s->outputFrameQueue_capacity)
 	{	// queue is full => display the first queued frame, as it would get throwed out in another decompress anyways
-		puts("queue full");
+		//puts("queue full");
 		return output_queue_pop_first(s);
 	}
 
 	if (first->frame_seq < s->idr_frame_seq)
 	{	// first queued frame is from another GOP than currently decoded one => display it 
-		puts("previous GOP");
+		//puts("previous GOP");
 		return output_queue_pop_first(s);
 	}
 
-	//NOTE: this may never work as we never know which frame is truly first in display order in GOP (negative POCs can occur)
-	//TODO check
-	if (s->last_displayed_frame_seq >= s->idr_frame_seq &&
-		s->last_displayed_poc + POC_STEP == first->poc)
-	{	// last displayed frame was in the same (must be current) GOP as first queued frame
-		// and also is in display order right after it => display it
-		puts("current GOP succeeding frame");
-		return output_queue_pop_first(s);
-	}
-
-	puts("no frame");
+	//puts("no frame");
 	return NULL;
 }
 
@@ -2786,12 +2776,12 @@ static slice_info_t get_ref_slot_from_queue(struct state_vulkan_decompress *s, u
 	return s->referenceSlotsQueue[wrappedIdx];
 }
 
-static void print_queue_indices(struct state_vulkan_decompress *s) //DEBUG
+static void print_ref_queue(struct state_vulkan_decompress *s) //DEBUG
 {
 	for (uint32_t i = 0; i < s->referenceSlotsQueue_count; ++i)
 	{
 		const slice_info_t si = get_ref_slot_from_queue(s, i);
-		printf("%d ", si.dpbIndex);
+		printf("%d|%d|%d ", si.dpbIndex, si.nal_idc, si.frame_seq);
 	}
 }
 
@@ -2820,6 +2810,50 @@ static uint32_t smallest_dpb_index_not_in_queue(struct state_vulkan_decompress *
 	return 0;
 }
 
+static void ref_queue_swap_references(struct state_vulkan_decompress *s, uint32_t index1, uint32_t index2)
+{
+	assert(index1 != index2);
+	assert(index1 < s->referenceSlotsQueue_count);
+	assert(index2 < s->referenceSlotsQueue_count);
+
+	uint32_t wrapped1 = (s->referenceSlotsQueue_start + index1) % MAX_REF_FRAMES;
+	uint32_t wrapped2 = (s->referenceSlotsQueue_start + index2) % MAX_REF_FRAMES;
+
+	slice_info_t tmp = s->referenceSlotsQueue[wrapped1];
+	s->referenceSlotsQueue[wrapped1] = s->referenceSlotsQueue[wrapped2];
+	s->referenceSlotsQueue[wrapped2] = tmp;
+}
+
+static bool ref_slot_priority_smaller_than(slice_info_t ref1, slice_info_t ref2)
+{
+	// returns true if ref1 has lower or same priorty in the reference queue than ref2
+	return ref1.nal_idc < ref2.nal_idc ||
+		  (ref1.nal_idc == ref2.nal_idc && ref1.frame_seq <= ref2.frame_seq);
+}
+
+static uint32_t ref_slot_queue_bubble_index_forward(struct state_vulkan_decompress *s, uint32_t index)
+{
+	// bubbles reference picture at given index in the referecene queue forwards with respect to priority
+	// (lower priority is closer to the queue start -> dropped from the queue earlier if needed)
+	// returns the new bubbled index of this picture
+	
+	slice_info_t bubbled = get_ref_slot_from_queue(s, index);
+	while (index > 0)
+	{
+		slice_info_t compared_to = get_ref_slot_from_queue(s, index - 1);
+		if (ref_slot_priority_smaller_than(compared_to, bubbled)) // we found lower priority reference
+		{
+			break;
+		}
+		// else swap frames
+		ref_queue_swap_references(s, index - 1, index);
+
+		--index;
+	}
+
+	return index;
+}
+
 static void insert_ref_slot_into_queue(struct state_vulkan_decompress *s, slice_info_t slice_info)
 {
 	// inserts given reference picture (it's slice info) into reference slot queue,
@@ -2837,9 +2871,12 @@ static void insert_ref_slot_into_queue(struct state_vulkan_decompress *s, slice_
 		--(s->referenceSlotsQueue_count); // correct the size of the queue
 	}
 
-	uint32_t wrappedIdx = (s->referenceSlotsQueue_start + s->referenceSlotsQueue_count) % MAX_REF_FRAMES;
+	uint32_t idx = s->referenceSlotsQueue_count;
+	uint32_t wrappedIdx = (s->referenceSlotsQueue_start + idx) % MAX_REF_FRAMES;
 	s->referenceSlotsQueue[wrappedIdx] = slice_info;
 	++(s->referenceSlotsQueue_count);
+
+	ref_slot_queue_bubble_index_forward(s, idx);
 }
 
 static void clear_the_ref_slot_queue(struct state_vulkan_decompress *s)
@@ -2860,6 +2897,9 @@ static void fill_ref_picture_infos(struct state_vulkan_decompress *s,
 	VkExtent2D videoSize = { s->width, s->height };
 
 	uint32_t ref_count = s->referenceSlotsQueue_count;
+	/*printf("Reference queue (%u):\n", ref_count);
+	print_ref_queue(s);
+	putchar('\n');*/
 
 	for (uint32_t i = 0; i < max_count && i < ref_count; ++i)
 	{
@@ -3218,6 +3258,24 @@ static void write_bitstream_file(const unsigned char *src, size_t src_len, FILE 
 {
 	size_t written = fwrite(src, 1, src_len, f);
 	if (written < src_len) printf("[DEBUG] Not the whole input(%u) was successfully written(%u)!\n", src_len, written);
+}
+
+static bool detect_poc_wrapping(struct state_vulkan_decompress *s)
+{
+	// if there is already a frame in the output queue from the same GOP with the same POC nad POC wrap
+	// as the currently decoded frame, than we return that poc wrapping occurred
+	// not ideal system, but better than nothing - can fail for example when such frame was missed or already displayed
+
+	for (size_t i = 0; i < s->outputFrameQueue_count; ++i)
+	{
+		frame_data_t queued = get_frame_from_output_queue(s, i);
+		if (queued.idr_frame_seq == s->idr_frame_seq &&
+			queued.poc == s->last_poc &&
+			queued.poc_wrap == s->poc_wrap)
+				return true;
+	}
+
+	return false;
 }
 
 static void copy_decoded_image(struct state_vulkan_decompress *s, VkImage srcDpbImage)
@@ -3599,6 +3657,7 @@ static VkDeviceSize handle_vcl(struct state_vulkan_decompress *s,
 		*slice_offsets_count += 1;
 
 		slice_info->is_reference = nal_idc > 0;
+		if (nal_idc > slice_info->nal_idc) slice_info->nal_idc = nal_idc;
 	}
 	else printf("\tNAL writing fail!\n");
 
@@ -3636,12 +3695,6 @@ static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_i
 														.frame_num = slice_info.frame_num,
 														.idr_pic_id = slice_info.idr_pic_id,
 														.PicOrderCnt = { slice_info.poc, slice_info.poc } };
-	/*printf("offsets(%u): ", slice_offsets_count);
-	for (uint32_t i = 0; i < slice_offsets_count; ++i)
-	{
-		printf("%u ", slice_offsets[i]);
-	}
-	putchar('\n');*/
 	VkVideoDecodeH264PictureInfoKHR h264DecodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PICTURE_INFO_KHR,
 													   .pStdPictureInfo = &h264DecodeStdInfo,
 													   .sliceCount = slice_offsets_count,
@@ -3655,7 +3708,7 @@ static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_i
 											.queryPool = s->queryPool,
 											.firstQuery = 0,
 											.queryCount = 1 };
-	
+
 	VkVideoDecodeInfoKHR decodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_INFO_KHR,
 										.pNext = enable_queries ? (void*)&queryInfo :
 												 (isH264 ? (void*)&h264DecodeInfo : (void*)&h265DecodeInfo),
@@ -3681,10 +3734,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 
 	int prev_idr_frame_seq = s->idr_frame_seq;
 	
-	/*printf("Queue dpb indices: ");
-	print_queue_indices(s);
-	putchar('\n');
-	printf("Current dpb index: %d\n", slice_info->dpbIndex);*/
+	//printf("Current dpb index: %d\n", slice_info->dpbIndex);
 	uint32_t slice_offsets[MAX_SLICES] = { 0 };
 	uint32_t slice_offsets_count = 0; 
 
@@ -3781,6 +3831,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 					break; //switch break
 				case NAL_H264_IDR:
 					{
+						//puts("got IDR nal");
 						s->prev_poc_lsb = 0;
 						s->prev_poc_msb = 0;
 						s->idr_frame_seq = frame_seq;
@@ -3835,11 +3886,18 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 	bitstream = NULL; // just to be sure
  	assert(bitstream_written <= bitstream_max_size);
 
+	if (slice_offsets_count == 0)
+	{
+		puts("Got no frame data to decode.");
+		return false;
+	}
+
 	//DEBUG
-	/*if (slice_info->is_intra && slice_info->is_reference)
+	if (slice_info->is_intra && slice_info->is_reference)
 	{
 		printf("Got IDR frame - %d\n", slice_info->idr_pic_id);
-	};*/
+	}
+	//else printf("Got non-IDR frame.\n");
 
 	assert(s->cmdBuffer != VK_NULL_HANDLE);
 	assert(s->videoSession != VK_NULL_HANDLE);
@@ -3847,7 +3905,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 
 	/*printf("\tframe_seq: %d, frame_num: %d, poc_lsb: %d, pps_id: %d, is_reference: %d, is_intra: %d\n",
 			slice_info->frame_seq, slice_info->frame_num, slice_info->poc_lsb, slice_info->pps_id,
-			(int)(slice_info.is_reference), slice_info.is_intra);*/
+			(int)(slice_info->is_reference), slice_info->is_intra);*/
 
 	if (!begin_cmd_buffer(s))
 	{
@@ -3986,7 +4044,6 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 	// can be done before synchronization as we only work with slice_infos
 	if (slice_info->is_reference) // however insert only if the decoded frame actually is a reference
 	{
-		// new value for s->dpbDstPictureIdx gets set in insert_ref_slot_into_queue!
 		insert_ref_slot_into_queue(s, *slice_info);
 	}
 
@@ -4036,11 +4093,11 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 	}
 
 	// ---Try to detect if POC wrapping occurred---
-	if (s->idr_frame_seq == prev_idr_frame_seq && s->last_poc >= slice_info->poc)
+	s->last_poc = slice_info->poc;
+	if (detect_poc_wrapping(s))
 	{
 		++(s->poc_wrap);
 	}
-	s->last_poc = slice_info->poc;
 
 	// ---Make new slot in the output queue for newly decoded frame---
 	frame_data_t *decoded_frame = make_new_entry_in_output_queue(s, *slice_info);
@@ -4122,7 +4179,8 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	}
 
 	// gets filled in parse_and_decode
-	slice_info_t slice_info = { .is_reference = false, .is_intra = false, .idr_pic_id = -1, .sps_id = -1, .pps_id = -1,
+	slice_info_t slice_info = { .is_reference = false, .is_intra = false, .nal_idc = 0,
+								.idr_pic_id = -1, .sps_id = -1, .pps_id = -1,
 								.frame_num = -1, .frame_seq = frame_seq, .poc_lsb = -1,
 								.dpbIndex = smallest_dpb_index_not_in_queue(s) };
 
@@ -4132,6 +4190,7 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 
 	// ---Getting next frame to be displayed (in display order) from output queue---
 	const frame_data_t *display_frame = output_queue_get_next_frame(s);
+	//const frame_data_t *display_frame = output_queue_pop_first(s);
 	if (display_frame == NULL) return res;// no frame to display
 	else res = DECODER_GOT_FRAME;
 

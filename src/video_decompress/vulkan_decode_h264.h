@@ -244,8 +244,10 @@ typedef struct
 
 static void print_pps(const pps_t *pps) //DEBUG
 {
-	printf("pic_parameter_set_id: %d, seq_parameter_set_id: %d, num_slice_groups_minus1 %d, num_ref_idx_l0_active_minus1 %d, num_ref_idx_l1_active_minus1 %d\n",
-			pps->pic_parameter_set_id, pps->seq_parameter_set_id, pps->num_slice_groups_minus1, pps->num_ref_idx_l0_active_minus1, pps->num_ref_idx_l1_active_minus1);
+	printf("pic_parameter_set_id: %d, seq_parameter_set_id: %d, num_slice_groups_minus1 %d, slice_group_map_type: %d, "
+			"num_ref_idx_l0_active_minus1 %d, num_ref_idx_l1_active_minus1 %d\n",
+			pps->pic_parameter_set_id, pps->seq_parameter_set_id, pps->num_slice_groups_minus1, pps->slice_group_map_type,
+			pps->num_ref_idx_l0_active_minus1, pps->num_ref_idx_l1_active_minus1);
 }
 
 static void print_sps(sps_t *sps) //DEBUG
@@ -347,9 +349,11 @@ static void print_sps(sps_t *sps) //DEBUG
 
 static void print_sh(slice_header_t *sh) //DEBUG
 {
-	printf("field_pic_flag: %d, bottom_field_flag: %d\n", sh->field_pic_flag, sh->bottom_field_flag);
+	//printf("field_pic_flag: %d, bottom_field_flag: %d\n", sh->field_pic_flag, sh->bottom_field_flag);
 	//printf("frame_num: %d, idr_pic_id: %d, slice_type: %d, pic_parameter_set_id: %d, poc_lsb: %d, long term: %d\n",
 	//		sh->frame_num, sh->idr_pic_id, sh->slice_type, sh->pic_parameter_set_id, sh->pic_order_cnt_lsb, sh->drpm.long_term_reference_flag);
+	printf("slice_type: %d, ref override: %d, l0 active: %d, l1 active: %d\n",
+			sh->slice_type, sh->num_ref_idx_active_override_flag, sh->num_ref_idx_l0_active_minus1 + 1, sh->num_ref_idx_l1_active_minus1 + 1);
 }
 
 static int intlog2(int x)
@@ -365,6 +369,7 @@ static int intlog2(int x)
 }
 
 // NOTE: this function was copied from utils/h264_stream.c,
+//		 (real origin is: https://github.com/aizvorski/h264bitstream/blob/master/h264_nal.c#L241)
 // however we dont include this file as some functions would collide with functions from Wicked engine
 /**
    Convert NAL data (Annex B format) to RBSP data.
@@ -460,11 +465,11 @@ static int more_rbsp_data(bs_t *bs)
 
 static void read_rbsp_trailing_bits(bs_t* b)
 {
-    /* rbsp_stop_one_bit */ bs_read_u(b, 1);
+    /* rbsp_stop_one_bit */ bs_skip_u(b, 1);
 
     while (!bs_byte_aligned(b))
     {
-        /* rbsp_alignment_zero_bit */ bs_read_u(b, 1);
+        /* rbsp_alignment_zero_bit */ bs_skip_u(b, 1);
     }
 }
 
