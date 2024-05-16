@@ -1248,7 +1248,7 @@ static void sps_to_vk_sps(const sps_t *sps, StdVideoH264SequenceParameterSet *vk
 	}
 
 	//vk_sps->chroma_format_idc = STD_VIDEO_H264_CHROMA_FORMAT_IDC_420; // only one we support currently
-	//NOTE change for vulkan_decode
+	//NOTE changed for vulkan_decode
 	vk_sps->chroma_format_idc = (StdVideoH264ChromaFormatIdc)sps->chroma_format_idc;
 	vk_sps->seq_parameter_set_id = sps->seq_parameter_set_id;
 	vk_sps->bit_depth_luma_minus8 = sps->bit_depth_luma_minus8;

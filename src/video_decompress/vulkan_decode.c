@@ -15,14 +15,12 @@
 #endif
 
 #include "debug.h"
-#include "host.h"				//?
 #include "lib_common.h"
-#include "video.h"				//?
+#include "video.h"
 #include "video_decompress.h"
 
 #include "utils/bs.h"
-#include "rtp/rtpdec_h264.h"	//?
-#include "rtp/rtpenc_h264.h"	//?
+#include "rtp/rtpdec_h264.h"
 
 #ifdef VK_USE_PLATFORM_WIN32_KHR
 //#include <windows.h>	//LoadLibrary
@@ -33,11 +31,12 @@
 #ifndef VK_NO_PROTOTYPES
 #define VK_NO_PROTOTYPES
 #endif
-//TODO add into configure.ac
+
 #include <vulkan/vulkan.h>
 #include <vk_video/vulkan_video_codec_h264std.h>
 #include <vk_video/vulkan_video_codec_h264std_decode.h>
 
+// helper functions for parsing H.264:
 #include "vulkan_decode_h264.h"
 
 // activates vulkan validation layers if defined
@@ -166,7 +165,7 @@ static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader
 	vkDestroyDevice = (PFN_vkDestroyDevice)loader(instance, "vkDestroyDevice");
 	vkEnumerateDeviceExtensionProperties = (PFN_vkEnumerateDeviceExtensionProperties)
 												loader(instance, "vkEnumerateDeviceExtensionProperties");
-	vkGetDeviceQueue = (PFN_vkGetDeviceQueue)loader(instance, "vkGetDeviceQueue"); //USELESS
+	vkGetDeviceQueue = (PFN_vkGetDeviceQueue)loader(instance, "vkGetDeviceQueue");
 	vkGetPhysicalDeviceMemoryProperties = (PFN_vkGetPhysicalDeviceMemoryProperties)
 												loader(instance, "vkGetPhysicalDeviceMemoryProperties");
 	vkAllocateMemory = (PFN_vkAllocateMemory)loader(instance, "vkAllocateMemory");
@@ -316,7 +315,6 @@ struct state_vulkan_decompress
 	VkBuffer bitstreamBuffer;					// needs to be destroyed if valid
 	VkDeviceSize bitstreamBufferSize;
 	VkDeviceSize bitstreambufferSizeAlignment;
-	//USELESS - dstPicBuffer and related stuff
 	VkDeviceMemory bitstreamBufferMemory;		// allocated memory for bitstreamBuffer, needs to be freed if valid
 	VkCommandPool commandPool;					// needs to be destroyed if valid
 	VkCommandBuffer cmdBuffer;
@@ -333,7 +331,7 @@ struct state_vulkan_decompress
 
 	// Pointers to arrays of sps (length MAX_SPS_IDS), pps (length MAX_PPS_IDS)
 	// could be static arrays but that would take too much memory of this struct
-	sps_t *sps_array; //TODO maybe better to store already converted vulkan version?
+	sps_t *sps_array;
 	pps_t *pps_array;
 
 	// Memory related to decode picture buffer and picture queue
@@ -649,7 +647,6 @@ static VkPhysicalDevice choose_physical_device(VkPhysicalDevice devices[], uint3
 													 .pNext = (void*)&deviceFeatures13 };
 		vkGetPhysicalDeviceFeatures2(devices[i], &deviceFeatures);
 
-		//TODO could be a parameter
 		if (!deviceFeatures13.synchronization2 || !deviceFeatures13.maintenance4 ||
 			(requireQueries && !videoFeatures1.videoMaintenance1))
 		{
@@ -668,12 +665,11 @@ static VkPhysicalDevice choose_physical_device(VkPhysicalDevice devices[], uint3
 			continue;
 		}
 		
-		//IDEA maybe we can use MAX_QUEUE_FAMILIES (6?) instead of dynamic allocation
 		VkQueueFamilyProperties2 *properties = (VkQueueFamilyProperties2*)calloc(queues_count, sizeof(VkQueueFamilyProperties2));
 		VkQueueFamilyVideoPropertiesKHR *video_properties = (VkQueueFamilyVideoPropertiesKHR*)calloc(queues_count, sizeof(VkQueueFamilyVideoPropertiesKHR));
 		VkQueueFamilyQueryResultStatusPropertiesKHR *query_properties = (VkQueueFamilyQueryResultStatusPropertiesKHR*)
 																		calloc(queues_count, sizeof(VkQueueFamilyQueryResultStatusPropertiesKHR));
-		if (properties == NULL || video_properties == NULL || query_properties == NULL) //TODO probably return error?
+		if (properties == NULL || video_properties == NULL || query_properties == NULL)
 		{
 			log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate properties and/or video_properties arrays!\n");
 			free(properties);
@@ -1119,10 +1115,7 @@ static bool configure_with(struct state_vulkan_decompress *s, struct video_desc 
 	s->width = desc.width;
 	s->height = desc.height;
 
-	//TODO this assumes 4:2:0 subsampling!
-	//s->lumaSize = s->width * s->height;
-	//s->chromaSize = s->lumaSize / 4;
-	//TODO pitch
+	// assuming NV12 format
 	s->lumaSize = s->width * s->height;
 	s->chromaSize = (s->width / 2) * (s->height / 2);
 
@@ -1163,7 +1156,7 @@ static int vulkan_decompress_reconfigure(void *state, struct video_desc desc,
 		return false;
 	}
 
-	s->prepared = false; //TODO - freeing resources probably needed when s->prepared == true
+	s->prepared = false;
 	s->sps_vps_found = false;
 	s->resetVideoCoding = true;
 	s->depth_chroma = 0;
@@ -1209,13 +1202,13 @@ static int vulkan_decompress_get_property(void *state, int property, void *val, 
 static int vulkan_decompress_get_priority(codec_t compression, struct pixfmt_desc internal, codec_t ugc)
 {
 	UNUSED(internal);
-	UNUSED(ugc);
+
+	if (ugc != VIDEO_CODEC_NONE && ugc != I420) return 2500;
 
 	VkVideoCodecOperationFlagsKHR vulkanFlag = codec_to_vulkan_flag(compression);
 
-	if (vulkanFlag == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR ||
-		vulkanFlag == VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR)
-			return 30; //TODO magic value
+	if (vulkanFlag == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR) return 100;
+	if (vulkanFlag == VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR) return 500;
 
 	return -1; 
 }
@@ -1281,7 +1274,7 @@ static bool check_format(const VkVideoFormatPropertiesKHR *props, const VkFormat
 		   optFlags & VK_FORMAT_FEATURE_2_VIDEO_DECODE_DPB_BIT_KHR &&
 		   optFlags & VK_FORMAT_FEATURE_2_VIDEO_DECODE_OUTPUT_BIT_KHR && //only for VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR
 		   optFlags & VK_FORMAT_FEATURE_2_TRANSFER_SRC_BIT_KHR &&
-		   optFlags & VK_FORMAT_FEATURE_2_HOST_IMAGE_TRANSFER_BIT_EXT; //TODO use this?
+		   optFlags & VK_FORMAT_FEATURE_2_HOST_IMAGE_TRANSFER_BIT_EXT;
 }
 
 static bool check_for_vulkan_format(VkPhysicalDevice physDevice, VkPhysicalDeviceVideoFormatInfoKHR videoFormatInfo,
@@ -1397,7 +1390,7 @@ static bool allocate_buffers(struct state_vulkan_decompress *s, VkVideoProfileLi
 	assert(s->bitstreamBuffer == VK_NULL_HANDLE);
 	assert(s->bitstreamBufferMemory == VK_NULL_HANDLE);
 
-	const VkDeviceSize wantedBitstreamBufferSize = 10 * 1024 * 1024; //TODO magic number, check if smaller than allowed amount
+	const VkDeviceSize wantedBitstreamBufferSize = 10 * 1024 * 1024; //TODO magic number for size
 	s->bitstreambufferSizeAlignment = videoCapabilities.minBitstreamBufferSizeAlignment;
 	s->bitstreamBufferSize = (wantedBitstreamBufferSize + (s->bitstreambufferSizeAlignment - 1))
 							 & ~(s->bitstreambufferSizeAlignment - 1); //alignment bit mask magic
@@ -1526,7 +1519,6 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
 		return false;
 	}
 
-	//TODO check if we can make enough allocations using maxMemoryAllocationCount
 	for (uint32_t i = 0; i < memoryRequirements_count; ++i)
 	{
         uint32_t memoryTypeIndex = 0;
@@ -1541,7 +1533,6 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
 			return false;
 		}
 
-		//TODO create one big memory allocation for and bind parts of it to video session
 		VkMemoryAllocateInfo allocateInfo = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
 											  .allocationSize = memoryRequirements[i].memoryRequirements.size,
 											  .memoryTypeIndex = memoryTypeIndex };
@@ -1704,7 +1695,7 @@ static bool create_output_image(struct state_vulkan_decompress *s)
 									 	.imageType = VK_IMAGE_TYPE_2D,
 									 	.mipLevels = 1,
 									 	.samples = VK_SAMPLE_COUNT_1_BIT,
-									 	.format = VK_FORMAT_R8_UNORM, //TODO
+									 	.format = VK_FORMAT_R8_UNORM,
 									 	.extent = videoSize,
 									 	.arrayLayers = 1,
 									 	.tiling = VK_IMAGE_TILING_LINEAR,
@@ -1729,7 +1720,7 @@ static bool create_output_image(struct state_vulkan_decompress *s)
 									 	   .imageType = VK_IMAGE_TYPE_2D,
 									 	   .mipLevels = 1,
 									 	   .samples = VK_SAMPLE_COUNT_1_BIT,
-									 	   .format = VK_FORMAT_R8G8_UNORM, //TODO
+									 	   .format = VK_FORMAT_R8G8_UNORM,
 									 	   .extent = { videoSize.width / 2, videoSize.height / 2, 1 },
 									 	   .arrayLayers = 1,
 									 	   .tiling = VK_IMAGE_TILING_LINEAR,
@@ -1794,8 +1785,6 @@ static bool create_output_image(struct state_vulkan_decompress *s)
 		destroy_output_image(s);
 		return false;
 	}
-
-	//TODO outputImage views for each plane?
 
 	return true;
 }
@@ -2169,7 +2158,6 @@ static frame_data_t * output_queue_get_next_frame(struct state_vulkan_decompress
 	}
 
 	const frame_data_t *first = s->outputFrameQueue + s->outputFrameQueue_start;
-	//TODO we may want to discard frames with negative poc anyways -> always display a frame with poc < POC_STEP?
 
 	//NOTE: this may lead to potential wrong display order when s->outputFrameQueue_capacity is small!
 	//		(smaller than current GOP size) So maybe could be commented out
@@ -2269,7 +2257,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	//TODO interlacing
 	VkVideoDecodeH264ProfileInfoKHR h264Profile = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PROFILE_INFO_KHR,
 													.stdProfileIdc = s->profileIdc,
-													//.pictureLayout = VK_VIDEO_DECODE_H264_PICTURE_LAYOUT_INTERLACED_INTERLEAVED_LINES_BIT_KHR
 													.pictureLayout = VK_VIDEO_DECODE_H264_PICTURE_LAYOUT_PROGRESSIVE_KHR };
 	VkVideoDecodeH265ProfileInfoKHR h265Profile = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_PROFILE_INFO_KHR,
 													.stdProfileIdc = STD_VIDEO_H265_PROFILE_IDC_MAIN //TODO H.265
@@ -2568,7 +2555,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	s->resetVideoCoding = true;
 
 	// ---Creating video session parameters---
-	//TODO probably not needed to create them in prepare
 	assert(s->videoSession != VK_NULL_HANDLE);
 
 	VkVideoDecodeH264SessionParametersCreateInfoKHR h264SessionParamsInfo =
@@ -2897,7 +2883,7 @@ static const unsigned char * get_next_nal(const unsigned char *start, long len, 
 }
 
 //DEBUG - copied from rtp/rtpenc_h264.c
-/*static void print_nalu_name(int type) //DEBUG
+/*static void print_nalu_name(int type)
 {
 	switch ((enum nal_type)type)
 	{
@@ -3049,7 +3035,7 @@ static bool find_first_sps_vps(struct state_vulkan_decompress *s, const unsigned
 
 		next_nal = get_next_nal(nal_payload, src_len - (nal_payload - src), true);
 		size_t nal_len = next_nal == NULL ? src_len - (nal - src) : next_nal - nal;
-		if (nal_len <= 4 || (size_t)(nal_payload - nal) >= nal_len) //TODO weird?
+		if (nal_len <= 4 || (size_t)(nal_payload - nal) >= nal_len)
 		{
 			log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] NAL unit is too short.\n");
 			return false;
@@ -3112,7 +3098,6 @@ static VkDeviceSize write_bitstream(uint8_t *bitstream, VkDeviceSize bitstream_l
 	const uint8_t *startcode = startcode_short;
 	size_t startcode_len = sizeof(startcode_short) / sizeof(startcode_short[0]);
 	
-	//TODO check if the cast is correct
 	VkDeviceSize result_len = (VkDeviceSize)startcode_len + 1 + (VkDeviceSize)len; // startcode + header + rbsp data
 	
 	// check if enough space for rbsp in the buffer, return zero if not
@@ -3213,8 +3198,8 @@ static bool write_decoded_frame(struct state_vulkan_decompress *s, frame_data_t 
 	// Translating NV12 into I420:
 	// luma plane
 	const uint8_t *luma = memory;
-	//TODO memcpy
-	for (size_t i = 0; i < lumaSize; ++i) dst_mem[i] = (unsigned char)luma[i]; // could be memcpy I guess
+	//for (size_t i = 0; i < lumaSize; ++i) dst_mem[i] = (unsigned char)luma[i]; // could be memcpy I guess
+	memcpy(dst_mem, luma, lumaSize);
 
 	// chroma plane
 	const uint8_t *chroma = memory + s->outputChromaPlaneOffset;
@@ -3384,7 +3369,7 @@ static void fill_slice_info(struct state_vulkan_decompress *s, slice_info_t *si,
 	assert(si->pps_id == -1 || si->pps_id == sh->pic_parameter_set_id);
 	si->pps_id = sh->pic_parameter_set_id;
 
-	assert(sh->pic_parameter_set_id < MAX_PPS_IDS); //TODO if
+	assert(sh->pic_parameter_set_id < MAX_PPS_IDS);
 	pps_t *pps = s->pps_array + sh->pic_parameter_set_id;
 	int new_sps_id = pps->seq_parameter_set_id;
 
@@ -3435,7 +3420,7 @@ static VkDeviceSize handle_vcl(struct state_vulkan_decompress *s,
 	int nal_idc = H264_NALU_HDR_GET_NRI(nal_header);
 
 	bool sh_ret = handle_sh_nalu(s, rbsp, rbsp_len, nal_type, nal_idc, slice_info);
-	UNUSED(sh_ret); //TODO maybe error?
+	UNUSED(sh_ret); // we want to write it into bitstream anyway
 
 	VkDeviceSize written = write_bitstream(bitstream, bitstream_written, bitstream_capacity,
 										   rbsp, rbsp_len, nal_header, long_startcode);
@@ -3471,8 +3456,7 @@ static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_i
 	StdVideoDecodeH264PictureInfo h264DecodeStdInfo = { .flags = { .field_pic_flag = 0,
 																   .is_intra = slice_info.is_intra,
 																   .is_reference = slice_info.is_reference,
-																    //TODO this could be potentially wrong,
-																	//maybe introduce new member to slice_info_t for it
+																	//IDEA maybe introduce new member to slice_info_t for it
 																   .IdrPicFlag = slice_info.is_intra && slice_info.is_reference,
 																   },
 														.seq_parameter_set_id = slice_info.sps_id,
@@ -3523,7 +3507,9 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 	uint32_t slice_offsets_count = 0; 
 
 	// ---Copying NAL units into s->bitstreamBuffer---
-	const bool filter_nal = true, convert_to_rbsp = false; //DEBUG - in release both should be true
+	// those flags are for debugging purposes - true, false are probably correct for normal usage
+	const bool filter_nal = true, convert_to_rbsp = false;
+
 	VkDeviceSize bitstream_written = 0;
 	const VkDeviceSize bitstream_max_size = s->bitstreamBufferSize;
 	assert(bitstream_max_size > 0);
@@ -3545,16 +3531,14 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 			if (nal_payload == NULL)
 			{
 				log_msg(LOG_LEVEL_WARNING, "[vulkan_decode] Encountered NAL unit that does not begin with a start code.\n");
-				//TODO err flag
 				break;
 			}
 
 			next_nal = get_next_nal(nal_payload, src_len - (nal_payload - src), true);
 			nal_len = next_nal == NULL ? src_len - (nal - src) : next_nal - nal;
-			if (nal_len <= 4 || (size_t)(nal_payload - nal) >= nal_len) //TODO weird?
+			if (nal_len <= 4 || (size_t)(nal_payload - nal) >= nal_len)
 			{
 				log_msg(LOG_LEVEL_WARNING, "[vulkan_decode] Encountered too short NAL unit.\n");
-				//TODO err flag
 				break;
 			}
 			
@@ -3570,7 +3554,6 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 			if (!create_rbsp(nal_payload, nal_payload_len, &rbsp, &rbsp_len))
 			{
 				//err should get printed inside of create_rbsp
-				//TODO err flag
 				break;
 			}
 			assert(rbsp != NULL);
@@ -3627,13 +3610,13 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 				case NAL_H264_SPS:
 					{
 						bool sps_ret = handle_sps_nalu(s, rbsp, rbsp_len);
-						UNUSED(sps_ret); //TODO maybe error?
+						UNUSED(sps_ret);
 					}
 					break; //switch break
 				case NAL_H264_PPS:
 					{
 						bool pps_ret = handle_pps_nalu(s, rbsp, rbsp_len);
-						UNUSED(pps_ret); //TODO maybe error?
+						UNUSED(pps_ret);
 					}
 					break; //switch break
 
@@ -3648,7 +3631,6 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 			nal = next_nal;
 		}
 	}
-	//TODO check for err flag here
 	end_bitstream_writing(s);
 	bitstream = NULL; // just to be sure
  	assert(bitstream_written <= bitstream_max_size);
@@ -3735,7 +3717,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 		assert(slotInfos_ref_count <= MAX_REF_FRAMES);
 
 		// Filling the decoded frame info
-		assert(slice_info->sps_id < MAX_SPS_IDS); //TODO if
+		assert(slice_info->sps_id < MAX_SPS_IDS);
 
 		sps_t *sps = s->sps_array + slice_info->sps_id;
 		slice_info->poc = get_picture_order_count(sps, slice_info->poc_lsb, slice_info->frame_num, slice_info->is_reference,
@@ -3775,7 +3757,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 	}
 	
 	// ---Copying decoded DPB image into output image---
-	assert(s->dpbFormat == VK_FORMAT_G8_B8R8_2PLANE_420_UNORM); //TODO requirement
+	assert(s->dpbFormat == VK_FORMAT_G8_B8R8_2PLANE_420_UNORM); //TODO handle other potential formats too
 	copy_decoded_image(s, s->dpb[slice_info->dpbIndex]);
 	transfer_image_layout(s->cmdBuffer, s->outputLumaPlane,
 						  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
