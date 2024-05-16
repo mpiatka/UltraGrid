@@ -43,7 +43,7 @@
 // activates vulkan validation layers if defined
 // if defined your vulkan loader needs to know where to find the validation layer manifest
 // (for example through VK_LAYER_PATH or VK_ADD_LAYER_PATH env. variables)
-#define VULKAN_VALIDATE
+//#define VULKAN_VALIDATE
 
 // one of value from enum VkDebugUtilsMessageSeverityFlagBitsEXT included from vulkan.h
 // (definition in vulkan_core.h)
@@ -305,7 +305,6 @@ struct state_vulkan_decompress
 	PFN_vkGetInstanceProcAddr loader;
 	//maybe this could be present only when VULKAN_VALIDATE is defined?
 	VkDebugUtilsMessengerEXT debugMessenger;	// needs to be destroyed if valid
-	VkDeviceSize physDeviceMaxBuffSize;
 	VkPhysicalDevice physicalDevice;
 	VkDevice device;							// needs to be destroyed if valid
 	uint32_t queueFamilyIdx;
@@ -360,7 +359,7 @@ struct state_vulkan_decompress
 	// Output video description data
 	int width, height;
 	VkDeviceSize lumaSize, chromaSize;
-	int pitch; //TODO
+	int pitch; // currently not used (maybe not needed for multiplanar output formats)
 	codec_t out_codec;
 
 	// Output frame data
@@ -387,14 +386,14 @@ static bool load_vulkan(struct state_vulkan_decompress *s)
     s->vulkanLib = LoadLibrary(vulkan_lib_filename);
 	if (s->vulkanLib == NULL)
 	{
-		printf("[vulkan_decode] Vulkan loader file '%s' not found!\n", vulkan_lib_filename);
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Vulkan loader file '%s' not found!\n", vulkan_lib_filename);
 		return false;
 	}
 
 	s->loader = (PFN_vkGetInstanceProcAddr)GetProcAddress(s->vulkanLib, vulkan_proc_name);
     if (s->loader == NULL) {
 
-		printf("[vulkan_decode] Vulkan function '%s' not found!\n", vulkan_proc_name);
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Vulkan function '%s' not found!\n", vulkan_proc_name);
         return false;
     }
 	#else // non windows
@@ -404,14 +403,14 @@ static bool load_vulkan(struct state_vulkan_decompress *s)
 	s->vulkanLib = dlopen(vulkan_lib_filename, RTLD_LAZY);
 	if (s->vulkanLib == NULL)
 	{
-		printf("[vulkan_decode] Vulkan loader file '%s' not found!\n", vulkan_lib_filename);
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Vulkan loader file '%s' not found!\n", vulkan_lib_filename);
 		return false;
 	}
 	
 	s->loader = (PFN_vkGetInstanceProcAddr)dlsym(s->vulkanLib, vulkan_proc_name);
     if (s->loader == NULL) {
 
-		printf("[vulkan_decode] Vulkan function '%s' not found!\n", vulkan_proc_name);
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Vulkan function '%s' not found!\n", vulkan_proc_name);
         return false;
     }
 	#endif
@@ -432,31 +431,26 @@ static bool check_for_instance_extensions(const char * const requiredInstanceext
 {
 	uint32_t extensions_count = 0;
 	vkEnumerateInstanceExtensionProperties(NULL, &extensions_count, NULL);
-	printf("instance extensions_count: %d\n", extensions_count);
 	if (extensions_count == 0)
 	{
 		if (requiredInstanceextensions[0] != NULL)
 		{
-			printf("[vulkan_decode] No instance extensions supported.\n");
+			log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] No instance extensions supported.\n");
 			return false;
 		}
 		
-		printf("No instance extensions found and none required.\n");
+		log_msg(LOG_LEVEL_INFO, "[vulkan_decode] No instance extensions found and none required.\n");
 		return true;
 	}
 
 	VkExtensionProperties *extensions = (VkExtensionProperties*)calloc(extensions_count, sizeof(VkExtensionProperties));
 	if (extensions == NULL)
 	{
-		printf("[vulkan_decode] Failed to allocate array for instance extensions!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate array for instance extensions!\n");
 		return false;
 	}
 
 	vkEnumerateInstanceExtensionProperties(NULL, &extensions_count, extensions);
-
-	//IDEA verbose setting
-	// Printing of all found instance extentions
-	//for (uint32_t i = 0; i < extensions_count; ++i) printf("\tExtension: '%s'\n", extensions[i].extensionName);
 
 	// Checking for required ones
 	for (size_t i = 0; requiredInstanceextensions[i] != NULL; ++i)
@@ -473,8 +467,8 @@ static bool check_for_instance_extensions(const char * const requiredInstanceext
 
 		if (!found)
 		{
-			printf("[vulkan_decode] Required instance extension: '%s' was not found!\n",
-						requiredInstanceextensions[i]);
+			log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Required instance extension: '%s' was not found!\n",
+									 requiredInstanceextensions[i]);
 			free(extensions);
 			return false;
 		}
@@ -496,11 +490,6 @@ static bool check_for_validation_layers(const char * const validationLayers[])
 
 	result = vkEnumerateInstanceLayerProperties(&properties_count, properties);
 	if (result != VK_SUCCESS) return false;
-
-	//IDEA verbose setting
-	// Printing of all found layers extentions
-	//for (uint32_t i = 0; i < properties_count; ++i) printf("\tLayer: '%s' desc: '%s'\n",
-	//		properties[i].layerName, properties[i].description);
 
 	for (size_t i = 0; validationLayers[i]; ++i)
 	{
@@ -531,31 +520,26 @@ static bool check_for_device_extensions(VkPhysicalDevice physDevice, const char*
 {
 	uint32_t extensions_count = 0;
 	vkEnumerateDeviceExtensionProperties(physDevice, NULL, &extensions_count, NULL);
-	printf("device extensions_count: %d\n", extensions_count);
 	if (extensions_count == 0)
 	{
 		if (requiredDeviceExtensions[0] != NULL)
 		{
-			printf("[vulkan_decode] No device extensions supported.\n");
+			log_msg(LOG_LEVEL_WARNING, "[vulkan_decode] No device extensions supported.\n");
 			return false;
 		}
-		
-		printf("No device extensions found and none required.\n");
+
+		log_msg(LOG_LEVEL_INFO, "[vulkan_decode] No device extensions found and none required.\n");
 		return true;
 	}
 
 	VkExtensionProperties *extensions = (VkExtensionProperties*)calloc(extensions_count, sizeof(VkExtensionProperties));
 	if (extensions == NULL)
 	{
-		printf("[vulkan_decode] Failed to allocate array for device extensions!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate array for device extensions!\n");
 		return false;
 	}
 
 	vkEnumerateDeviceExtensionProperties(physDevice, NULL, &extensions_count, extensions);
-
-	//IDEA verbose setting
-	// Printing of all found device extentions
-	//for (uint32_t i = 0; i < extensions_count; ++i) printf("\tExtension: '%s'\n", extensions[i].extensionName);
 
 	// Checking for required ones
 	for (size_t i = 0; requiredDeviceExtensions[i] != NULL; ++i)
@@ -572,7 +556,7 @@ static bool check_for_device_extensions(VkPhysicalDevice physDevice, const char*
 
 		if (!found)
 		{
-			printf("[vulkan_decode] Required device extension: '%s' was not found!\n",
+			log_msg(LOG_LEVEL_WARNING, "[vulkan_decode] Required device extension: '%s' was not found!\n",
 						requiredDeviceExtensions[i]);
 			free(extensions);
 			return false;
@@ -595,7 +579,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
 
 	if (messageSeverity >= VULKAN_VALIDATE_SHOW_SEVERITY)
 	{
-		printf("VULKAN VALIDATION: '%s'\n", pCallbackData->pMessage);
+		log_msg(LOG_LEVEL_WARNING, "VULKAN VALIDATION: '%s'\n", pCallbackData->pMessage);
 	}
 
 	return VK_FALSE;
@@ -650,11 +634,11 @@ static VkPhysicalDevice choose_physical_device(VkPhysicalDevice devices[], uint3
 	{
 		VkPhysicalDeviceProperties deviceProperties;
 		vkGetPhysicalDeviceProperties(devices[i], &deviceProperties);
-		printf("Device %d: '%s'\n", deviceProperties.deviceID, deviceProperties.deviceName);
 
 		if (!check_for_device_extensions(devices[i], requiredDeviceExtensions))
 		{
-			printf("\tDevice does not have required extensions.\n");
+			log_msg(LOG_LEVEL_NOTICE, "[vulkan_decode] Device '%s' does not have required extensions.\n",
+									  deviceProperties.deviceName);
 			continue;
 		}
 
@@ -665,11 +649,12 @@ static VkPhysicalDevice choose_physical_device(VkPhysicalDevice devices[], uint3
 													 .pNext = (void*)&deviceFeatures13 };
 		vkGetPhysicalDeviceFeatures2(devices[i], &deviceFeatures);
 
-		//TODO better check, maybe make it a parameter?
+		//TODO could be a parameter
 		if (!deviceFeatures13.synchronization2 || !deviceFeatures13.maintenance4 ||
 			(requireQueries && !videoFeatures1.videoMaintenance1))
 		{
-			printf("\tDevice does not have required features!\n");
+			log_msg(LOG_LEVEL_NOTICE, "[vulkan_decode] Device '%s' does not have required features.\n",
+									  deviceProperties.deviceName);
 			continue;
 		}
 
@@ -678,7 +663,8 @@ static VkPhysicalDevice choose_physical_device(VkPhysicalDevice devices[], uint3
 
 		if (queues_count == 0)
 		{
-			printf("\tNo queue families found for this device.\n");
+			log_msg(LOG_LEVEL_NOTICE, "[vulkan_decode] Device '%s' has no queue families.\n",
+									  deviceProperties.deviceName);
 			continue;
 		}
 		
@@ -689,7 +675,7 @@ static VkPhysicalDevice choose_physical_device(VkPhysicalDevice devices[], uint3
 																		calloc(queues_count, sizeof(VkQueueFamilyQueryResultStatusPropertiesKHR));
 		if (properties == NULL || video_properties == NULL || query_properties == NULL) //TODO probably return error?
 		{
-			printf("[vulkan_decode] Failed to allocate properties and/or video_properties arrays!\n");
+			log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate properties and/or video_properties arrays!\n");
 			free(properties);
 			free(video_properties);
 			break;
@@ -706,7 +692,6 @@ static VkPhysicalDevice choose_physical_device(VkPhysicalDevice devices[], uint3
 
 		vkGetPhysicalDeviceQueueFamilyProperties2(devices[i], &queues_count, properties);
 
-		//printf("\tQueue families of the device:\n");
 		// the only important queue flags for us
 		const VkQueueFlags queueFlagsFilter = (VK_QUEUE_GRAPHICS_BIT |
                                                VK_QUEUE_COMPUTE_BIT |
@@ -719,23 +704,6 @@ static VkPhysicalDevice choose_physical_device(VkPhysicalDevice devices[], uint3
 		{
 			VkQueueFlags flags = properties[j].queueFamilyProperties.queueFlags & queueFlagsFilter;
 			VkVideoCodecOperationFlagsKHR videoFlags = video_properties[j].videoCodecOperations;
-
-			/*int encode = flags & VK_QUEUE_VIDEO_ENCODE_BIT_KHR ? 1 : 0;
-			int decode = flags & VK_QUEUE_VIDEO_DECODE_BIT_KHR ? 1 : 0;
-			int compute = flags & VK_QUEUE_COMPUTE_BIT ? 1 : 0;
-			int transfer = flags & VK_QUEUE_TRANSFER_BIT ? 1 : 0;
-			int graphics = flags & VK_QUEUE_GRAPHICS_BIT ? 1 : 0;
-			printf("\tflags: %d, encode: %d, decode: %d, compute: %d, transfer: %d, graphics: %d\n",
-					  flags, encode, decode, compute, transfer, graphics);
-
-			int h264_en = videoFlags & VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR ? 1 : 0;
-			int h265_en = videoFlags & VK_VIDEO_CODEC_OPERATION_ENCODE_H265_BIT_KHR ? 1 : 0;
-			int h264_de = videoFlags & VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR ? 1 : 0;
-			int h265_de = videoFlags & VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR ? 1 : 0;
-			//int av1_de = videoFlags & VK_VIDEO_CODEC_OPERATION_DECODE_AV1_BIT_KHR ? 1 : 0;
-			printf("\tvideo flags: %d, h264: %d %d, h265: %d %d\n",
-					  videoFlags, h264_en, h264_de, h265_en, h265_de);*/
-			//printf("\tquery support: %d\n", query_properties[j].queryResultStatusSupport);
 
 			if (requestedQueueFamilyFlags == (flags & requestedQueueFamilyFlags) && videoFlags &&
 				(!requireQueries || query_properties[j].queryResultStatusSupport))
@@ -772,20 +740,18 @@ static VkPhysicalDevice choose_physical_device(VkPhysicalDevice devices[], uint3
 
 static void * vulkan_decompress_init(void)
 {
-	printf("vulkan_decode - init\n");
-
 	// ---Allocation of the vulkan_decompress state and sps/pps arrays---
 	struct state_vulkan_decompress *s = calloc(1, sizeof(struct state_vulkan_decompress));
 	if (s == NULL)
 	{
-		printf("[vulkan_decode] Couldn't allocate memory for state struct!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Couldn't allocate memory for state struct!\n");
 		return NULL;
 	}
 
 	sps_t *sps_array = calloc(MAX_SPS_IDS, sizeof(sps_t));
 	if (sps_array == NULL)
 	{
-		printf("[vulkan_decode] Couldn't allocate memory for SPS array (num of members: %u)!\n", MAX_SPS_IDS);
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Couldn't allocate memory for SPS array (num of members: %u)!\n", MAX_SPS_IDS);
 		free(s);
 		return NULL;
 	}
@@ -793,7 +759,7 @@ static void * vulkan_decompress_init(void)
 	pps_t *pps_array = calloc(MAX_PPS_IDS, sizeof(pps_t));
 	if (pps_array == NULL)
 	{
-		printf("[vulkan_decode] Couldn't allocate memory for PPS array (num of members: %u)!\n", MAX_PPS_IDS);
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Couldn't allocate memory for PPS array (num of members: %u)!\n", MAX_PPS_IDS);
 		free(sps_array);
 		free(s);
 		return NULL;
@@ -815,7 +781,7 @@ static void * vulkan_decompress_init(void)
 	// ---Loading function pointers where the instance is not needed---
 	if (!load_vulkan_functions_globals(s->loader))
 	{
-		printf("[vulkan_decode] Failed to load all vulkan functions!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to load all vulkan functions!\n");
 		unload_vulkan(s);
 		free(pps_array);
 		free(sps_array);
@@ -829,10 +795,9 @@ static void * vulkan_decompress_init(void)
 						"VK_LAYER_KHRONOS_validation",
 						NULL };
 	
-	//printf("Checking for validation layers.\n");
 	if (!check_for_validation_layers(validationLayers))
 	{
-		printf("[vulkan_deconde] Required vulkan validation layers not found!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Required vulkan validation layers not found!\n");
 		unload_vulkan(s);
 		free(pps_array);
 		free(sps_array);
@@ -881,7 +846,7 @@ static void * vulkan_decompress_init(void)
 	VkResult result = vkCreateInstance(&createInfo, NULL, &s->instance);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to create vulkan instance! Error: %d\n", result);
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan instance! Error: %d\n", result);
         unload_vulkan(s);
 		free(pps_array);
 		free(sps_array);
@@ -891,7 +856,7 @@ static void * vulkan_decompress_init(void)
 
 	if (!load_vulkan_functions_with_instance(s->loader, s->instance))
 	{
-		printf("[vulkan_decode] Failed to load all instance related vulkan functions!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to load all instance related vulkan functions!\n");
 		if (vkDestroyInstance != NULL) vkDestroyInstance(s->instance, NULL);
 		unload_vulkan(s);
 		free(pps_array);
@@ -905,7 +870,7 @@ static void * vulkan_decompress_init(void)
 	result = create_debug_messenger(s->instance, &s->debugMessenger);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to setup debug messenger!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to setup debug messenger!\n");
 		vkDestroyInstance(s->instance, NULL);
         unload_vulkan(s);
 		free(pps_array);
@@ -934,10 +899,10 @@ static void * vulkan_decompress_init(void)
 
 	uint32_t physDevices_count = 0;
 	vkEnumeratePhysicalDevices(s->instance, &physDevices_count, NULL);
-	printf("phys_devices_count: %d\n", physDevices_count);
+	log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Found %d physical devices.\n", physDevices_count);
 	if (physDevices_count == 0)
 	{
-		printf("[vulkan_decode] No physical devices found!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] No physical devices found!\n");
 		destroy_debug_messenger(s->instance, s->debugMessenger);
 		vkDestroyInstance(s->instance, NULL);
         unload_vulkan(s);
@@ -950,7 +915,7 @@ static void * vulkan_decompress_init(void)
 	VkPhysicalDevice *physDevices = (VkPhysicalDevice*)calloc(physDevices_count, sizeof(VkPhysicalDevice));
 	if (physDevices == NULL)
 	{
-		printf("[vulkan_decode] Failed to allocate array for devices!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate array for devices!\n");
 		destroy_debug_messenger(s->instance, s->debugMessenger);
 		vkDestroyInstance(s->instance, NULL);
         unload_vulkan(s);
@@ -961,15 +926,15 @@ static void * vulkan_decompress_init(void)
 	}
 
 	vkEnumeratePhysicalDevices(s->instance, &physDevices_count, physDevices);
-	VkQueueFamilyProperties2 chosen_queue_family; //TODO use this?
-	VkQueueFamilyVideoPropertiesKHR chosen_queue_video_props; //TODO use this more?
+	VkQueueFamilyProperties2 chosen_queue_family;
+	VkQueueFamilyVideoPropertiesKHR chosen_queue_video_props;
 	s->physicalDevice = choose_physical_device(physDevices, physDevices_count, requestedFamilyQueueFlags,
 											   requiredDeviceExtensions, requireQueries,
 											   &s->queueFamilyIdx, &chosen_queue_family, &chosen_queue_video_props);
 	free(physDevices);
 	if (s->physicalDevice == VK_NULL_HANDLE)
 	{
-		printf("[vulkan_decode] Failed to choose a appropriate physical device!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to choose a appropriate physical device!\n");
 		destroy_debug_messenger(s->instance, s->debugMessenger);
 		vkDestroyInstance(s->instance, NULL);
         unload_vulkan(s);
@@ -987,16 +952,10 @@ static void * vulkan_decompress_init(void)
 												{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_PROPERTIES };
 	VkPhysicalDeviceProperties2KHR physDeviceProperties = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
 														 	.pNext = &physDevicePropertiesExtra };
-	printf("before: maxBufferSize: %u\n", physDevicePropertiesExtra.maxBufferSize);
 	vkGetPhysicalDeviceProperties2KHR(s->physicalDevice, &physDeviceProperties);
-	//TODO this?
-	printf("after: maxBufferSize: %u\n", physDevicePropertiesExtra.maxBufferSize);
-	//void *phys_pnext = physDeviceProperties.pNext;
-	//printf("after2: maxBufferSize: %u\n", ((VkPhysicalDeviceMaintenance4PropertiesKHR*)phys_pnext)->maxBufferSize);
 
-	s->physDeviceMaxBuffSize = physDevicePropertiesExtra.maxBufferSize; //TODO this is wrong for some unknown reason
-	printf("Chosen physical device is: '%s', maxBuffSize: %u and chosen queue family index is: %d\n", 
-				physDeviceProperties.properties.deviceName, s->physDeviceMaxBuffSize, s->queueFamilyIdx);
+	log_msg(LOG_LEVEL_INFO, "[vulkan_decode] Chosen physical device is: '%s', chosen queue family index is: %d\n", 
+							physDeviceProperties.properties.deviceName, s->queueFamilyIdx);
 
 	// ---Creating a logical device---
 	VkPhysicalDeviceVideoMaintenance1FeaturesKHR enabledDeviceVideoFeatures1 =
@@ -1023,7 +982,7 @@ static void * vulkan_decompress_init(void)
 	result = vkCreateDevice(s->physicalDevice, &createDeviceInfo, NULL, &s->device);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to create a appropriate vulkan logical device!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create a appropriate vulkan logical device!\n");
 		destroy_debug_messenger(s->instance, s->debugMessenger);
 		vkDestroyInstance(s->instance, NULL);
         unload_vulkan(s);
@@ -1068,7 +1027,7 @@ static void * vulkan_decompress_init(void)
 
 	s->queryPool = VK_NULL_HANDLE;
 
-	printf("[vulkan_decode] Initialization finished successfully.\n");
+	log_msg(LOG_LEVEL_INFO, "[vulkan_decode] Initialization finished successfully.\n");
 	return s;
 }
 
@@ -1089,7 +1048,6 @@ static void free_video_session_memory(struct state_vulkan_decompress *s)
 
 static void vulkan_decompress_done(void *state)
 {
-	printf("vulkan_decode - done\n");
 	struct state_vulkan_decompress *s = (struct state_vulkan_decompress *)state;
 	if (!s) return;
 
@@ -1141,30 +1099,16 @@ static VkVideoCodecOperationFlagsKHR codec_to_vulkan_flag(codec_t codec)
 	}
 }
 
-static codec_t vulkan_flag_to_codec(VkVideoCodecOperationFlagsKHR flag)
-{
-	switch(flag)
-	{
-		case VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR: return H264;
-		case VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR: return H265;
-		//case VK_VIDEO_CODEC_OPERATION_DECODE_AV1_BIT_KHR: return AV1;
-		default: return VIDEO_CODEC_NONE;
-	}
-}
-
 static bool configure_with(struct state_vulkan_decompress *s, struct video_desc desc)
 {
-	printf("vulkan_decode - configure_with\n");
 	const char *spec_name = get_codec_name_long(desc.color_spec);
-	printf("\tw: %u, h: %u, color_spec: '%s', fps: %f, interlacing: %d, tile_count: %u\n",
-			desc.width, desc.height, spec_name, desc.fps, desc.interlacing, desc.tile_count);
 
 	s->codecOperation = VK_VIDEO_CODEC_OPERATION_NONE_KHR;
 	VkVideoCodecOperationFlagsKHR videoCodecOperation = codec_to_vulkan_flag(desc.color_spec);
 
 	if (!(s->queueVideoFlags & videoCodecOperation))
 	{
-		printf("[vulkan_decode] Wanted color spec: '%s' is not supported by chosen vulkan queue family!\n", spec_name);
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Wanted color spec: '%s' is not supported by chosen vulkan queue family!\n", spec_name);
 		return false;
 	}
 
@@ -1208,19 +1152,14 @@ static bool configure_with(struct state_vulkan_decompress *s, struct video_desc 
 static int vulkan_decompress_reconfigure(void *state, struct video_desc desc,
 										 int rshift, int gshift, int bshift, int pitch, codec_t out_codec)
 {
-	printf("vulkan_decode - reconfigure\n");
 	struct state_vulkan_decompress *s = (struct state_vulkan_decompress *)state;
 	if (!s) return false;
 
-	const char *spec_name = get_codec_name_long(desc.color_spec);
-	const char *out_name = get_codec_name_long(out_codec);
-	printf("\tcodec color_spec: '%s', out_codec: '%s', pitch: %d\n", spec_name, out_name, pitch);
-	if (out_codec == VIDEO_CODEC_NONE) printf("\tRequested probing.\n");
+	if (out_codec == VIDEO_CODEC_NONE) log_msg(LOG_LEVEL_NOTICE, "[vulkan_decode] Requested probing.\n");
 
 	if (desc.tile_count != 1)
 	{
-		//TODO they could be supported (?)
-		printf("[vulkan_decode] Tiled video formats are not supported!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Tiled video formats are not supported!\n");
 		return false;
 	}
 
@@ -1247,10 +1186,8 @@ static int vulkan_decompress_reconfigure(void *state, struct video_desc desc,
 
 static int vulkan_decompress_get_property(void *state, int property, void *val, size_t *len)
 {
-	printf("vulkan_decode - get_property\n");
 	struct state_vulkan_decompress *s = (struct state_vulkan_decompress *)state;
     UNUSED(s);
-	//printf("\tproperty index: %d, val: %p, len: %p\n", property, val, len);
 	
 	int ret = FALSE;
 	switch(property) {
@@ -1271,12 +1208,9 @@ static int vulkan_decompress_get_property(void *state, int property, void *val, 
 
 static int vulkan_decompress_get_priority(codec_t compression, struct pixfmt_desc internal, codec_t ugc)
 {
-	printf("vulkan_decode - get_priority\n");
-	const char *compression_name = get_codec_name(compression);
-	const char *ugc_name = get_codec_name(ugc);
-	printf("\tcompression: '%s', ugc: '%s', pixfmt - depth: %d, subsampling: %d, rgb: %d\n",
-			compression_name, ugc_name, internal.depth, internal.subsampling, internal.rgb ? 1 : 0);
-	
+	UNUSED(internal);
+	UNUSED(ugc);
+
 	VkVideoCodecOperationFlagsKHR vulkanFlag = codec_to_vulkan_flag(compression);
 
 	if (vulkanFlag == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR ||
@@ -1295,17 +1229,6 @@ static VkVideoChromaSubsamplingFlagBitsKHR subsampling_to_vulkan_flag(int subs)
 		case SUBS_444: return VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR;
 		case SUBS_4444: return VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR;
 		default: return VK_VIDEO_CHROMA_SUBSAMPLING_INVALID_KHR;
-	}
-}
-
-static int vulkan_flag_to_subsampling(VkVideoChromaSubsamplingFlagBitsKHR flag)
-{
-	switch(flag)
-	{
-		case VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR: return 4200;
-		case VK_VIDEO_CHROMA_SUBSAMPLING_422_BIT_KHR: return 4220;
-		case VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR: return 4440;
-		default: return 0; // invalid subsampling
 	}
 }
 
@@ -1350,15 +1273,6 @@ static bool does_video_size_fit(VkExtent2D videoSize, VkExtent2D minExtent, VkEx
 		   minExtent.height <= videoSize.height && videoSize.height <= maxExtent.height;
 }
 
-static VkFormat codec_to_vulkan_format(codec_t codec)
-{
-	switch(codec)
-	{
-		case I420: return VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
-		default: return VK_FORMAT_UNDEFINED;
-	}
-}
-
 static bool check_format(const VkVideoFormatPropertiesKHR *props, const VkFormatProperties3 *extraProps)
 {
 	VkFormatFeatureFlags2 optFlags = extraProps->optimalTilingFeatures;
@@ -1370,9 +1284,6 @@ static bool check_format(const VkVideoFormatPropertiesKHR *props, const VkFormat
 		   optFlags & VK_FORMAT_FEATURE_2_HOST_IMAGE_TRANSFER_BIT_EXT; //TODO use this?
 }
 
-//TODO delete:
-static void print_bits(unsigned char num);
-
 static bool check_for_vulkan_format(VkPhysicalDevice physDevice, VkPhysicalDeviceVideoFormatInfoKHR videoFormatInfo,
 									VkVideoFormatPropertiesKHR *formatProperties)
 {
@@ -1382,7 +1293,7 @@ static bool check_for_vulkan_format(VkPhysicalDevice physDevice, VkPhysicalDevic
 																  &properties_count, NULL);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to get video format properties of physical device!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to get video format properties of physical device!\n");
 		return false;
 	}
 	if (properties_count == 0)
@@ -1394,7 +1305,7 @@ static bool check_for_vulkan_format(VkPhysicalDevice physDevice, VkPhysicalDevic
 							calloc(properties_count, sizeof(VkVideoFormatPropertiesKHR));
 	if (properties == NULL)
 	{
-		printf("[vulkan_decode] Failed to allocate memory for video format properties!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate memory for video format properties!\n");
 		return false;
 	}
 	for (uint32_t i = 0; i < properties_count; ++i)
@@ -1404,13 +1315,12 @@ static bool check_for_vulkan_format(VkPhysicalDevice physDevice, VkPhysicalDevic
 														 &properties_count, properties);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to get video format properties of physical device!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to get video format properties of physical device!\n");
 		free(properties);
 		return false;
 	}
 
-	printf("videoFromatProperties_count: %u\n", properties_count);
-	//VkFormat wanted = codec_to_vulkan_format(codec);
+	log_msg(LOG_LEVEL_INFO, "[vulkan_decode] Found %d suitable formats.\n", properties_count);
 
 	for (uint32_t i = 0; i < properties_count; ++i)
 	{
@@ -1421,12 +1331,13 @@ static bool check_for_vulkan_format(VkPhysicalDevice physDevice, VkPhysicalDevic
 											.pNext = (void*)&extraProps };
 		vkGetPhysicalDeviceFormatProperties2(physDevice, format, &formatProps);
 
-		printf("\tformat: %d, image_type: %d, imageCreateFlags: %d, imageTiling: %d, imageUsageFlags: %d\n",
-				format, properties[i].imageType, properties[i].imageCreateFlags, properties[i].imageTiling, properties[i].imageUsageFlags);
-		printf("\tusage flags: ");
-		print_bits((unsigned char)(properties[i].imageUsageFlags >> 8)); 
-		print_bits((unsigned char)properties[i].imageUsageFlags);
-		putchar('\n');
+		//DEBUG
+		//printf("\tformat: %d, image_type: %d, imageCreateFlags: %d, imageTiling: %d, imageUsageFlags: %d\n",
+		//		format, properties[i].imageType, properties[i].imageCreateFlags, properties[i].imageTiling, properties[i].imageUsageFlags);
+		//printf("\tusage flags: ");
+		//print_bits((unsigned char)(properties[i].imageUsageFlags >> 8)); 
+		//print_bits((unsigned char)properties[i].imageUsageFlags);
+		//putchar('\n');
 		
 		bool blitSrc = VK_FORMAT_FEATURE_2_BLIT_SRC_BIT & extraProps.optimalTilingFeatures ? 1 : 0;
 		bool blitDst = VK_FORMAT_FEATURE_2_BLIT_DST_BIT & extraProps.optimalTilingFeatures ? 1 : 0;
@@ -1436,12 +1347,12 @@ static bool check_for_vulkan_format(VkPhysicalDevice physDevice, VkPhysicalDevic
 		bool transferDst = VK_FORMAT_FEATURE_2_TRANSFER_DST_BIT_KHR  & extraProps.optimalTilingFeatures ? 1 : 0;
 		bool hostTransfer = VK_FORMAT_FEATURE_2_HOST_IMAGE_TRANSFER_BIT_EXT & extraProps.optimalTilingFeatures ? 1 : 0;
 		
-		printf("\tblit: %d %d, decode out: %d, decode dpb: %d, transfer: %d %d, host transfer: %d\n",
-				blitSrc, blitDst, decodeOutput, decodeDPB, transferSrc, transferDst, hostTransfer);
+		log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] format %d - blit: %d %d, decode out: %d, decode dpb: %d, transfer: %d %d, host transfer: %d\n",
+								 format, blitSrc, blitDst, decodeOutput, decodeDPB, transferSrc, transferDst, hostTransfer);
 		VkComponentMapping swizzle = properties[i].componentMapping;
-		printf("\tswizzle identity - r: %d, g: %d, b: %d, a: %d\n",
-				swizzle.r == VK_COMPONENT_SWIZZLE_IDENTITY, swizzle.g == VK_COMPONENT_SWIZZLE_IDENTITY,
-				swizzle.b == VK_COMPONENT_SWIZZLE_IDENTITY, swizzle.a == VK_COMPONENT_SWIZZLE_IDENTITY);
+		log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] format %d - swizzle identity - r: %d, g: %d, b: %d, a: %d\n", format,
+								 swizzle.r == VK_COMPONENT_SWIZZLE_IDENTITY, swizzle.g == VK_COMPONENT_SWIZZLE_IDENTITY,
+								 swizzle.b == VK_COMPONENT_SWIZZLE_IDENTITY, swizzle.a == VK_COMPONENT_SWIZZLE_IDENTITY);
 
 		if (check_format(properties + i, &extraProps))
 		{
@@ -1452,7 +1363,7 @@ static bool check_for_vulkan_format(VkPhysicalDevice physDevice, VkPhysicalDevic
 		}
 	}
 
-	printf("[vulkan_decode] Wanted output video format is not supported!\n");
+	log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Wanted output video format is not supported!\n");
 	free(properties);
 	return false;
 }
@@ -1501,7 +1412,7 @@ static bool allocate_buffers(struct state_vulkan_decompress *s, VkVideoProfileLi
 	VkResult result = vkCreateBuffer(s->device, &bitstreamBufferInfo, NULL, &s->bitstreamBuffer);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to create vulkan buffer for decoding!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan buffer for decoding!\n");
 		free_buffers(s);
 
 		return false;
@@ -1517,7 +1428,7 @@ static bool allocate_buffers(struct state_vulkan_decompress *s, VkVideoProfileLi
 						  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 						  &memType_idx))
 	{
-		printf("[vulkan_decode] Failed to find required memory type for vulkan bitstream buffer!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to find required memory type for vulkan bitstream buffer!\n");
 		free_buffers(s);
 
 		return false;
@@ -1529,7 +1440,7 @@ static bool allocate_buffers(struct state_vulkan_decompress *s, VkVideoProfileLi
 	result = vkAllocateMemory(s->device, &memAllocInfo, NULL, &s->bitstreamBufferMemory);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to allocate memory for vulkan bitstream buffer!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate memory for vulkan bitstream buffer!\n");
 		free_buffers(s);
 
 		return false;
@@ -1540,7 +1451,7 @@ static bool allocate_buffers(struct state_vulkan_decompress *s, VkVideoProfileLi
 	result = vkBindBufferMemory(s->device, s->bitstreamBuffer, s->bitstreamBufferMemory, 0);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to bind vulkan memory to vulkan bitstream buffer!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to bind vulkan memory to vulkan bitstream buffer!\n");
 		free_buffers(s);
 		
 		return false;
@@ -1575,7 +1486,7 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
 	VkResult result = vkGetVideoSessionMemoryRequirementsKHR(s->device, s->videoSession, &memoryRequirements_count, NULL);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to get vulkan video session memory requirements!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to get vulkan video session memory requirements!\n");
 		return false;
 	}
 
@@ -1589,7 +1500,7 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
 	s->videoSessionMemory = (VkDeviceMemory*)calloc(memoryRequirements_count, sizeof(VkDeviceMemory));
 	if (memoryRequirements == NULL || bindMemoryInfo == NULL || s->videoSessionMemory == NULL)
 	{
-		printf("[vulkan_decode] Failed to allocate memory for vulkan video session!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate memory for vulkan video session!\n");
 		free(memoryRequirements);
 		free(bindMemoryInfo);
 		free_video_session_memory(s);
@@ -1607,7 +1518,7 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
 	result = vkGetVideoSessionMemoryRequirementsKHR(s->device, s->videoSession, &memoryRequirements_count, memoryRequirements);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to get vulkan video session memory requirements!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to get vulkan video session memory requirements!\n");
 		free(memoryRequirements);
 		free(bindMemoryInfo);
 		free_video_session_memory(s);
@@ -1622,7 +1533,7 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
 		if (!find_memory_type(s, memoryRequirements[i].memoryRequirements.memoryTypeBits,
 							  0, &memoryTypeIndex))
 		{
-			printf("[vulkan_decode] No suitable memory type for vulkan video session requirments!\n");
+			log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] No suitable memory type for vulkan video session requirments!\n");
 			free(memoryRequirements);
 			free(bindMemoryInfo);
 			free_video_session_memory(s);
@@ -1637,7 +1548,7 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
 		result = vkAllocateMemory(s->device, &allocateInfo, NULL, &s->videoSessionMemory[i]);
 		if (result != VK_SUCCESS)
 		{
-			printf("[vulkan_decode] Failed to allocate vulkan memory!\n");
+			log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate vulkan memory!\n");
 			free(memoryRequirements);
 			free(bindMemoryInfo);
 			free_video_session_memory(s);
@@ -1654,7 +1565,7 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
 	result = vkBindVideoSessionMemoryKHR(s->device, s->videoSession, memoryRequirements_count, bindMemoryInfo);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Can't bind video session memory!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Can't bind video session memory!\n");
 		free(memoryRequirements);
 		free(bindMemoryInfo);
 		free_video_session_memory(s);
@@ -1673,7 +1584,7 @@ static bool begin_cmd_buffer(struct state_vulkan_decompress *s)
 	VkResult result = vkResetCommandBuffer(s->cmdBuffer, 0);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to reset the vulkan command buffer!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to reset the vulkan command buffer!\n");
 		return false;
 	}
 	
@@ -1682,7 +1593,7 @@ static bool begin_cmd_buffer(struct state_vulkan_decompress *s)
 	result = vkBeginCommandBuffer(s->cmdBuffer, &cmdBufferBeginInfo);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to begin command buffer recording!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to begin command buffer recording!\n");
 		return false;
 	}
 
@@ -1694,12 +1605,12 @@ static bool end_cmd_buffer(struct state_vulkan_decompress *s)
 	VkResult result = vkEndCommandBuffer(s->cmdBuffer);
 	if (result == VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR)
 	{
-		printf("[vulkan_decode] Failed to end command buffer recording - Invalid video standard parameters\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to end command buffer recording - Invalid video standard parameters\n");
 		return false;
 	}
 	else if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to end command buffer recording!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to end command buffer recording!\n");
 		return false;
 	}
 
@@ -1804,7 +1715,7 @@ static bool create_output_image(struct state_vulkan_decompress *s)
 	VkResult result = vkCreateImage(s->device, &lumaPlaneInfo, NULL, &s->outputLumaPlane);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to create vulkan image for the output frame (luma plane)!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan image for the output frame (luma plane)!\n");
 		destroy_output_image(s);
 		return false;
 	}
@@ -1829,7 +1740,7 @@ static bool create_output_image(struct state_vulkan_decompress *s)
 	result = vkCreateImage(s->device, &chromaPlaneInfo, NULL, &s->outputChromaPlane);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to create vulkan image for the output frame (chroma plane)!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan image for the output frame (chroma plane)!\n");
 		destroy_output_image(s);
 		return false;
 	}
@@ -1842,15 +1753,15 @@ static bool create_output_image(struct state_vulkan_decompress *s)
 	VkDeviceSize chromaAlignment = chromaMemReq.alignment;
 	s->outputChromaPlaneOffset = (lumaMemReq.size + (chromaAlignment - 1)) & ~(chromaAlignment - 1); //alignment bit mask magic
 
-	printf("\tluma size: %u, chroma size: %u, chroma offset: %u\n",
-			lumaMemReq.size, chromaMemReq.size, s->outputChromaPlaneOffset);
+	log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Luma size: %llu, chroma size: %llu, chroma offset: %llu.\n",
+							lumaMemReq.size, chromaMemReq.size, s->outputChromaPlaneOffset);
 
 	uint32_t imgMemoryTypeIdx = 0;
 	if (!find_memory_type(s, lumaMemReq.memoryTypeBits & chromaMemReq.memoryTypeBits, // taking the susbet
 						  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 						  &imgMemoryTypeIdx))
 	{
-		printf("[vulkan_decode] Failed to find required memory type for output image!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to find required memory type for output image!\n");
 		destroy_output_image(s);
 		return false;
 	}
@@ -1862,7 +1773,7 @@ static bool create_output_image(struct state_vulkan_decompress *s)
 	result = vkAllocateMemory(s->device, &allocInfo, NULL, &s->outputImageMemory);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to allocate device memory for output image!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate device memory for output image!\n");
 		destroy_output_image(s);
 		return false;
 	}
@@ -1871,7 +1782,7 @@ static bool create_output_image(struct state_vulkan_decompress *s)
 	result = vkBindImageMemory(s->device, s->outputLumaPlane, s->outputImageMemory, 0);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to bind vulkan device memory to output image (luma plane)!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to bind vulkan device memory to output image (luma plane)!\n");
 		destroy_output_image(s);
 		return false;
 	}
@@ -1879,7 +1790,7 @@ static bool create_output_image(struct state_vulkan_decompress *s)
 	result = vkBindImageMemory(s->device, s->outputChromaPlane, s->outputImageMemory, s->outputChromaPlaneOffset);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to bind vulkan device memory to output image (chroma plane)!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to bind vulkan device memory to output image (chroma plane)!\n");
 		destroy_output_image(s);
 		return false;
 	}
@@ -1943,11 +1854,10 @@ static bool create_dpb(struct state_vulkan_decompress *s, VkVideoProfileListInfo
 
 	for (size_t i = 0; i < dpb_len; ++i)
 	{
-		//printf("Creating image %u.\n", i);
 		VkResult result = vkCreateImage(s->device, &dpbImgInfo, NULL, s->dpb + i);
 		if (result != VK_SUCCESS)
 		{
-			printf("[vulkan_decode] Failed to create vulkan image(%u) for DPB slot!\n", i);
+			log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan image(%zu) for DPB slot!\n", i);
 			destroy_dpb(s);
 			return false;
 		}
@@ -1960,7 +1870,7 @@ static bool create_dpb(struct state_vulkan_decompress *s, VkVideoProfileListInfo
 	uint32_t imgMemoryTypeIdx = 0;
 	if (!find_memory_type(s, dpbImgMemoryRequirements.memoryTypeBits, 0, &imgMemoryTypeIdx))
 	{
-		printf("[vulkan_decode] Failed to find required memory type for DPB!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to find required memory type for DPB!\n");
 		destroy_dpb(s);
 		return false;
 	}
@@ -1976,7 +1886,7 @@ static bool create_dpb(struct state_vulkan_decompress *s, VkVideoProfileListInfo
 	VkResult result = vkAllocateMemory(s->device, &allocInfo, NULL, &s->dpbMemory);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to allocate vulkan device memory for DPB!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate vulkan device memory for DPB!\n");
 		destroy_dpb(s);
 		return false;
 	}
@@ -1987,7 +1897,7 @@ static bool create_dpb(struct state_vulkan_decompress *s, VkVideoProfileListInfo
 		result = vkBindImageMemory(s->device, s->dpb[i], s->dpbMemory, i * dpbImgAlignedSize);
 		if (result != VK_SUCCESS)
 		{
-			printf("[vulkan_decode] Failed to bind vulkan device memory to DPB image (idx: %u)!\n", i);
+			log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to bind vulkan device memory to DPB image (idx: %zu)!\n", i);
 			destroy_dpb(s);
 			return false;
 		}
@@ -2012,14 +1922,13 @@ static bool create_dpb(struct state_vulkan_decompress *s, VkVideoProfileListInfo
 	
 	for (size_t i = 0; i < dpb_len; ++i)
 	{
-		//printf("Creating image view %u.\n", i);
 		assert(s->dpb[i] != VK_NULL_HANDLE);
 
 		dpbViewInfo.image = s->dpb[i];
 		result = vkCreateImageView(s->device, &dpbViewInfo, NULL, s->dpbViews + i);
 		if (result != VK_SUCCESS)
 		{
-			printf("[vulkan_decode] Failed to create vulkan image view(%u) for DPB slot!\n", i);
+			log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan image view(%zu) for DPB slot!\n", i);
 			destroy_dpb(s);
 			return false;
 		}
@@ -2046,7 +1955,6 @@ static void destroy_dpb(struct state_vulkan_decompress *s)
 	{
 		for (size_t i = 0; i < dpb_len; ++i)
 		{
-			//printf("Destroying image: %u.\n", i);
 			vkDestroyImage(s->device, s->dpb[i], NULL);
 		}
 	}
@@ -2085,7 +1993,7 @@ static bool create_output_queue(struct state_vulkan_decompress *s)
 
 	if (s->outputFrameQueue_data == NULL)
 	{
-		printf("[vulkan_decode] Failed to allocate memory for output decoded frames queue!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate memory for output decoded frames queue!\n");
 		return false;
 	}
 
@@ -2098,7 +2006,8 @@ static bool create_output_queue(struct state_vulkan_decompress *s)
 	s->last_displayed_frame_seq = -1;
 	s->last_displayed_poc = -999999; // some invalid POC that should be smaller than any encountered valid POC
 
-	printf("\tallocated output decoded frame queue of capacity: %u\n", s->outputFrameQueue_capacity);
+	log_msg(LOG_LEVEL_INFO, "[vulkan_decode] Allocated output decoded frame queue of capacity: %zu\n",
+							s->outputFrameQueue_capacity);
 
 	return true;
 }
@@ -2122,7 +2031,8 @@ static frame_data_t get_frame_from_output_queue(struct state_vulkan_decompress *
 	return s->outputFrameQueue[wrappedIdx];
 }
 
-static void output_queue_print(struct state_vulkan_decompress *s) //DEBUG
+//DEBUG
+/*static void output_queue_print(struct state_vulkan_decompress *s)
 {
 	for (size_t i = 0; i < s->outputFrameQueue_count; ++i)
 	{
@@ -2132,7 +2042,7 @@ static void output_queue_print(struct state_vulkan_decompress *s) //DEBUG
 				frame.idr_frame_seq, frame.poc_wrap, frame.poc, frame.frame_seq);
 	}
 	putchar('\n');
-}
+}*/
 
 static size_t get_unused_output_queue_data_index(struct state_vulkan_decompress *s)
 {
@@ -2255,7 +2165,6 @@ static frame_data_t * output_queue_get_next_frame(struct state_vulkan_decompress
 
 	if (s->outputFrameQueue_count == 0)
 	{
-		//puts("no frame - queue empty");
 		return NULL; // empty queue case
 	}
 
@@ -2266,17 +2175,14 @@ static frame_data_t * output_queue_get_next_frame(struct state_vulkan_decompress
 	//		(smaller than current GOP size) So maybe could be commented out
 	if (s->outputFrameQueue_count == s->outputFrameQueue_capacity)
 	{	// queue is full => display the first queued frame, as it would get throwed out in another decompress anyways
-		//puts("queue full");
 		return output_queue_pop_first(s);
 	}
 
 	if (first->frame_seq < s->idr_frame_seq)
 	{	// first queued frame is from another GOP than currently decoded one => display it 
-		//puts("previous GOP");
 		return output_queue_pop_first(s);
 	}
 
-	//puts("no frame");
 	return NULL;
 }
 
@@ -2302,7 +2208,7 @@ static bool create_queries(struct state_vulkan_decompress *s, VkVideoProfileInfo
 	VkResult result = vkCreateQueryPool(s->device, &createInfo, NULL, &s->queryPool);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to create vulkan query pool!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan query pool!\n");
 		destroy_queries(s); // probably useless
 		return false;
 	}
@@ -2325,35 +2231,24 @@ static void destroy_queries(struct state_vulkan_decompress *s)
 
 static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 {
-	printf("vulkan_decode - prepare\n");
 	assert(!s->prepared); //this function should be called only when decompress is not prepared
 
 	*wrong_pixfmt = false;
 
-	//codec_t in_codec = vulkan_flag_to_codec(s->codecOperation);
-	//struct pixfmt_desc pf_desc = get_pixfmt_desc(in_codec);
-	//printf("\tpf_desc - depth: %d, subsampling: %d, rgb: %d, accel_type: %d\n",
-	//			pf_desc.depth, pf_desc.subsampling, pf_desc.rgb, pf_desc.accel_type);
-	//if (!pf_desc.depth) //pixel format description is invalid
-	//{
-	//	printf("[vulkan_decode] Got invalid pixel format!\n");
-	//	return false;
-	//}
-
-	printf("\tPreparing with - depth: %d %d, subsampling: %d, profile: %d\n",
-			s->depth_chroma, s->depth_luma, s->subsampling, (int)s->profileIdc);
+	log_msg(LOG_LEVEL_INFO, "[vulkan_decode] Preparing with - depth: %d %d, subsampling: %d, profile: %d\n",
+							s->depth_luma, s->depth_chroma, s->subsampling, (int)s->profileIdc);
 
 	VkVideoChromaSubsamplingFlagsKHR chromaSubsampling = subsampling_to_vulkan_flag(s->subsampling);
 	if (chromaSubsampling == VK_VIDEO_CHROMA_SUBSAMPLING_INVALID_KHR)
 	{
-		printf("[vulkan_decode] Got unsupported chroma subsampling!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Got unsupported chroma subsampling!\n");
 		*wrong_pixfmt = true;
 		return false;
 	}
 	//NOTE: Otherwise vulkan video fails to work (on my hardware)
 	else if (chromaSubsampling != VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR)
 	{
-		printf("[vulkan_decode] Wrong chroma subsampling! Currently the only supported one is 4:2:0!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Wrong chroma subsampling! Currently the only supported one is 4:2:0!\n");
 		*wrong_pixfmt = true;
 		return false;
 	}
@@ -2363,12 +2258,10 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	if (vulkanChromaDepth == VK_VIDEO_COMPONENT_BIT_DEPTH_INVALID_KHR ||
 		vulkanLumaDepth == VK_VIDEO_COMPONENT_BIT_DEPTH_INVALID_KHR)
 	{
-		printf("[vulkan_decode] Got unsupported color channel depth!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Got unsupported color channel depth!\n");
 		*wrong_pixfmt = true;
 		return false;
 	}
-
-	printf("vulkan depth - luma: %d, chroma %d\n", vulkanLumaDepth, vulkanChromaDepth);
 
 	assert(s->codecOperation != VK_VIDEO_CODEC_OPERATION_NONE_KHR);
 	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
@@ -2400,47 +2293,40 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	VkResult result = vkGetPhysicalDeviceVideoCapabilitiesKHR(s->physicalDevice, &videoProfile, &videoCapabilities);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to get physical device video capabilities!");
-		if (result == VK_ERROR_OUT_OF_HOST_MEMORY) puts(" - Host out of memory.");
-		else if (result == VK_ERROR_OUT_OF_DEVICE_MEMORY) puts(" - Device out of memory.");
-		else if (result == VK_ERROR_VIDEO_PICTURE_LAYOUT_NOT_SUPPORTED_KHR) puts(" - Video picture layout not supported.");
-		else if (result == VK_ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR) puts(" - Video operation not supported.");
-		else if (result == VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR) puts(" - Video format not supported.");
-		else if (result == VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR) puts(" - Video codec not supported.");
-		else printf(" - Vulkan error: %d\n", result);
-		// it's not obvious when to set '*wrong_pixfmt = true;'
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to get physical device video capabilities!\n");
+		// it's not obvious if to set '*wrong_pixfmt = true;'
 		return false;
 	}
 
 	//TODO allow dpb be implemented using only one VkImage
 	if (!(videoCapabilities.flags & VK_VIDEO_CAPABILITY_SEPARATE_REFERENCE_IMAGES_BIT_KHR))
 	{
-		printf("[vulkan_decode] Chosen physical device does not support separate reference images for DPB!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Chosen physical device does not support separate reference images for DPB!\n");
 		return false;
 	}
 
 	if (videoCapabilities.maxDpbSlots < MAX_REF_FRAMES + 1)
 	{
-		printf("[vulkan_decode] Chosen physical device does not support needed amount of DPB slots(%u)!\n",
-				MAX_REF_FRAMES + 1);
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Chosen physical device does not support needed amount of DPB slots(%u)!\n",
+								 MAX_REF_FRAMES + 1);
 		return false;
 	}
 
 	if (videoCapabilities.maxActiveReferencePictures < MAX_REF_FRAMES)
 	{
-		printf("[vulkan_decode] Chosen physical device does not support needed amount of active reference pictures(%u)!\n",
-				MAX_REF_FRAMES);
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Chosen physical device does not support needed amount of active reference pictures(%u)!\n",
+								 MAX_REF_FRAMES);
 		return false;
 	}
 
 	const VkExtent2D videoSize = { s->width, s->height };
 	if (!does_video_size_fit(videoSize, videoCapabilities.minCodedExtent, videoCapabilities.maxCodedExtent))
 	{
-		printf("[vulkan_decode] Requested video size: %ux%u does not fit in vulkan video extents."
-			   " Min extent: %ux%u, max extent: %ux%u\n",
-				videoSize.width, videoSize.height,
-				videoCapabilities.minCodedExtent.width, videoCapabilities.minCodedExtent.height,
-				videoCapabilities.maxCodedExtent.width, videoCapabilities.maxCodedExtent.height);
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Requested video size: %ux%u does not fit in vulkan video extents."
+			   					 " Min extent: %ux%u, max extent: %ux%u\n",
+								 videoSize.width, videoSize.height,
+								 videoCapabilities.minCodedExtent.width, videoCapabilities.minCodedExtent.height,
+								 videoCapabilities.maxCodedExtent.width, videoCapabilities.maxCodedExtent.height);
 		return false;
 	}
 
@@ -2459,9 +2345,9 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 
 	assert(s->physicalDevice != VK_NULL_HANDLE);
 
-	printf("\tdecode capabilities flags - coincide: %d, distinct: %d\n",
-			decodeCapabilitiesFlags & VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR ? 1 : 0,
-			decodeCapabilitiesFlags & VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_DISTINCT_BIT_KHR ? 1 : 0);
+	log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Decode capability flags - coincide: %d, distinct: %d\n",
+							 decodeCapabilitiesFlags & VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR ? 1 : 0,
+							 decodeCapabilitiesFlags & VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_DISTINCT_BIT_KHR ? 1 : 0);
 
 	if (decodeCapabilitiesFlags & VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR)
 	{
@@ -2481,7 +2367,8 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	else if (decodeCapabilitiesFlags & VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_DISTINCT_BIT_KHR)
 	{
 		//TODO handlle this case as well
-		printf("[vulkan_decode] Currently it is required for physical decoder to support DPB slot being the output as well!\n");
+		log_msg(LOG_LEVEL_ERROR,
+				"[vulkan_decode] Currently it is required for physical decoder to support DPB slot being the output as well!\n");
 		return false;
 
 		/*videoFormatInfo.imageUsage = VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR;
@@ -2497,7 +2384,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	}
 	else
 	{
-		printf("[vulkan_decode] Unsupported decodeCapabilitiesFlags value (%d)!\n", decodeCapabilitiesFlags);
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Unsupported decodeCapabilitiesFlags value (%d)!\n", decodeCapabilitiesFlags);
 		return false;
 	}
 
@@ -2516,7 +2403,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	result = vkCreateFence(s->device, &fenceInfo, NULL, &s->fence);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to create vulkan fence for synchronization!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan fence for synchronization!\n");
 		return false;
 	}
 
@@ -2542,7 +2429,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	result = vkCreateCommandPool(s->device, &poolInfo, NULL, &s->commandPool);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to create vulkan command pool!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan command pool!\n");
 		free_buffers(s);
 		if (vkDestroyFence != NULL)
 		{
@@ -2561,7 +2448,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	result = vkAllocateCommandBuffers(s->device, &cmdBufferInfo, &s->cmdBuffer);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to allocate vulkan command buffer!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate vulkan command buffer!\n");
 		if (vkDestroyCommandPool != NULL)
 		{
 			vkDestroyCommandPool(s->device, s->commandPool, NULL);
@@ -2640,7 +2527,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	// ---Creating query pool---
 	// is true when VULKAN_QUERIES defined and queries were created successfully
 	bool query_ret = create_queries(s, &videoProfile);
-	//printf("\tquery_ret: %d\n", (int)query_ret);
 
 	// ---Creating video session---
 	assert(s->videoSession == VK_NULL_HANDLE);
@@ -2659,7 +2545,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	result = vkCreateVideoSessionKHR(s->device, &sessionInfo, NULL, &s->videoSession);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to create vulkan video session!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan video session!\n");
 		destroy_queries(s);
 		destroy_output_queue(s);
 		destroy_output_image(s);
@@ -2705,7 +2591,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	result = vkCreateVideoSessionParametersKHR(s->device, &sessionParamsInfo, NULL, &s->videoSessionParams);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to create vulkan video session parameters!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan video session parameters!\n");
 		if (vkDestroyVideoSessionKHR != NULL)
 		{
 			vkDestroyVideoSessionKHR(s->device, s->videoSession, NULL);
@@ -2764,7 +2650,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 		return false;
 	}
 
-	printf("Preparation successful.\n");
+	log_msg(LOG_LEVEL_INFO, "[vulkan_decode] Preparation successful.\n");
 	return true;
 }
 
@@ -2776,14 +2662,15 @@ static slice_info_t get_ref_slot_from_queue(struct state_vulkan_decompress *s, u
 	return s->referenceSlotsQueue[wrappedIdx];
 }
 
-static void print_ref_queue(struct state_vulkan_decompress *s) //DEBUG
+//DEBUG
+/*static void print_ref_queue(struct state_vulkan_decompress *s)
 {
 	for (uint32_t i = 0; i < s->referenceSlotsQueue_count; ++i)
 	{
 		const slice_info_t si = get_ref_slot_from_queue(s, i);
 		printf("%d|%d|%d ", si.dpbIndex, si.nal_idc, si.frame_seq);
 	}
-}
+}*/
 
 static uint32_t smallest_dpb_index_not_in_queue(struct state_vulkan_decompress *s)
 {
@@ -2904,9 +2791,6 @@ static void fill_ref_picture_infos(struct state_vulkan_decompress *s,
 	for (uint32_t i = 0; i < max_count && i < ref_count; ++i)
 	{
 		const slice_info_t slice_info = get_ref_slot_from_queue(s, i);
-		/*printf("\tGot slice_info - frame_seq: %d, frame_num: %d, poc_lsb: %d, poc: %d, pps_id: %d, is_reference: %d, is_intra: %d, dpbIndex: %u\n",
-			slice_info.frame_seq, slice_info.frame_num, slice_info.poc_lsb, slice_info.poc, slice_info.pps_id,
-			(int)(slice_info.is_reference), slice_info.is_intra, slice_info.dpbIndex);*/
 		
 		assert(slice_info.frame_num >= 0);
 		assert(slice_info.dpbIndex < MAX_REF_FRAMES + 1);
@@ -2960,7 +2844,8 @@ static void end_video_coding_scope(struct state_vulkan_decompress *s)
 	vkCmdEndVideoCodingKHR(s->cmdBuffer, &endCodingInfo);
 }
 
-static void print_bits(unsigned char num) //DEBUG
+//DEBUG
+/*static void print_bits(unsigned char num)
 {
 	unsigned int bit = 1<<(sizeof(unsigned char) *8 - 1);
 
@@ -2969,7 +2854,7 @@ static void print_bits(unsigned char num) //DEBUG
 		printf("%i ", num & bit ? 1 : 0);
 		bit >>= 1;
 	}
-}
+}*/
 
 //copied from rtp/rtpenc_h264.c
 static uint32_t get4Bytes(const unsigned char *ptr)
@@ -3011,8 +2896,8 @@ static const unsigned char * get_next_nal(const unsigned char *start, long len, 
 	return NULL;
 }
 
-//copied from rtp/rtpenc_h264.c
-static void print_nalu_name(int type)
+//DEBUG - copied from rtp/rtpenc_h264.c
+/*static void print_nalu_name(int type) //DEBUG
 {
 	switch ((enum nal_type)type)
 	{
@@ -3049,11 +2934,12 @@ static void print_nalu_name(int type)
     }
 }
 
+//DEBUG
 static void print_nalu_header(unsigned char header)
 {
 	printf("forbidden bit: %u, idc: %u, type: %u", header & 128 ? 1 : 0,
 				H264_NALU_HDR_GET_NRI(header), H264_NALU_HDR_GET_TYPE(header));
-}
+}*/
 
 static bool create_rbsp(const unsigned char *nal, size_t nal_len, uint8_t **rbsp, int *rbsp_len)
 {
@@ -3063,7 +2949,7 @@ static bool create_rbsp(const unsigned char *nal, size_t nal_len, uint8_t **rbsp
 
 	if (sizeof(unsigned char) != sizeof(uint8_t))
 	{
-		printf("[vulkan_decode] H.264/H.265 stream handling requires sizeof(unsigned char) == sizeof(uint8_t)!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] H.264/H.265 stream handling requires sizeof(unsigned char) == sizeof(uint8_t)!\n");
 		*rbsp_len = 0;
 		return false;
 	}
@@ -3073,7 +2959,7 @@ static bool create_rbsp(const unsigned char *nal, size_t nal_len, uint8_t **rbsp
 	uint8_t *out = (uint8_t*)malloc(nal_len * sizeof(uint8_t));
 	if (out == NULL)
 	{
-		printf("[vulkan_decode] Failed to allocate memory for RBSP stream data!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate memory for RBSP stream data!\n");
 		*rbsp_len = 0;
 		return false;
 	}
@@ -3081,12 +2967,10 @@ static bool create_rbsp(const unsigned char *nal, size_t nal_len, uint8_t **rbsp
 	// throw away variable, could be set to 'nal_len' instead, but we are using the fact that 'rbsp_len' is already converted
 	int nal_payload_len = *rbsp_len;
 	// the cast here to (const uint8_t*) is valid because of the first 'if'
-	//printf("nal: %u %u, nal_payload_len: %d, rbsp_len: %d\n", nal[0], nal[1], nal_payload_len, *rbsp_len);
-
 	int ret = nal_to_rbsp((const uint8_t*)nal, &nal_payload_len, out, rbsp_len);
 	if (ret == -1)
 	{
-		printf("[vulkan_decode] Failed to convert NALU stream into RBSP data!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to convert NALU stream into RBSP data!\n");
 		free(out);
 		*rbsp_len = 0;
 		return false;
@@ -3094,9 +2978,6 @@ static bool create_rbsp(const unsigned char *nal, size_t nal_len, uint8_t **rbsp
 
 	assert(ret == *rbsp_len);
 	*rbsp = out;
-
-	//printf("first bytes - nal: %u %u, rbsp: %u %u, rbsp_len: %d\n",
-	//		nal[0], nal[1], out[0], out[1], *rbsp_len);
 	
 	return true;
 }
@@ -3170,7 +3051,7 @@ static bool find_first_sps_vps(struct state_vulkan_decompress *s, const unsigned
 		size_t nal_len = next_nal == NULL ? src_len - (nal - src) : next_nal - nal;
 		if (nal_len <= 4 || (size_t)(nal_payload - nal) >= nal_len) //TODO weird?
 		{
-			printf("[vulkan_decode] NAL unit is too short.\n");
+			log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] NAL unit is too short.\n");
 			return false;
 		}
 
@@ -3180,10 +3061,9 @@ static bool find_first_sps_vps(struct state_vulkan_decompress *s, const unsigned
 		if (isH264 &&
 			nalu_type == NAL_H264_SPS)
 		{
-			//TODO
 			if (!get_video_info_from_sps(s, nal_payload, nal_payload_len))
 			{
-				printf("[vulkan_decode] Found first SPS, but it was invalid! Discarting it.\n");
+				log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Found first SPS, but it was invalid! Discarting it.\n");
 				return false;
 			}
 
@@ -3253,13 +3133,6 @@ static void end_bitstream_writing(struct state_vulkan_decompress *s)
 	vkUnmapMemory(s->device, s->bitstreamBufferMemory);
 }
 
-//DEBUG
-static void write_bitstream_file(const unsigned char *src, size_t src_len, FILE *f)
-{
-	size_t written = fwrite(src, 1, src_len, f);
-	if (written < src_len) printf("[DEBUG] Not the whole input(%u) was successfully written(%u)!\n", src_len, written);
-}
-
 static bool detect_poc_wrapping(struct state_vulkan_decompress *s)
 {
 	// if there is already a frame in the output queue from the same GOP with the same POC nad POC wrap
@@ -3314,66 +3187,12 @@ static void copy_decoded_image(struct state_vulkan_decompress *s, VkImage srcDpb
 				   s->outputChromaPlane, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &chromaRegion);
 }
 
-/*static bool write_decoded_frame(struct state_vulkan_decompress *s, unsigned char *dst)
-{
-	assert(sizeof(unsigned char) == sizeof(uint8_t)); //DEBUG ?
-	assert(s->device != VK_NULL_HANDLE);
-	assert(s->outputImageMemory != VK_NULL_HANDLE);
-	assert(dst != NULL);
-
-	//460800 = 640*480 + 153600 = 640*480 + 76800 + 76800 = 640*480 + 640*480/4 + 640*480/4
-	VkDeviceSize lumaSize = s->lumaSize;		// using local variable, otherwise would get bad performance
-	VkDeviceSize chromaSize = s->chromaSize;	// using local variable, otherwise would get bad performance
-	//VkDeviceSize size = lumaSize + 2 * chromaSize;
-	//printf("\t%d = %d + 2 * %d\n", size, lumaSize, chromaSize);
-
-	assert(lumaSize <= s->outputChromaPlaneOffset);
-
-	uint8_t *memory = NULL;
-	VkResult result = vkMapMemory(s->device, s->outputImageMemory, 0, s->outputChromaPlaneOffset + chromaSize,
-								  0, (void**)&memory);
-	if (result != VK_SUCCESS) return false;
-	assert(memory != NULL);
-
-	//DEBUG - attempt at translating NV12 into I420
-	// luma plane
-	const uint8_t *luma = memory;
-	for (size_t i = 0; i < lumaSize; ++i) dst[i] = (unsigned char)luma[i]; // could be memcpy I guess
-	for (int row = 0; row < s->height; ++row)
-	{
-		for (int col = 0; col < s->width; ++col)
-		{
-			dst[row * s->pitch + col] = (unsigned char)luma[row * s->width + col];
-		}
-	}
-
-	// chroma plane
-	const uint8_t *chroma = memory + s->outputChromaPlaneOffset;
-	for (size_t i = 0; i < chromaSize; ++i)
-	{
-		unsigned char Cb = (unsigned char)chroma[2*i],
-					  Cr = (unsigned char)chroma[2*i + 1];
-
-		//int col = i % (s->width / 2);
-		//int row = i / (s->width / 2);
-		//printf("i: %u, row: %d, col: %d\n", i, row, col);
-
-		dst[lumaSize + i] = Cb;
-		dst[lumaSize + chromaSize + i] = Cr;
-	}
-	
-	vkUnmapMemory(s->device, s->outputImageMemory);
-
-	return true;
-}*/
-
 static bool write_decoded_frame(struct state_vulkan_decompress *s, frame_data_t *dst_frame)
 {
 	assert(s->device != VK_NULL_HANDLE);
 	assert(s->outputImageMemory != VK_NULL_HANDLE);
 	assert(dst_frame != NULL);
 
-	//460800 = 640*480 + 153600 = 640*480 + 76800 + 76800 = 640*480 + 640*480/4 + 640*480/4
 	VkDeviceSize lumaSize = s->lumaSize;		// using local variable, otherwise would get bad performance
 	VkDeviceSize chromaSize = s->chromaSize;	// using local variable, otherwise would get bad performance
 	VkDeviceSize size = lumaSize + 2 * chromaSize;
@@ -3391,17 +3210,11 @@ static bool write_decoded_frame(struct state_vulkan_decompress *s, frame_data_t 
 
 	uint8_t *dst_mem = s->outputFrameQueue_data + dst_frame->data_idx * s->outputFrameQueue_data_size;
 
-	//DEBUG - attempt at translating NV12 into I420
+	// Translating NV12 into I420:
 	// luma plane
 	const uint8_t *luma = memory;
+	//TODO memcpy
 	for (size_t i = 0; i < lumaSize; ++i) dst_mem[i] = (unsigned char)luma[i]; // could be memcpy I guess
-	/*for (int row = 0; row < s->height; ++row)
-	{
-		for (int col = 0; col < s->width; ++col)
-		{
-			dst[row * s->pitch + col] = (unsigned char)luma[row * s->width + col];
-		}
-	}*/
 
 	// chroma plane
 	const uint8_t *chroma = memory + s->outputChromaPlaneOffset;
@@ -3409,10 +3222,6 @@ static bool write_decoded_frame(struct state_vulkan_decompress *s, frame_data_t 
 	{
 		unsigned char Cb = (unsigned char)chroma[2*i],
 					  Cr = (unsigned char)chroma[2*i + 1];
-
-		//int col = i % (s->width / 2);
-		//int row = i / (s->width / 2);
-		//printf("i: %u, row: %d, col: %d\n", i, row, col);
 
 		dst_mem[lumaSize + i] = Cb;
 		dst_mem[lumaSize + chromaSize + i] = Cr;
@@ -3481,7 +3290,7 @@ static bool update_video_session_params(struct state_vulkan_decompress *s, bool 
 	VkResult result = vkCreateVideoSessionParametersKHR(s->device, &createInfo, NULL, &newVideoSessionParams);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to update vulkan video session parameters!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to update vulkan video session parameters!\n");
 		return false;
 	}
 
@@ -3513,11 +3322,6 @@ static bool handle_sps_nalu(struct state_vulkan_decompress *s, uint8_t *rbsp, in
 
 	bs_init(&b, rbsp, rbsp_len);
 	
-	//puts("bitstream:");
-	//printf("ue1: %d, ue2: %d\n", bs_read_ue(&b), bs_read_ue(&b));
-	//for (size_t i = 0; i < rbsp_len && i < 30; ++i) printf("%u ", bs_read_u8(&b));
-	//putchar('\n');
-
 	read_sps(&sps, &b);
 	b = (bs_t){ 0 }; // just to be sure
 	//print_sps(&sps);
@@ -3527,11 +3331,10 @@ static bool handle_sps_nalu(struct state_vulkan_decompress *s, uint8_t *rbsp, in
 	int id = sps.seq_parameter_set_id;
 	if (id < 0 || id >= MAX_SPS_IDS)
 	{
-		printf("[vulkan_decode] Id of read SPS is out of bounds (%d)! Discarting it.\n", id);
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Id of read SPS is out of bounds (%d)! Discarting it.\n", id);
 		return false;
 	}
 
-	//printf("adding sps: %d\n", id);
 	assert(s->sps_array != NULL);
 	s->sps_array[id] = sps;
 
@@ -3552,11 +3355,6 @@ static bool handle_pps_nalu(struct state_vulkan_decompress *s, uint8_t *rbsp, in
 	pps_t pps = { 0 };
 
 	bs_init(&b, rbsp, rbsp_len);
-	
-	//puts("bitstream:");
-	//printf("ue1: %d, ue2: %d\n", bs_read_ue(&b), bs_read_ue(&b));
-	//for (size_t i = 0; i < rbsp_len && i < 30; ++i) printf("%u ", bs_read_u8(&b));
-	//putchar('\n');
 
 	read_pps(&pps, &b);
 	b = (bs_t){ 0 }; // just to be sure
@@ -3565,11 +3363,10 @@ static bool handle_pps_nalu(struct state_vulkan_decompress *s, uint8_t *rbsp, in
 	int id = pps.pic_parameter_set_id;
 	if (id < 0 || id >= MAX_PPS_IDS)
 	{
-		printf("[vulkan_decode] Id of read PPS is out of bounds (%d)! Discarting it.\n", id);
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Id of read PPS is out of bounds (%d)! Discarting it.\n", id);
 		return false;
 	}
 
-	//printf("adding pps: %d - into sps: %d\n", id, pps.seq_parameter_set_id);
 	assert(s->pps_array != NULL);
 	s->pps_array[id] = pps;
 
@@ -3584,7 +3381,6 @@ static void fill_slice_info(struct state_vulkan_decompress *s, slice_info_t *si,
 	assert(si->idr_pic_id == -1 || si->idr_pic_id == sh->idr_pic_id);
 	si->idr_pic_id = sh->idr_pic_id;
 
-	//printf("si->pps_id: %d, sh->pps_id: %d\n", si->pps_id, sh->pic_parameter_set_id);
 	assert(si->pps_id == -1 || si->pps_id == sh->pic_parameter_set_id);
 	si->pps_id = sh->pic_parameter_set_id;
 
@@ -3619,7 +3415,7 @@ static bool handle_sh_nalu(struct state_vulkan_decompress *s, uint8_t *rbsp, int
 
 	if (!read_slice_header(&sh, nal_type, nal_idc, s->pps_array, s->sps_array, &b))
 	{
-		printf("[vulkan_decode] Encountered wrong SPS/PPS ids while reading a slice header! Discarting it.\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Encountered wrong SPS/PPS ids while reading a slice header! Discarting it.\n");
 		return false;
 	}
 	//print_sh(&sh);
@@ -3645,21 +3441,13 @@ static VkDeviceSize handle_vcl(struct state_vulkan_decompress *s,
 										   rbsp, rbsp_len, nal_header, long_startcode);
 	if (written > 0 && *slice_offsets_count < MAX_SLICES)
 	{
-		//printf("\t\tWriting success.\n");
-		//if (nal_type == NAL_H264_IDR) printf("slice offset IDR: %u\n", *bitstream_written);
-		//else printf("slice offset: %u\n", *bitstream_written);
-		/*printf("slice count: %u, slice offset: %u, slice len: %u, header: %u, startcode: %u %u %u %u\n",
-				*slice_offsets_count, bitstream_written, written, nal_header,
-				bitstream[bitstream_written + 0], bitstream[bitstream_written + 1],
-				bitstream[bitstream_written + 2], bitstream[bitstream_written + 3]);*/
-
 		slice_offsets[*slice_offsets_count] = bitstream_written; // pointing at the written startcode
 		*slice_offsets_count += 1;
 
 		slice_info->is_reference = nal_idc > 0;
 		if (nal_idc > slice_info->nal_idc) slice_info->nal_idc = nal_idc;
 	}
-	else printf("\tNAL writing fail!\n");
+	else log_msg(LOG_LEVEL_WARNING, "[vulkan_decode] NAL writing fail!\n");
 
 	return written;
 }
@@ -3680,9 +3468,6 @@ static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_i
 	assert(isH264); //TODO H.265
 
 	// ---Filling infos related to bitstream---
-	//print_sps(&s->sps_array[slice_info.sps_id]);
-	//print_pps(&s->pps_array[slice_info.pps_id]);
-	//printf("is_intra: %d, is_reference: %d, IdrPicFlag: %d\n", slice_info.is_intra, slice_info.is_reference, slice_info.is_intra && slice_info.is_reference);
 	StdVideoDecodeH264PictureInfo h264DecodeStdInfo = { .flags = { .field_pic_flag = 0,
 																   .is_intra = slice_info.is_intra,
 																   .is_reference = slice_info.is_reference,
@@ -3732,9 +3517,8 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
 	const VkExtent2D videoSize = { s->width, s->height };
 
-	int prev_idr_frame_seq = s->idr_frame_seq;
+	//int prev_idr_frame_seq = s->idr_frame_seq;
 	
-	//printf("Current dpb index: %d\n", slice_info->dpbIndex);
 	uint32_t slice_offsets[MAX_SLICES] = { 0 };
 	uint32_t slice_offsets_count = 0; 
 
@@ -3744,27 +3528,23 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 	const VkDeviceSize bitstream_max_size = s->bitstreamBufferSize;
 	assert(bitstream_max_size > 0);
 
-	//DEBUG
-	//VkResult result_wait = vkWaitForFences(s->device, 1, &s->fence, VK_TRUE, 0);
-	//printf("[DEBUG] Wait result: %d!\n", result_wait);
-
 	uint8_t *bitstream = (uint8_t*)begin_bitstream_writing(s);
 	if (bitstream == NULL)
 	{
-		printf("[vulkan_decode] Failed to map needed vulkan memory for NAL units!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to map needed vulkan memory for NAL units!\n");
 		return false;
 	}
 	{
 		const unsigned char *nal = get_next_nal(src, src_len, true), *next_nal = NULL;
 		size_t nal_len = 0;
-		if (nal == NULL) puts("First NAL is NULL");
+		if (nal == NULL) log_msg(LOG_LEVEL_WARNING, "[vulkan_decode] First NAL is NULL!\n");
 
 		while (nal != NULL)
 		{
 			const unsigned char *nal_payload = skip_nal_start_code(nal);
 			if (nal_payload == NULL)
 			{
-				printf("[vulkan_decode] NAL unit does not begin with a start code.\n");
+				log_msg(LOG_LEVEL_WARNING, "[vulkan_decode] Encountered NAL unit that does not begin with a start code.\n");
 				//TODO err flag
 				break;
 			}
@@ -3773,7 +3553,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 			nal_len = next_nal == NULL ? src_len - (nal - src) : next_nal - nal;
 			if (nal_len <= 4 || (size_t)(nal_payload - nal) >= nal_len) //TODO weird?
 			{
-				printf("[vulkan_decode] NAL unit is too short.\n");
+				log_msg(LOG_LEVEL_WARNING, "[vulkan_decode] Encountered too short NAL unit.\n");
 				//TODO err flag
 				break;
 			}
@@ -3784,13 +3564,6 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 
 			unsigned char nalu_header = nal_payload[0];
 			int nalu_type = NALU_HDR_GET_TYPE(nalu_header, !isH264);
-			//int nalu_idc = H264_NALU_HDR_GET_NRI(nalu_header);
-
-			/*printf("\tNALU - input idx: %u, len: %u, header %u: (", nal - src, nal_len, nal_payload[0]);
-			print_nalu_header(nal_payload[0]);
-			printf(") type name - ");
-			print_nalu_name(nalu_type);
-			putchar('\n');*/
 
 			uint8_t *rbsp = NULL;
 			int rbsp_len = 0;
@@ -3817,21 +3590,15 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 											  (uint8_t*)(nal_payload + 1), (int)(nal_payload_len - 1), nalu_header, long_startcode);
 				}
 				
-				//DEBUG
-				//if (written > 0) printf("other NAL written: %u at %u\n", written, bitstream_written);
-				//else printf("\tNAL writing fail!\n");
-				
 				bitstream_written += written;
 			}
 
 			switch(nalu_type)
 			{
 				case NAL_H264_SEI:
-					//puts("\t\tSEI => Skipping.");
 					break; //switch break
 				case NAL_H264_IDR:
 					{
-						//puts("got IDR nal");
 						s->prev_poc_lsb = 0;
 						s->prev_poc_msb = 0;
 						s->idr_frame_seq = frame_seq;
@@ -3872,8 +3639,8 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 
 				//TODO H.265 NAL unit types
 				default:
-					if (isH264) puts("\t\tOther => Skipping.");
-					else puts("\t\tH265 is not implemented yet.");
+					if (isH264) log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Irrelevant NAL unit => Skipping it.\n");
+					if (!isH264) log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] H265 is not implemented!\n");
 					break; //switch break
 			}
 
@@ -3888,22 +3655,20 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 
 	if (slice_offsets_count == 0)
 	{
-		puts("Got no frame data to decode.");
+		log_msg(LOG_LEVEL_WARNING, "[vulkan_decode] Got no video data to decompress!\n");
 		return false;
 	}
 
 	//DEBUG
-	if (slice_info->is_intra && slice_info->is_reference)
-	{
-		printf("Got IDR frame - %d\n", slice_info->idr_pic_id);
-	}
-	//else printf("Got non-IDR frame.\n");
+	//if (slice_info->is_intra && slice_info->is_reference)
+	//		log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Got IDR frame - %d\n", slice_info->idr_pic_id);
+	//else log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Got non-IDR frame.\n");
 
 	assert(s->cmdBuffer != VK_NULL_HANDLE);
 	assert(s->videoSession != VK_NULL_HANDLE);
 	assert(s->videoSessionParams != VK_NULL_HANDLE);
 
-	/*printf("\tframe_seq: %d, frame_num: %d, poc_lsb: %d, pps_id: %d, is_reference: %d, is_intra: %d\n",
+	/*log_msg(LOG_LEVEL_DEBUG, "\tframe_seq: %d, frame_num: %d, poc_lsb: %d, pps_id: %d, is_reference: %d, is_intra: %d\n",
 			slice_info->frame_seq, slice_info->frame_num, slice_info->poc_lsb, slice_info->pps_id,
 			(int)(slice_info->is_reference), slice_info->is_intra);*/
 
@@ -3973,12 +3738,8 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 		assert(slice_info->sps_id < MAX_SPS_IDS); //TODO if
 
 		sps_t *sps = s->sps_array + slice_info->sps_id;
-		//printf("\tprev_msb: %d, prev_lsb: %d, lsb: %d\n", s->prev_poc_msb, s->prev_poc_lsb, slice_info->poc_lsb);
 		slice_info->poc = get_picture_order_count(sps, slice_info->poc_lsb, slice_info->frame_num, slice_info->is_reference,
 												  &s->prev_poc_msb, &s->prev_poc_lsb);
-		
-		//if (slice_info->is_intra && slice_info->is_reference)
-		//printf("\tcalculated poc: %d display_frame_seq: %d\n", slice_info->poc, slice_info->frame_seq - s->idr_frame_seq);
 
 		h264StdInfos[slotInfos_ref_count] = (StdVideoDecodeH264ReferenceInfo){ .flags = { 0 },
 																		   	   .FrameNum = slice_info->frame_num,
@@ -4036,7 +3797,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 	VkResult result = vkQueueSubmit(s->decodeQueue, 1, &submitInfo, s->fence);
 	if (result != VK_SUCCESS)
 	{
-		printf("[vulkan_decode] Failed to submit the decode cmd buffer into queue!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to submit the decode cmd buffer into queue!\n");
 		return false;
 	}
 
@@ -4053,9 +3814,9 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 	result = vkWaitForFences(s->device, 1, &s->fence, VK_TRUE, synchronizationTimeout);
 	if (result != VK_SUCCESS)
 	{
-		if (result == VK_TIMEOUT) printf("[vulkan_decode] Vulkan can't synchronize! -> Timeout reached.\n");
-		else if (result == VK_ERROR_DEVICE_LOST) printf("[vulkan_decode] Vulkan can't synchronize! -> Device lost.\n");
-		else printf("[vulkan_decode] Vulkan can't synchronize! -> Not enough memory.\n");
+		if (result == VK_TIMEOUT) log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Vulkan can't synchronize! -> Timeout reached.\n");
+		else if (result == VK_ERROR_DEVICE_LOST) log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Vulkan can't synchronize! -> Device lost.\n");
+		else log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Vulkan can't synchronize! -> Not enough memory.\n");
 		
 		return false;
 	}
@@ -4064,7 +3825,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 	if (result != VK_SUCCESS)
 	{
 		// should happen only when out of memory
-		printf("[vulkan_decode] Failed to reset vulkan fence!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to reset vulkan fence!\n");
 		return false;
 	}
 
@@ -4079,16 +3840,12 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 									   VK_QUERY_RESULT_WITH_STATUS_BIT_KHR);
 		if (result != VK_SUCCESS)
 		{
-			printf("vkGetQueryPoolResults error: %d!\n", result); //TODO err
+			log_msg(LOG_LEVEL_WARNING, "[vulkan_decode] Get query results returned error: %d!\n", result);
 		}
 		else
 		{
-			/*for (size_t i = 0; i < queryResult_size / sizeof(queryResult[0]); ++i)
-					printf("%d ", queryResult[i]);
-			putchar('\n');*/
-
 			VkQueryResultStatusKHR *status = (VkQueryResultStatusKHR*)queryResult;
-			printf("query result: %d\n", *status);
+			log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Decode query result: %d.\n", *status);
 		}
 	}
 
@@ -4103,10 +3860,9 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 	frame_data_t *decoded_frame = make_new_entry_in_output_queue(s, *slice_info);
 
 	// ---Writing the newly decoded frame data into output queue slot---
-	//if (!write_decoded_frame(s, dst))
 	if (!write_decoded_frame(s, decoded_frame))
 	{
-		printf("[vulkan_decode] Failed to write the decoded frame into the destination buffer!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to write the decoded frame into the destination buffer!\n");
 		return false;
 	}
 
@@ -4117,41 +3873,32 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
                 unsigned int src_len, int frame_seq, struct video_frame_callbacks *callbacks,
                 struct pixfmt_desc *internal_prop)
 {
-	//printf("vulkan_decode - decompress\n");
 	UNUSED(callbacks);
 	struct state_vulkan_decompress *s = (struct state_vulkan_decompress *)state;
-    //printf("\tdst: %p, src: %p, src_len: %u, frame_seq: %d\n",
-	//		dst, src, src_len, frame_seq);
+    //log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Decompress - dst: %p, src: %p, src_len: %u, frame_seq: %d\n",
+	//						 dst, src, src_len, frame_seq);
 	
     decompress_status res = DECODER_NO_FRAME;
 
 	if (s->out_codec == VIDEO_CODEC_NONE)
 	{
-		printf("\tProbing...\n");
+		log_msg(LOG_LEVEL_NOTICE, "[vulkan_decode] Probing...\n");
 
 		*internal_prop = get_pixfmt_desc(I420);
 		return DECODER_GOT_CODEC;
 	}
 
-	if (src_len < 5) //TODO check this
+	if (src_len < 5)
 	{
-		printf("[vulkan_decode] Source buffer too short!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Source buffer is too short!\n");
 		return res;
 	}
-
-	/*unsigned format = src[src_len - 2];
-	int av_depth = 8 + (format >> 4) * 2;
-	int subs_a = ((format >> 2) & 0x3) + 1;
-	int subs_b = ((format >> 1) & 0x1) * subs_a;
-	int av_subsampling = 4000 + subs_a * 100 + subs_b * 10;
-	int av_rgb = format & 0x1;
-	printf("forced pixfmt - depth: %d, subs: %d, rgb: %d\n", av_depth, av_subsampling, av_rgb);*/
 
 	assert(s->codecOperation != VK_VIDEO_CODEC_OPERATION_NONE_KHR);
 
 	if (!s->sps_vps_found && !find_first_sps_vps(s, src, src_len))
 	{
-		puts("\tStill no SPS or VPS found.");
+		log_msg(LOG_LEVEL_NOTICE, "[vulkan_decode] Still no SPS or VPS found.\n");
 		return res;
 	}
 	s->sps_vps_found = true;
@@ -4161,11 +3908,11 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	{
 		if (wrong_pixfmt)
 		{
-			printf("\tFailed to prepare for decompress - wrong pixel format.\n");
+			log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to prepare for decompress - wrong pixel format.\n");
 			return DECODER_UNSUPP_PIXFMT;
 		}
 
-		printf("\tFailed to prepare for decompress.\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to prepare for decompress.\n");
 		return res;
 	}
 	s->prepared = true;
@@ -4174,7 +3921,7 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	s->current_frame_seq = frame_seq;
 	if (frame_seq > prev_frame_seq + 1)
 	{
-		puts("Missed frame!");
+		log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Missed frame.\n");
 		clear_the_ref_slot_queue(s);
 	}
 

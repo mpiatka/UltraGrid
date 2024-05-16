@@ -242,7 +242,7 @@ typedef struct
     } drpm; // decoded ref pic marking
 } slice_header_t;
 
-static void print_pps(const pps_t *pps) //DEBUG
+/*static void print_pps(const pps_t *pps) //DEBUG
 {
 	printf("pic_parameter_set_id: %d, seq_parameter_set_id: %d, num_slice_groups_minus1 %d, slice_group_map_type: %d, "
 			"num_ref_idx_l0_active_minus1 %d, num_ref_idx_l1_active_minus1 %d\n",
@@ -354,7 +354,7 @@ static void print_sh(slice_header_t *sh) //DEBUG
 	//		sh->frame_num, sh->idr_pic_id, sh->slice_type, sh->pic_parameter_set_id, sh->pic_order_cnt_lsb, sh->drpm.long_term_reference_flag);
 	printf("slice_type: %d, ref override: %d, l0 active: %d, l1 active: %d\n",
 			sh->slice_type, sh->num_ref_idx_active_override_flag, sh->num_ref_idx_l0_active_minus1 + 1, sh->num_ref_idx_l1_active_minus1 + 1);
-}
+}*/
 
 static int intlog2(int x)
 {
