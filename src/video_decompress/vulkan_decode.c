@@ -2129,7 +2129,7 @@ static frame_data_t * make_new_entry_in_output_queue(struct state_vulkan_decompr
 	s->outputFrameQueue[queue_index_wrapped] = frame;
 	++(s->outputFrameQueue_count);
 
-	queue_index = output_queue_bubble_index_forward(s, queue_index); // bubble new element and return it's bubbled index
+	//queue_index = output_queue_bubble_index_forward(s, queue_index); // bubble new element and return it's bubbled index
 	// wrap again for updated queue_index
 	queue_index_wrapped = (s->outputFrameQueue_start + queue_index) % s->outputFrameQueue_capacity;
 
@@ -2649,14 +2649,14 @@ static slice_info_t get_ref_slot_from_queue(struct state_vulkan_decompress *s, u
 }
 
 //DEBUG
-/*static void print_ref_queue(struct state_vulkan_decompress *s)
+static void print_ref_queue(struct state_vulkan_decompress *s)
 {
 	for (uint32_t i = 0; i < s->referenceSlotsQueue_count; ++i)
 	{
 		const slice_info_t si = get_ref_slot_from_queue(s, i);
 		printf("%d|%d|%d ", si.dpbIndex, si.nal_idc, si.frame_seq);
 	}
-}*/
+}
 
 static uint32_t smallest_dpb_index_not_in_queue(struct state_vulkan_decompress *s)
 {
@@ -2749,7 +2749,7 @@ static void insert_ref_slot_into_queue(struct state_vulkan_decompress *s, slice_
 	s->referenceSlotsQueue[wrappedIdx] = slice_info;
 	++(s->referenceSlotsQueue_count);
 
-	ref_slot_queue_bubble_index_forward(s, idx);
+	//ref_slot_queue_bubble_index_forward(s, idx);
 }
 
 static void clear_the_ref_slot_queue(struct state_vulkan_decompress *s)
@@ -2761,7 +2761,7 @@ static void clear_the_ref_slot_queue(struct state_vulkan_decompress *s)
 static void fill_ref_picture_infos(struct state_vulkan_decompress *s,
 								   VkVideoReferenceSlotInfoKHR refInfos[], VkVideoPictureResourceInfoKHR picInfos[],
 								   VkVideoDecodeH264DpbSlotInfoKHR h264SlotInfos[], StdVideoDecodeH264ReferenceInfo h264Infos[],								 
-								   uint32_t max_count, bool isH264, uint32_t *out_count)
+								   uint32_t max_count, uint32_t sps_ref_frames_num, bool isH264, uint32_t *out_count)
 {
 	// count is a size of both given arrays (should be at most same as MAX_REF_FRAMES)
 	assert(max_count <= MAX_REF_FRAMES);
@@ -2769,14 +2769,15 @@ static void fill_ref_picture_infos(struct state_vulkan_decompress *s,
 
 	VkExtent2D videoSize = { s->width, s->height };
 
-	uint32_t ref_count = s->referenceSlotsQueue_count;
-	/*printf("Reference queue (%u):\n", ref_count);
+	uint32_t ref_count = min(s->referenceSlotsQueue_count, sps_ref_frames_num);
+	uint32_t ref_offset = s->referenceSlotsQueue_count - ref_count;
+	/*rintf("Reference queue (%u):\n", ref_count);
 	print_ref_queue(s);
 	putchar('\n');*/
 
 	for (uint32_t i = 0; i < max_count && i < ref_count; ++i)
 	{
-		const slice_info_t slice_info = get_ref_slot_from_queue(s, i);
+		const slice_info_t slice_info = get_ref_slot_from_queue(s, ref_offset + i);
 		
 		assert(slice_info.frame_num >= 0);
 		assert(slice_info.dpbIndex < MAX_REF_FRAMES + 1);
@@ -2996,13 +2997,21 @@ static bool get_video_info_from_sps(struct state_vulkan_decompress *s, const uns
 
 	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
 
+	s->profileIdc = profile_idc_to_h264_flag(sps.profile_idc); //TODO H.265
 	s->depth_chroma = sps.bit_depth_chroma_minus8 + 8;
 	s->depth_luma = sps.bit_depth_luma_minus8 + 8;
-	s->subsampling = isH264 ? h264_flag_to_subsampling((StdVideoH264ChromaFormatIdc)sps.chroma_format_idc)
-							: h265_flag_to_subsampling((StdVideoH265ChromaFormatIdc)sps.chroma_format_idc);
-	s->profileIdc = profile_idc_to_h264_flag(sps.profile_idc); //TODO H.265
 
-	//printf("Profile IDC - sps: %d, state: %d\n", sps.profile_idc, (int)s->profileIdc);
+	int chroma_format_idc = 1; // resembles 4:2:0 subsampling
+	// same if as in read_sps parsing function
+	if (sps.profile_idc == 100 || sps.profile_idc == 110 ||
+		sps.profile_idc == 122 || sps.profile_idc == 144)
+	{
+		chroma_format_idc = sps.chroma_format_idc;
+	}
+	//printf("profile_idc: %d, chroma_format_idc: %d\n", sps.profile_idc, chroma_format_idc);
+	s->subsampling = isH264 ? h264_flag_to_subsampling((StdVideoH264ChromaFormatIdc)chroma_format_idc)
+							: h265_flag_to_subsampling((StdVideoH265ChromaFormatIdc)chroma_format_idc);
+	//printf("chroma: %d, luma: %d, subs: %d\n", s->depth_chroma, s->depth_luma, s->subsampling);
 
 	if (s->profileIdc == STD_VIDEO_H264_PROFILE_IDC_INVALID ||
 		s->depth_chroma < 8 ||
@@ -3439,7 +3448,7 @@ static VkDeviceSize handle_vcl(struct state_vulkan_decompress *s,
 
 static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_info, VkDeviceSize bitstreamBufferWritten,
 						 uint32_t slice_offsets[], uint32_t slice_offsets_count,
-						 VkVideoReferenceSlotInfoKHR refSlotInfos[], uint32_t refSlotInfos_count,
+						 VkVideoReferenceSlotInfoKHR refSlotInfos[], uint32_t refSlotInfos_count,// uint32_t take_references,
 						 VkVideoReferenceSlotInfoKHR *dstSlotInfo, VkVideoPictureResourceInfoKHR *dstVideoPicInfo)
 {
 	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
@@ -3451,6 +3460,9 @@ static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_i
 	// for IDR pictures the id must be valid
 	assert(!slice_info.is_intra || !slice_info.is_reference || slice_info.idr_pic_id >= 0);
 	assert(isH264); //TODO H.265
+
+	//assert(take_references >= 0);
+	//assert(take_references <= refSlotInfos_count);
 
 	// ---Filling infos related to bitstream---
 	StdVideoDecodeH264PictureInfo h264DecodeStdInfo = { .flags = { .field_pic_flag = 0,
@@ -3490,8 +3502,10 @@ static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_i
 										// otherwise must not be the same as dstPictureResource
 										.pSetupReferenceSlot = dstSlotInfo,
 										//specifies the needed used references (but not the decoded frame)
+										//TODO take_references
 										.referenceSlotCount = refSlotInfos_count,
-										.pReferenceSlots = refSlotInfos };
+										.pReferenceSlots = refSlotInfos,
+										};
 	vkCmdDecodeVideoKHR(s->cmdBuffer, &decodeInfo);
 }
 
@@ -3705,6 +3719,9 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 	{
 		assert(slice_info->frame_num >= 0 && slice_info->poc_lsb >= 0 &&
 		   	   slice_info->pps_id >= 0 && slice_info->sps_id >= 0);
+		assert(slice_info->sps_id < MAX_SPS_IDS);
+
+		sps_t *sps = s->sps_array + slice_info->sps_id;
 		
 		// Filling the references infos
 		uint32_t slotInfos_ref_count = 0;
@@ -3713,13 +3730,11 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 		VkVideoPictureResourceInfoKHR picInfos[MAX_REF_FRAMES + 1] = { 0 };
 		VkVideoReferenceSlotInfoKHR slotInfos[MAX_REF_FRAMES + 1] = { 0 };
 
-		fill_ref_picture_infos(s, slotInfos, picInfos, h264SlotInfos, h264StdInfos, MAX_REF_FRAMES, isH264, &slotInfos_ref_count);
+		fill_ref_picture_infos(s, slotInfos, picInfos, h264SlotInfos, h264StdInfos, MAX_REF_FRAMES, sps->num_ref_frames,
+							   isH264, &slotInfos_ref_count);
 		assert(slotInfos_ref_count <= MAX_REF_FRAMES);
 
 		// Filling the decoded frame info
-		assert(slice_info->sps_id < MAX_SPS_IDS);
-
-		sps_t *sps = s->sps_array + slice_info->sps_id;
 		slice_info->poc = get_picture_order_count(sps, slice_info->poc_lsb, slice_info->frame_num, slice_info->is_reference,
 												  &s->prev_poc_msb, &s->prev_poc_lsb);
 

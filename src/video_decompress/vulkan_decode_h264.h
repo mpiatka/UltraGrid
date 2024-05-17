@@ -242,7 +242,7 @@ typedef struct
     } drpm; // decoded ref pic marking
 } slice_header_t;
 
-/*static void print_pps(const pps_t *pps) //DEBUG
+static void print_pps(const pps_t *pps) //DEBUG
 {
 	printf("pic_parameter_set_id: %d, seq_parameter_set_id: %d, num_slice_groups_minus1 %d, slice_group_map_type: %d, "
 			"num_ref_idx_l0_active_minus1 %d, num_ref_idx_l1_active_minus1 %d\n",
@@ -264,6 +264,7 @@ static void print_sps(sps_t *sps) //DEBUG
     printf(" level_idc : %d \n", sps->level_idc );
     printf(" seq_parameter_set_id : %d \n", sps->seq_parameter_set_id );
     printf(" chroma_format_idc : %d \n", sps->chroma_format_idc );
+	printf(" separate_colour_plane_flag : %d \n", sps->separate_colour_plane_flag);
     //printf(" residual_colour_transform_flag : %d \n", sps->residual_colour_transform_flag );
     printf(" bit_depth_luma_minus8 : %d \n", sps->bit_depth_luma_minus8 );
     printf(" bit_depth_chroma_minus8 : %d \n", sps->bit_depth_chroma_minus8 );
@@ -347,7 +348,7 @@ static void print_sps(sps_t *sps) //DEBUG
     printf(" time_offset_length : %d \n", sps->hrd.time_offset_length );
 }
 
-static void print_sh(slice_header_t *sh) //DEBUG
+/*static void print_sh(slice_header_t *sh) //DEBUG
 {
 	//printf("field_pic_flag: %d, bottom_field_flag: %d\n", sh->field_pic_flag, sh->bottom_field_flag);
 	//printf("frame_num: %d, idr_pic_id: %d, slice_type: %d, pic_parameter_set_id: %d, poc_lsb: %d, long term: %d\n",
