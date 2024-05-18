@@ -1040,7 +1040,8 @@ static bool read_slice_header(slice_header_t *sh, int nal_type, int nal_idc,
 	return true;
 }
 
-static int32_t get_picture_order_count(const sps_t *sps, int sh_pic_order_cnt_lsb, int sh_frame_num, bool sh_is_reference,
+static int32_t get_picture_order_count(const sps_t *sps, int sh_pic_order_cnt_lsb, int sh_frame_num,
+									   bool sh_is_reference, bool sh_is_idr,
 									   int *prev_poc_msb, int *prev_poc_lsb)
 {
 	// calculates picture order count (POC) for given slice header
@@ -1077,13 +1078,24 @@ static int32_t get_picture_order_count(const sps_t *sps, int sh_pic_order_cnt_ls
 		*prev_poc_lsb = pic_order_cnt_lsb;
 		*prev_poc_msb = pic_order_cnt_msb;
 
-		// final value of PicOrderCnt:
-		//printf("\teturning poc: %d\n", (int32_t)(pic_order_cnt_msb + pic_order_cnt_lsb));
 		return (int32_t)(pic_order_cnt_msb + pic_order_cnt_lsb);
 	}
 	else
 	{
+		// Rec. ITU-T H.264, 8.2.1.3
+		// Assumes there is no memory_management_control_operation == 5
 		// Type 2 POC value calculation:
+
+		if (sh_is_idr) return 0;
+
+		//TODO
+		/*int max_frame_num = 1 << (sps->log2_max_frame_num_minus4 + 4);
+		int frame_num_offset = 0;
+		if (prev_frame_num > sh_frame_num) frame_num_offset = prev_frame_num_offset + max_frame_num;
+		else frame_num_offset = prev_frame_num_offset;
+		
+		return (int32_t)(sh_is_reference ? 2*(frame_num_offset + sh_frame_num) : 2*(frame_num_offset + sh_frame_num) - 1);*/
+		
 		return (int32_t)(sh_is_reference ? 2*sh_frame_num : 2*sh_frame_num - 1);
 	}
 }

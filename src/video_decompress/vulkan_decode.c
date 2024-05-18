@@ -270,7 +270,7 @@ static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader
 
 typedef struct	// structure used to pass around variables related to currently decoded frame (slice)
 {
-	bool is_intra, is_reference;
+	bool is_intra, is_reference, is_idr;
 	int nal_idc;
 	int idr_pic_id;
 	int sps_id;
@@ -3458,7 +3458,7 @@ static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_i
 	assert(bitstreamBufferWrittenAligned <= s->bitstreamBufferSize);
 	assert(slice_offsets_count > 0);
 	// for IDR pictures the id must be valid
-	assert(!slice_info.is_intra || !slice_info.is_reference || slice_info.idr_pic_id >= 0);
+	assert(!slice_info.is_idr || slice_info.idr_pic_id >= 0);
 	assert(isH264); //TODO H.265
 
 	//assert(take_references >= 0);
@@ -3468,8 +3468,7 @@ static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_i
 	StdVideoDecodeH264PictureInfo h264DecodeStdInfo = { .flags = { .field_pic_flag = 0,
 																   .is_intra = slice_info.is_intra,
 																   .is_reference = slice_info.is_reference,
-																	//IDEA maybe introduce new member to slice_info_t for it
-																   .IdrPicFlag = slice_info.is_intra && slice_info.is_reference,
+																   .IdrPicFlag = slice_info.is_idr,
 																   },
 														.seq_parameter_set_id = slice_info.sps_id,
 														.pic_parameter_set_id = slice_info.pps_id,
@@ -3600,6 +3599,9 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 						s->prev_poc_msb = 0;
 						s->idr_frame_seq = frame_seq;
 						s->poc_wrap = 0;
+
+						slice_info->is_idr = true;
+
 						clear_the_ref_slot_queue(s); // we dont need those references anymore
 					}
 					// intentional fallthrough
@@ -3735,7 +3737,8 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 		assert(slotInfos_ref_count <= MAX_REF_FRAMES);
 
 		// Filling the decoded frame info
-		slice_info->poc = get_picture_order_count(sps, slice_info->poc_lsb, slice_info->frame_num, slice_info->is_reference,
+		slice_info->poc = get_picture_order_count(sps, slice_info->poc_lsb, slice_info->frame_num,
+												  slice_info->is_reference, slice_info->is_idr,
 												  &s->prev_poc_msb, &s->prev_poc_lsb);
 
 		h264StdInfos[slotInfos_ref_count] = (StdVideoDecodeH264ReferenceInfo){ .flags = { 0 },
@@ -3923,8 +3926,8 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	}
 
 	// gets filled in parse_and_decode
-	slice_info_t slice_info = { .is_reference = false, .is_intra = false, .nal_idc = 0,
-								.idr_pic_id = -1, .sps_id = -1, .pps_id = -1,
+	slice_info_t slice_info = { .is_reference = false, .is_intra = false, .is_idr = false,
+								.nal_idc = 0, .idr_pic_id = -1, .sps_id = -1, .pps_id = -1,
 								.frame_num = -1, .frame_seq = frame_seq, .poc_lsb = -1,
 								.dpbIndex = smallest_dpb_index_not_in_queue(s) };
 
