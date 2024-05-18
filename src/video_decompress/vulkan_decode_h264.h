@@ -1042,7 +1042,8 @@ static bool read_slice_header(slice_header_t *sh, int nal_type, int nal_idc,
 
 static int32_t get_picture_order_count(const sps_t *sps, int sh_pic_order_cnt_lsb, int sh_frame_num,
 									   bool sh_is_reference, bool sh_is_idr,
-									   int *prev_poc_msb, int *prev_poc_lsb)
+									   int *prev_poc_msb, int *prev_poc_lsb,
+									   int *prev_frame_num, int *prev_frame_num_offset)
 {
 	// calculates picture order count (POC) for given slice header
 	// reference: Section 3 at https://www.vcodex.com/h264avc-picture-management/
@@ -1086,17 +1087,28 @@ static int32_t get_picture_order_count(const sps_t *sps, int sh_pic_order_cnt_ls
 		// Assumes there is no memory_management_control_operation == 5
 		// Type 2 POC value calculation:
 
-		if (sh_is_idr) return 0;
-
-		//TODO
-		/*int max_frame_num = 1 << (sps->log2_max_frame_num_minus4 + 4);
 		int frame_num_offset = 0;
-		if (prev_frame_num > sh_frame_num) frame_num_offset = prev_frame_num_offset + max_frame_num;
-		else frame_num_offset = prev_frame_num_offset;
-		
-		return (int32_t)(sh_is_reference ? 2*(frame_num_offset + sh_frame_num) : 2*(frame_num_offset + sh_frame_num) - 1);*/
-		
-		return (int32_t)(sh_is_reference ? 2*sh_frame_num : 2*sh_frame_num - 1);
+		int tmp_poc = 0;
+
+		if (sh_is_idr)
+		{
+			frame_num_offset = 0;
+			tmp_poc = 0;
+		}
+		else
+		{
+			int max_frame_num = 1 << (sps->log2_max_frame_num_minus4 + 4);
+
+			if (*prev_frame_num > sh_frame_num) frame_num_offset = *prev_frame_num_offset + max_frame_num;
+			else frame_num_offset = *prev_frame_num_offset;
+
+			tmp_poc = (int32_t)(sh_is_reference ? 2*(frame_num_offset + sh_frame_num) : 2*(frame_num_offset + sh_frame_num) - 1);
+		}
+
+		*prev_frame_num = sh_frame_num;
+		*prev_frame_num_offset = frame_num_offset;
+
+		return tmp_poc;
 	}
 }
 

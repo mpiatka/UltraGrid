@@ -345,7 +345,8 @@ struct state_vulkan_decompress
 	uint32_t referenceSlotsQueue_start;			  		// index into referenceSlotsQueue where the queue starts
 	uint32_t referenceSlotsQueue_count;			  		// the current length of the reference slots queue
 
-	int prev_poc_lsb, prev_poc_msb, idr_frame_seq, current_frame_seq, poc_wrap, last_poc;
+	int prev_poc_lsb, prev_poc_msb, prev_frame_num, prev_frame_num_offset;
+	int idr_frame_seq, current_frame_seq, poc_wrap, last_poc;
 	int last_displayed_frame_seq, last_displayed_poc;
 
 	// Output frame data queue
@@ -1126,6 +1127,9 @@ static bool configure_with(struct state_vulkan_decompress *s, struct video_desc 
 
 	s->prev_poc_lsb = 0;
 	s->prev_poc_msb = 0;
+	s->prev_frame_num = 0;
+	s->prev_frame_num_offset = 0;
+
 	s->idr_frame_seq = 0;
 	s->current_frame_seq = 0;
 	s->poc_wrap = 0;
@@ -3597,6 +3601,9 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 					{
 						s->prev_poc_lsb = 0;
 						s->prev_poc_msb = 0;
+						s->prev_frame_num = 0;
+						s->prev_frame_num_offset = 0;
+
 						s->idr_frame_seq = frame_seq;
 						s->poc_wrap = 0;
 
@@ -3739,7 +3746,8 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 		// Filling the decoded frame info
 		slice_info->poc = get_picture_order_count(sps, slice_info->poc_lsb, slice_info->frame_num,
 												  slice_info->is_reference, slice_info->is_idr,
-												  &s->prev_poc_msb, &s->prev_poc_lsb);
+												  &s->prev_poc_msb, &s->prev_poc_lsb,
+												  &s->prev_frame_num, &s->prev_frame_num_offset);
 
 		h264StdInfos[slotInfos_ref_count] = (StdVideoDecodeH264ReferenceInfo){ .flags = { 0 },
 																		   	   .FrameNum = slice_info->frame_num,
