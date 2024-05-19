@@ -137,7 +137,8 @@ static bool load_vulkan_functions_globals(PFN_vkGetInstanceProcAddr loader)
 												loader(NULL, "vkEnumerateInstanceLayerProperties");
 	
 	return vkCreateInstance &&
-		   vkEnumerateInstanceExtensionProperties && vkEnumerateInstanceLayerProperties;
+		   vkEnumerateInstanceExtensionProperties &&
+		   vkEnumerateInstanceLayerProperties;
 }
 
 static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader, VkInstance instance)
@@ -805,11 +806,11 @@ static void * vulkan_decompress_init(void)
 
 	// ---Checking for extensions---
 	const char* const requiredInstanceExtensions[] = {
-						VK_EXT_DEBUG_REPORT_EXTENSION_NAME, //?
+						//VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
 	#ifdef VULKAN_VALIDATE
 						VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
 	#endif
-						VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME, //maxBuffSize
+						VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
 						NULL };
 	
 	if (!check_for_instance_extensions(requiredInstanceExtensions))
@@ -1186,18 +1187,18 @@ static int vulkan_decompress_get_property(void *state, int property, void *val, 
 	struct state_vulkan_decompress *s = (struct state_vulkan_decompress *)state;
     UNUSED(s);
 	
-	int ret = FALSE;
+	int ret = false;
 	switch(property) {
 		case DECOMPRESS_PROPERTY_ACCEPTS_CORRUPTED_FRAME:
 			if(*len >= sizeof(int))
 			{
-				*(int *) val = FALSE;
+				*(int *) val = false;
 				*len = sizeof(int);
-				ret = TRUE;
+				ret = true;
 			}
 			break;
 		default:
-				ret = FALSE;
+				ret = true;
 	}
 
 	return ret;
@@ -1205,14 +1206,13 @@ static int vulkan_decompress_get_property(void *state, int property, void *val, 
 
 static int vulkan_decompress_get_priority(codec_t compression, struct pixfmt_desc internal, codec_t ugc)
 {
-	UNUSED(internal);
-
-	if (ugc != VIDEO_CODEC_NONE && ugc != I420) return 2500;
+	if (ugc != VIDEO_CODEC_NONE && ugc != I420) return 500;
+	if (internal.subsampling != 4200) return 400;
 
 	VkVideoCodecOperationFlagsKHR vulkanFlag = codec_to_vulkan_flag(compression);
 
 	if (vulkanFlag == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR) return 100;
-	if (vulkanFlag == VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR) return 500;
+	if (vulkanFlag == VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR) return -1; //TODO H.265
 
 	return -1; 
 }
@@ -2133,7 +2133,7 @@ static frame_data_t * make_new_entry_in_output_queue(struct state_vulkan_decompr
 	s->outputFrameQueue[queue_index_wrapped] = frame;
 	++(s->outputFrameQueue_count);
 
-	//queue_index = output_queue_bubble_index_forward(s, queue_index); // bubble new element and return it's bubbled index
+	queue_index = output_queue_bubble_index_forward(s, queue_index); // bubble new element and return it's bubbled index
 	// wrap again for updated queue_index
 	queue_index_wrapped = (s->outputFrameQueue_start + queue_index) % s->outputFrameQueue_capacity;
 
@@ -2238,12 +2238,12 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 		return false;
 	}
 	//NOTE: Otherwise vulkan video fails to work (on my hardware)
-	else if (chromaSubsampling != VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR)
+	/*else if (chromaSubsampling != VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR)
 	{
 		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Wrong chroma subsampling! Currently the only supported one is 4:2:0!\n");
 		*wrong_pixfmt = true;
 		return false;
-	}
+	}*/
 
 	VkVideoComponentBitDepthFlagBitsKHR vulkanChromaDepth = depth_to_vulkan_flag(s->depth_chroma);
 	VkVideoComponentBitDepthFlagBitsKHR vulkanLumaDepth = depth_to_vulkan_flag(s->depth_luma);
@@ -2284,8 +2284,16 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	VkResult result = vkGetPhysicalDeviceVideoCapabilitiesKHR(s->physicalDevice, &videoProfile, &videoCapabilities);
 	if (result != VK_SUCCESS)
 	{
-		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to get physical device video capabilities!\n");
-		// it's not obvious if to set '*wrong_pixfmt = true;'
+		if (result == VK_ERROR_FORMAT_NOT_SUPPORTED)
+		{
+			log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Incoming video format is not supported by vulkan or chosen physical device!\n");
+			*wrong_pixfmt = true;
+		}
+		else
+		{
+			log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to get physical device video capabilities (error: %d)!\n", result);
+			// it's not obvious if to set '*wrong_pixfmt = true;'
+		}
 		return false;
 	}
 

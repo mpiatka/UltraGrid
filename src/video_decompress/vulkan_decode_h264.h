@@ -12,7 +12,7 @@
 
 #include "utils/bs.h"
 
-//constants borrowed from NVidia example
+// constants borrowed from NVidia example
 #define MAX_VPS_IDS 16
 #define MAX_SPS_IDS 32
 #define MAX_PPS_IDS 256
