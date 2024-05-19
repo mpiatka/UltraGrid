@@ -676,6 +676,7 @@ static VkPhysicalDevice choose_physical_device(VkPhysicalDevice devices[], uint3
 			log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate properties and/or video_properties arrays!\n");
 			free(properties);
 			free(video_properties);
+			free(query_properties);
 			break;
 		}
 
