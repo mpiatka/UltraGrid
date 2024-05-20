@@ -55,7 +55,9 @@
 // result query prints result value for each decode command (one per decoded frame)
 // typical query result values are: -1 => error, 1 => success, 1000331003 => ???
 // time query prints the execution time of the whole vulkan queue
-#define VULKAN_QUERIES
+//#define VULKAN_QUERIES
+
+#define DECODE_TIMING_CYCLE 500
 
 #define MAX_REF_FRAMES 16
 #define MAX_SLICES 128
@@ -128,6 +130,7 @@ static PFN_vkCreateQueryPool vkCreateQueryPool = NULL;
 static PFN_vkDestroyQueryPool vkDestroyQueryPool = NULL;
 static PFN_vkCmdResetQueryPool vkCmdResetQueryPool = NULL;
 static PFN_vkGetQueryPoolResults vkGetQueryPoolResults = NULL;
+static PFN_vkCmdWriteTimestamp vkCmdWriteTimestamp = NULL;
 
 static bool load_vulkan_functions_globals(PFN_vkGetInstanceProcAddr loader)
 {
@@ -228,6 +231,7 @@ static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader
 	vkDestroyQueryPool = (PFN_vkDestroyQueryPool)loader(instance, "vkDestroyQueryPool");
 	vkCmdResetQueryPool = (PFN_vkCmdResetQueryPool)loader(instance, "vkCmdResetQueryPool");
 	vkGetQueryPoolResults = (PFN_vkGetQueryPoolResults)loader(instance, "vkGetQueryPoolResults");
+	vkCmdWriteTimestamp = (PFN_vkCmdWriteTimestamp)loader(instance, "vkCmdWriteTimestamp");
 
 	return vkDestroyInstance &&
 	#ifdef VULKAN_VALIDATE
@@ -267,7 +271,8 @@ static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader
 		   vkCmdCopyImageToBuffer && vkCmdCopyImage &&
 		   vkCmdPipelineBarrier2KHR && vkGetPhysicalDeviceFormatProperties2 &&
 		   vkCreateQueryPool && vkDestroyQueryPool &&
-		   vkCmdResetQueryPool && vkGetQueryPoolResults;
+		   vkCmdResetQueryPool && vkGetQueryPoolResults &&
+		   vkCmdWriteTimestamp;
 }
 
 typedef struct	// structure used to pass around variables related to currently decoded frame (slice)
@@ -375,6 +380,8 @@ struct state_vulkan_decompress
 	// needs to be destroyed if valid, should be always VK_NULL_HANDLE when VULKAN_QUERIES is not defined
 	VkQueryPool queryPoolTime;
 	float timestampPeriod;
+	float timings[DECODE_TIMING_CYCLE];
+	size_t timings_count;
 };
 
 static void free_buffers(struct state_vulkan_decompress *s);
@@ -1032,6 +1039,11 @@ static void * vulkan_decompress_init(void)
 	s->queryPoolRes = VK_NULL_HANDLE;
 	s->queryPoolTime = VK_NULL_HANDLE;
 	s->timestampPeriod = 0;
+	for (size_t i = 0; i < DECODE_TIMING_CYCLE; ++i)
+	{
+		s->timings[i] = 0.f; //IDEA maybe rather some negative number?
+	}
+	s->timings_count = 0;
 
 	log_msg(LOG_LEVEL_INFO, "[vulkan_decode] Initialization finished successfully.\n");
 	return s;
@@ -1186,6 +1198,9 @@ static int vulkan_decompress_reconfigure(void *state, struct video_desc desc,
 
 	s->pitch = pitch;
 	s->out_codec = out_codec;
+
+	log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Reconfigured with width: %d, height: %d, pitch: %d\n",
+							 desc.width, desc.height, pitch);
 
 	return configure_with(s, desc);
 }
@@ -2222,7 +2237,7 @@ static bool create_queries(struct state_vulkan_decompress *s, VkVideoProfileInfo
 										 	 //.pNext = (void*)profile,
 										 	 .flags = 0,
 										 	 .queryType = VK_QUERY_TYPE_TIMESTAMP,
-										 	 .queryCount = 1 };
+										 	 .queryCount = 2 };
 	result = vkCreateQueryPool(s->device, &createInfoTime, NULL, &s->queryPoolTime);
 	if (result != VK_SUCCESS)
 	{
@@ -2329,8 +2344,8 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	//TODO allow dpb be implemented using only one VkImage
 	if (!(videoCapabilities.flags & VK_VIDEO_CAPABILITY_SEPARATE_REFERENCE_IMAGES_BIT_KHR))
 	{
-		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Chosen physical device does not support separate reference images for DPB!\n");
-		return false;
+		// we dont error out as decoding might still work for some streams (probably when sps.num_ref_frames == 1)
+		log_msg(LOG_LEVEL_WARNING, "[vulkan_decode] Chosen physical device does not support separate reference images for DPB! Decoding might not work.\n");
 	}
 
 	if (videoCapabilities.maxDpbSlots < MAX_REF_FRAMES + 1)
@@ -2553,7 +2568,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	}
 
 	// ---Creating query pool---
-	//TODO
 	VkPhysicalDeviceProperties physDeviceProperties;
 	vkGetPhysicalDeviceProperties(s->physicalDevice, &physDeviceProperties);
 	s->timestampPeriod = physDeviceProperties.limits.timestampPeriod;
@@ -2562,7 +2576,8 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 							 s->timestampPeriod > 0;
 	// is true when VULKAN_QUERIES defined and atleast result query was created successfully
 	bool query_ret = create_queries(s, &videoProfile, enable_time_query);
-	log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Time measuring enabled: %d\n", s->queryPoolTime != VK_NULL_HANDLE);
+	log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Time measuring enabled: %d, timestamp period: %f\n",
+			s->queryPoolTime != VK_NULL_HANDLE, s->timestampPeriod);
 
 	// ---Creating video session---
 	assert(s->videoSession == VK_NULL_HANDLE);
@@ -3730,9 +3745,16 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 
 	// ---Resetting queries if they are enabled---
 	bool enable_queries = s->queryPoolRes != VK_NULL_HANDLE;
+	bool enable_time_queries = s->queryPoolTime != VK_NULL_HANDLE;
 	if (enable_queries)
 	{
 		vkCmdResetQueryPool(s->cmdBuffer, s->queryPoolRes, 0, 1);
+		if (enable_time_queries)
+		{
+			vkCmdResetQueryPool(s->cmdBuffer, s->queryPoolTime, 0, 2);
+			// ---Starting the queue timing---
+			vkCmdWriteTimestamp(s->cmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, s->queryPoolTime, 0);
+		}
 	}
 
 	// ---VkImage layout transfering before video coding scope---
@@ -3835,6 +3857,12 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 	transfer_image_layout(s->cmdBuffer, s->outputChromaPlane,
 						  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
+	// ---Ending the queue timing---
+	if (enable_time_queries)
+	{
+		vkCmdWriteTimestamp(s->cmdBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, s->queryPoolTime, 1);
+	}
+
 	if (!end_cmd_buffer(s))
 	{
 		// relevant err msg printed inside of end_cmd_buffer
@@ -3885,6 +3913,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 	// ---Getting potential query results---
 	if (enable_queries)
 	{
+		// Result query
 		int32_t queryResult[1] = { 0 };
 		size_t queryResult_size = sizeof(queryResult);
 
@@ -3893,12 +3922,48 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 									   VK_QUERY_RESULT_WITH_STATUS_BIT_KHR);
 		if (result != VK_SUCCESS)
 		{
-			log_msg(LOG_LEVEL_WARNING, "[vulkan_decode] Get query results returned error: %d!\n", result);
+			log_msg(LOG_LEVEL_WARNING, "[vulkan_decode] Getting query for decode result returned error: %d!\n", result);
 		}
 		else
 		{
 			VkQueryResultStatusKHR *status = (VkQueryResultStatusKHR*)queryResult;
 			log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Decode query result: %d.\n", *status);
+		}
+
+		// Time query
+		if (enable_time_queries)
+		{
+			uint64_t queryTime[2] = { 0 };
+			size_t queryTime_size = sizeof(queryTime);
+
+			result = vkGetQueryPoolResults(s->device, s->queryPoolTime, 0, 2,
+									   	   queryTime_size, (void*)queryTime, sizeof(uint64_t),
+									   	   VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			if (result != VK_SUCCESS)
+			{
+				log_msg(LOG_LEVEL_WARNING, "[vulkan_decode] Getting query for timing returned error: %d!\n", result);
+			}
+			else
+			{
+				uint64_t elapsedTicks = queryTime[1] - queryTime[0];
+				// timestampPerioud is in ns - 1000000.f division converts it to ms
+				float elapsedTime_in_ms = (float)elapsedTicks * s->timestampPeriod / 1000000.f;
+
+				//log_msg(LOG_LEVEL_NOTICE, "[vulkan_decode] Decode query time: %f ms.\n", elapsedTime_in_ms); //TODO different log level
+				if (s->timings_count >= DECODE_TIMING_CYCLE)
+				{
+					float sum = 0;
+					for (size_t i = 0; i < DECODE_TIMING_CYCLE; ++i) sum += s->timings[i];
+					float average = sum / DECODE_TIMING_CYCLE;
+
+					log_msg(LOG_LEVEL_NOTICE, "[vulkan_decode] Average decode query time: %f ms (per %u frames).\n",
+							average, DECODE_TIMING_CYCLE); //TODO different log level
+					s->timings_count = 0;
+				}
+
+				s->timings[s->timings_count] = elapsedTime_in_ms;
+				++(s->timings_count);
+			}
 		}
 	}
 
