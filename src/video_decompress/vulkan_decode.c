@@ -52,9 +52,10 @@
 //#define VULKAN_VALIDATE_SHOW_SEVERITY VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
 
 // activates vukan queries if defined
-// query prints result value for each decode command (one per decoded frame)
+// result query prints result value for each decode command (one per decoded frame)
 // typical query result values are: -1 => error, 1 => success, 1000331003 => ???
-//#define VULKAN_QUERIES
+// time query prints the execution time of the whole vulkan queue
+#define VULKAN_QUERIES
 
 #define MAX_REF_FRAMES 16
 #define MAX_SLICES 128
@@ -308,6 +309,7 @@ struct state_vulkan_decompress
 	VkPhysicalDevice physicalDevice;
 	VkDevice device;							// needs to be destroyed if valid
 	uint32_t queueFamilyIdx;
+	VkQueueFamilyProperties2 queueFamilyProperties;
 	VkQueue decodeQueue;
 	VkVideoCodecOperationFlagsKHR queueVideoFlags;
 	VkVideoCodecOperationFlagsKHR codecOperation;
@@ -367,8 +369,12 @@ struct state_vulkan_decompress
 	VkDeviceMemory outputImageMemory;
 	VkDeviceSize outputChromaPlaneOffset;
 
-	// vulkan queries
-	VkQueryPool queryPool; // needs to be destroyed if valid, should be always VK_NULL_HANDLE when VULKAN_QUERIES is not defined
+	// Vulkan queries
+	// needs to be destroyed if valid, should be always VK_NULL_HANDLE when VULKAN_QUERIES is not defined
+	VkQueryPool queryPoolRes;
+	// needs to be destroyed if valid, should be always VK_NULL_HANDLE when VULKAN_QUERIES is not defined
+	VkQueryPool queryPoolTime;
+	float timestampPeriod;
 };
 
 static void free_buffers(struct state_vulkan_decompress *s);
@@ -925,11 +931,10 @@ static void * vulkan_decompress_init(void)
 	}
 
 	vkEnumeratePhysicalDevices(s->instance, &physDevices_count, physDevices);
-	VkQueueFamilyProperties2 chosen_queue_family;
 	VkQueueFamilyVideoPropertiesKHR chosen_queue_video_props;
 	s->physicalDevice = choose_physical_device(physDevices, physDevices_count, requestedFamilyQueueFlags,
 											   requiredDeviceExtensions, requireQueries,
-											   &s->queueFamilyIdx, &chosen_queue_family, &chosen_queue_video_props);
+											   &s->queueFamilyIdx, &s->queueFamilyProperties, &chosen_queue_video_props);
 	free(physDevices);
 	if (s->physicalDevice == VK_NULL_HANDLE)
 	{
@@ -944,7 +949,7 @@ static void * vulkan_decompress_init(void)
 	}
 
 	s->queueVideoFlags = chosen_queue_video_props.videoCodecOperations;
-	assert(chosen_queue_family.pNext == NULL && chosen_queue_video_props.pNext == NULL);
+	assert(s->queueFamilyProperties.pNext == NULL && chosen_queue_video_props.pNext == NULL);
 	assert(s->queueVideoFlags != 0);
 
 	VkPhysicalDeviceMaintenance4PropertiesKHR physDevicePropertiesExtra =
@@ -1024,7 +1029,9 @@ static void * vulkan_decompress_init(void)
 	s->outputImageMemory = VK_NULL_HANDLE;
 	s->outputChromaPlaneOffset = 0;
 
-	s->queryPool = VK_NULL_HANDLE;
+	s->queryPoolRes = VK_NULL_HANDLE;
+	s->queryPoolTime = VK_NULL_HANDLE;
+	s->timestampPeriod = 0;
 
 	log_msg(LOG_LEVEL_INFO, "[vulkan_decode] Initialization finished successfully.\n");
 	return s;
@@ -2179,31 +2186,48 @@ static frame_data_t * output_queue_get_next_frame(struct state_vulkan_decompress
 	return NULL;
 }
 
-static bool create_queries(struct state_vulkan_decompress *s, VkVideoProfileInfoKHR *profile)
+static bool create_queries(struct state_vulkan_decompress *s, VkVideoProfileInfoKHR *profile, bool create_timestamp_query)
 {
 	// returns false when VULKAN_QUERIES macro not defined,
-	// otherwise attempts to create query pool with 1 query for decode command,
-	// returns whether the creation was successful
+	// otherwise attempts to create result query pool with 1 query for decode command
+	// and (optionally) query pool with 1 query for time measuring of the decode queue,
+	// returns whether the creation of the result query was successful
 	#ifndef VULKAN_QUERIES
 	UNUSED(s);
 	UNUSED(profile);
 	return false;
 	#else
 	assert(s->device != VK_NULL_HANDLE);
-	assert(s->queryPool == VK_NULL_HANDLE);
+	assert(s->queryPoolRes == VK_NULL_HANDLE);
 
-	// Creating query pool for wanted decode query
-	VkQueryPoolCreateInfo createInfo = { .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
-										 .pNext = (void*)profile,
-										 .flags = 0,
-										 .queryType = VK_QUERY_TYPE_RESULT_STATUS_ONLY_KHR,
-										 .queryCount = 1 };
-	VkResult result = vkCreateQueryPool(s->device, &createInfo, NULL, &s->queryPool);
+	// Creating result query pool for wanted decode query
+	VkQueryPoolCreateInfo createInfoRes = { .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+											.pNext = (void*)profile,
+											.flags = 0,
+											.queryType = VK_QUERY_TYPE_RESULT_STATUS_ONLY_KHR,
+											.queryCount = 1 };
+	VkResult result = vkCreateQueryPool(s->device, &createInfoRes, NULL, &s->queryPoolRes);
 	if (result != VK_SUCCESS)
 	{
-		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan query pool!\n");
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan query pool for decode result!\n");
 		destroy_queries(s); // probably useless
 		return false;
+	}
+
+	if (!create_timestamp_query) return true;
+
+	assert(s->queryPoolTime == VK_NULL_HANDLE);
+	// Optionally create time query pool for time measurment of decode query
+	VkQueryPoolCreateInfo createInfoTime = { .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+										 	 //.pNext = (void*)profile,
+										 	 .flags = 0,
+										 	 .queryType = VK_QUERY_TYPE_TIMESTAMP,
+										 	 .queryCount = 1 };
+	result = vkCreateQueryPool(s->device, &createInfoTime, NULL, &s->queryPoolTime);
+	if (result != VK_SUCCESS)
+	{
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan query pool for time measuring!\n");
+		s->queryPoolTime = VK_NULL_HANDLE;
 	}
 
 	return true;
@@ -2216,9 +2240,13 @@ static void destroy_queries(struct state_vulkan_decompress *s)
 	UNUSED(s);
 	#else
 	if (vkDestroyQueryPool != NULL && s->device != VK_NULL_HANDLE)
-				vkDestroyQueryPool(s->device, s->queryPool, NULL);
+	{
+		vkDestroyQueryPool(s->device, s->queryPoolRes, NULL);
+		vkDestroyQueryPool(s->device, s->queryPoolTime, NULL);
+	}
 	
-	s->queryPool = VK_NULL_HANDLE;
+	s->queryPoolRes = VK_NULL_HANDLE;
+	s->queryPoolTime = VK_NULL_HANDLE;
 	#endif
 }
 
@@ -2525,8 +2553,16 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 	}
 
 	// ---Creating query pool---
-	// is true when VULKAN_QUERIES defined and queries were created successfully
-	bool query_ret = create_queries(s, &videoProfile);
+	//TODO
+	VkPhysicalDeviceProperties physDeviceProperties;
+	vkGetPhysicalDeviceProperties(s->physicalDevice, &physDeviceProperties);
+	s->timestampPeriod = physDeviceProperties.limits.timestampPeriod;
+
+	bool enable_time_query = s->queueFamilyProperties.queueFamilyProperties.timestampValidBits > 0 &&
+							 s->timestampPeriod > 0;
+	// is true when VULKAN_QUERIES defined and atleast result query was created successfully
+	bool query_ret = create_queries(s, &videoProfile, enable_time_query);
+	log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Time measuring enabled: %d\n", s->queryPoolTime != VK_NULL_HANDLE);
 
 	// ---Creating video session---
 	assert(s->videoSession == VK_NULL_HANDLE);
@@ -3495,10 +3531,10 @@ static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_i
 	//TODO H.265
 	VkVideoDecodeH265PictureInfoKHR h265DecodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_PICTURE_INFO_KHR };
 
-	bool enable_queries = s->queryPool != VK_NULL_HANDLE;
+	bool enable_queries = s->queryPoolRes != VK_NULL_HANDLE;
 	VkVideoInlineQueryInfoKHR queryInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_INLINE_QUERY_INFO_KHR,
 											.pNext = isH264 ? (void*)&h264DecodeInfo : (void*)&h265DecodeInfo,
-											.queryPool = s->queryPool,
+											.queryPool = s->queryPoolRes,
 											.firstQuery = 0,
 											.queryCount = 1 };
 
@@ -3693,10 +3729,10 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 	}
 
 	// ---Resetting queries if they are enabled---
-	bool enable_queries = s->queryPool != VK_NULL_HANDLE;
+	bool enable_queries = s->queryPoolRes != VK_NULL_HANDLE;
 	if (enable_queries)
 	{
-		vkCmdResetQueryPool(s->cmdBuffer, s->queryPool, 0, 1);
+		vkCmdResetQueryPool(s->cmdBuffer, s->queryPoolRes, 0, 1);
 	}
 
 	// ---VkImage layout transfering before video coding scope---
@@ -3852,7 +3888,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 		int32_t queryResult[1] = { 0 };
 		size_t queryResult_size = sizeof(queryResult);
 
-		result = vkGetQueryPoolResults(s->device, s->queryPool, 0, 1,
+		result = vkGetQueryPoolResults(s->device, s->queryPoolRes, 0, 1,
 									   queryResult_size, (void*)queryResult, queryResult_size,
 									   VK_QUERY_RESULT_WITH_STATUS_BIT_KHR);
 		if (result != VK_SUCCESS)
