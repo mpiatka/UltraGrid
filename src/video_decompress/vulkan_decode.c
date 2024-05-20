@@ -18,6 +18,7 @@
 #include "lib_common.h"
 #include "video.h"
 #include "video_decompress.h"
+#include "tv.h" //get_time_in_ns
 
 #include "utils/bs.h"
 #include "rtp/rtpdec_h264.h"
@@ -55,7 +56,7 @@
 // result query prints result value for each decode command (one per decoded frame)
 // typical query result values are: -1 => error, 1 => success, 1000331003 => ???
 // time query prints the execution time of the whole vulkan queue
-//#define VULKAN_QUERIES
+#define VULKAN_QUERIES
 
 #define DECODE_TIMING_CYCLE 500
 
@@ -3251,6 +3252,8 @@ static bool write_decoded_frame(struct state_vulkan_decompress *s, frame_data_t 
 	assert(s->outputImageMemory != VK_NULL_HANDLE);
 	assert(dst_frame != NULL);
 
+	time_ns_t t0 = get_time_in_ns(); //DEBUG
+
 	VkDeviceSize lumaSize = s->lumaSize;		// using local variable, otherwise would get bad performance
 	VkDeviceSize chromaSize = s->chromaSize;	// using local variable, otherwise would get bad performance
 	VkDeviceSize size = lumaSize + 2 * chromaSize;
@@ -3270,11 +3273,15 @@ static bool write_decoded_frame(struct state_vulkan_decompress *s, frame_data_t 
 
 	// Translating NV12 into I420:
 	// luma plane
+	time_ns_t t1 = get_time_in_ns(); //DEBUG
+
 	const uint8_t *luma = memory;
 	//for (size_t i = 0; i < lumaSize; ++i) dst_mem[i] = (unsigned char)luma[i]; // could be memcpy I guess
 	memcpy(dst_mem, luma, lumaSize);
 
 	// chroma plane
+	time_ns_t t2 = get_time_in_ns(); //DEBUG
+
 	const uint8_t *chroma = memory + s->outputChromaPlaneOffset;
 	for (size_t i = 0; i < chromaSize; ++i)
 	{
@@ -3284,8 +3291,15 @@ static bool write_decoded_frame(struct state_vulkan_decompress *s, frame_data_t 
 		dst_mem[lumaSize + i] = Cb;
 		dst_mem[lumaSize + chromaSize + i] = Cr;
 	}
+
+	time_ns_t t3 = get_time_in_ns(); //DEBUG
 	
 	vkUnmapMemory(s->device, s->outputImageMemory);
+
+	//DEBUG
+	time_ns_t t4 = get_time_in_ns();
+	//printf("NV12 to I420 - whole: %f ms, luma: %f ms, chroma: %f ms\n",
+	//		(t4 - t0) / NS_IN_MS_DBL, (t2 - t1) / NS_IN_MS_DBL, (t3 - t2) / NS_IN_MS_DBL);
 
 	return true;
 }
@@ -3573,7 +3587,8 @@ static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_i
 }
 
 static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *src, unsigned int src_len,
-							 int frame_seq, slice_info_t *slice_info)
+							 int frame_seq, slice_info_t *slice_info,
+							 time_ns_t *t_parse, time_ns_t *t_decode)
 {
 	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
 	const VkExtent2D videoSize = { s->width, s->height };
@@ -3717,6 +3732,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 	end_bitstream_writing(s);
 	bitstream = NULL; // just to be sure
  	assert(bitstream_written <= bitstream_max_size);
+	*t_parse = get_time_in_ns();
 
 	if (slice_offsets_count == 0)
 	{
@@ -3910,6 +3926,8 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 		return false;
 	}
 
+	*t_decode = get_time_in_ns();
+
 	// ---Getting potential query results---
 	if (enable_queries)
 	{
@@ -3956,8 +3974,8 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 					for (size_t i = 0; i < DECODE_TIMING_CYCLE; ++i) sum += s->timings[i];
 					float average = sum / DECODE_TIMING_CYCLE;
 
-					log_msg(LOG_LEVEL_NOTICE, "[vulkan_decode] Average decode query time: %f ms (per %u frames).\n",
-							average, DECODE_TIMING_CYCLE); //TODO different log level
+					log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Average decode query time: %f ms (per %u frames).\n",
+							average, DECODE_TIMING_CYCLE);
 					s->timings_count = 0;
 				}
 
@@ -4014,6 +4032,8 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 
 	assert(s->codecOperation != VK_VIDEO_CODEC_OPERATION_NONE_KHR);
 
+	time_ns_t t0 = get_time_in_ns();
+
 	if (!s->sps_vps_found && !find_first_sps_vps(s, src, src_len))
 	{
 		log_msg(LOG_LEVEL_NOTICE, "[vulkan_decode] Still no SPS or VPS found.\n");
@@ -4050,8 +4070,10 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 								.dpbIndex = smallest_dpb_index_not_in_queue(s) };
 
 	// potential err msg gets printed inside of parse_and_decode
-	bool ret_decode = parse_and_decode(s, src, src_len, frame_seq, &slice_info);
+	time_ns_t t1 = get_time_in_ns(), t2, t3;
+	bool ret_decode = parse_and_decode(s, src, src_len, frame_seq, &slice_info, &t2, &t3);
 	UNUSED(ret_decode);
+	time_ns_t t4 = get_time_in_ns();
 
 	// ---Getting next frame to be displayed (in display order) from output queue---
 	const frame_data_t *display_frame = output_queue_get_next_frame(s);
@@ -4065,6 +4087,12 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 
 	s->last_displayed_frame_seq = display_frame->frame_seq;
 	s->last_displayed_poc = display_frame->poc;
+
+	time_ns_t t5 = get_time_in_ns();
+
+	log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Decompressing took: %f ms, prepare: %f ms, parse: %f ms, decode: %f ms, get decoded frame: %f ms, copy decoded frame: %f ms.\n",
+							 (t5 - t0) / NS_IN_MS_DBL, (t1 - t0) / NS_IN_MS_DBL, (t2 - t1) / NS_IN_MS_DBL, (t3 - t2) / NS_IN_MS_DBL,
+							 (t4 - t3) / NS_IN_MS_DBL, (t5 - t4) / NS_IN_MS_DBL);
 
     return res;
 };
