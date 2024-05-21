@@ -57,8 +57,15 @@
 // typical query result values are: -1 => error, 1 => success, 1000331003 => ???
 // time query prints the execution time of the whole vulkan queue
 #define VULKAN_QUERIES
+// log level of the result query logging
+#define RESULT_QUERY_LOG_LEVEL
 
+// activates time measuring of the decompress function if defined
+#define DECODE_TIMING
+// cycle of time measurements, after how many frames log the results
 #define DECODE_TIMING_CYCLE 500
+// log level of the timing logs
+#define DECODE_TIMING_LOG_LEVEL LOG_LEVEL_NOTICE
 
 #define MAX_REF_FRAMES 16
 #define MAX_SLICES 128
@@ -380,9 +387,16 @@ struct state_vulkan_decompress
 	VkQueryPool queryPoolRes;
 	// needs to be destroyed if valid, should be always VK_NULL_HANDLE when VULKAN_QUERIES is not defined
 	VkQueryPool queryPoolTime;
+	#ifdef DECODE_TIMING
 	float timestampPeriod;
-	float timings[DECODE_TIMING_CYCLE];
 	size_t timings_count;
+	// time sums are in miliseconds
+	float decompress_time_sum;
+	float parsing_time_sum;
+	float vk_queue_time_sum;
+	float nv12_convert_time_sum;
+	float copy_to_dst_time_sum;
+	#endif
 };
 
 static void free_buffers(struct state_vulkan_decompress *s);
@@ -1040,11 +1054,12 @@ static void * vulkan_decompress_init(void)
 	s->queryPoolRes = VK_NULL_HANDLE;
 	s->queryPoolTime = VK_NULL_HANDLE;
 	s->timestampPeriod = 0;
-	for (size_t i = 0; i < DECODE_TIMING_CYCLE; ++i)
-	{
-		s->timings[i] = 0.f; //IDEA maybe rather some negative number?
-	}
 	s->timings_count = 0;
+	s->decompress_time_sum = 0;
+	s->parsing_time_sum = 0;
+	s->vk_queue_time_sum = 0;
+	s->nv12_convert_time_sum = 0;
+	s->copy_to_dst_time_sum = 0;
 
 	log_msg(LOG_LEVEL_INFO, "[vulkan_decode] Initialization finished successfully.\n");
 	return s;
@@ -2232,19 +2247,20 @@ static bool create_queries(struct state_vulkan_decompress *s, VkVideoProfileInfo
 
 	if (!create_timestamp_query) return true;
 
-	assert(s->queryPoolTime == VK_NULL_HANDLE);
-	// Optionally create time query pool for time measurment of decode query
-	VkQueryPoolCreateInfo createInfoTime = { .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
-										 	 //.pNext = (void*)profile,
-										 	 .flags = 0,
-										 	 .queryType = VK_QUERY_TYPE_TIMESTAMP,
-										 	 .queryCount = 2 };
-	result = vkCreateQueryPool(s->device, &createInfoTime, NULL, &s->queryPoolTime);
-	if (result != VK_SUCCESS)
-	{
-		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan query pool for time measuring!\n");
-		s->queryPoolTime = VK_NULL_HANDLE;
-	}
+	#ifdef DECODE_TIMING
+		assert(s->queryPoolTime == VK_NULL_HANDLE);
+		// Optionally create time query pool for time measurment of decode query
+		VkQueryPoolCreateInfo createInfoTime = { .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+												.flags = 0,
+												.queryType = VK_QUERY_TYPE_TIMESTAMP,
+												.queryCount = 2 };
+		result = vkCreateQueryPool(s->device, &createInfoTime, NULL, &s->queryPoolTime);
+		if (result != VK_SUCCESS)
+		{
+			log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan query pool for time measuring!\n");
+			s->queryPoolTime = VK_NULL_HANDLE;
+		}
+	#endif
 
 	return true;
 	#endif
@@ -2714,14 +2730,14 @@ static slice_info_t get_ref_slot_from_queue(struct state_vulkan_decompress *s, u
 }
 
 //DEBUG
-static void print_ref_queue(struct state_vulkan_decompress *s)
+/*static void print_ref_queue(struct state_vulkan_decompress *s)
 {
 	for (uint32_t i = 0; i < s->referenceSlotsQueue_count; ++i)
 	{
 		const slice_info_t si = get_ref_slot_from_queue(s, i);
 		printf("%d|%d|%d ", si.dpbIndex, si.nal_idc, si.frame_seq);
 	}
-}
+}*/
 
 static uint32_t smallest_dpb_index_not_in_queue(struct state_vulkan_decompress *s)
 {
@@ -3252,15 +3268,11 @@ static bool write_decoded_frame(struct state_vulkan_decompress *s, frame_data_t 
 	assert(s->outputImageMemory != VK_NULL_HANDLE);
 	assert(dst_frame != NULL);
 
-	time_ns_t t0 = get_time_in_ns(); //DEBUG
-
 	VkDeviceSize lumaSize = s->lumaSize;		// using local variable, otherwise would get bad performance
 	VkDeviceSize chromaSize = s->chromaSize;	// using local variable, otherwise would get bad performance
 	VkDeviceSize size = lumaSize + 2 * chromaSize;
 	assert((size_t)size == dst_frame->data_len);
 	assert((size_t)size == s->outputFrameQueue_data_size);
-	//printf("\t%d = %d + 2 * %d\n", size, lumaSize, chromaSize);
-
 	assert(lumaSize <= s->outputChromaPlaneOffset);
 
 	uint8_t *memory = NULL;
@@ -3273,15 +3285,11 @@ static bool write_decoded_frame(struct state_vulkan_decompress *s, frame_data_t 
 
 	// Translating NV12 into I420:
 	// luma plane
-	time_ns_t t1 = get_time_in_ns(); //DEBUG
-
 	const uint8_t *luma = memory;
-	//for (size_t i = 0; i < lumaSize; ++i) dst_mem[i] = (unsigned char)luma[i]; // could be memcpy I guess
+	//for (size_t i = 0; i < lumaSize; ++i) dst_mem[i] = (unsigned char)luma[i];
 	memcpy(dst_mem, luma, lumaSize);
 
 	// chroma plane
-	time_ns_t t2 = get_time_in_ns(); //DEBUG
-
 	const uint8_t *chroma = memory + s->outputChromaPlaneOffset;
 	for (size_t i = 0; i < chromaSize; ++i)
 	{
@@ -3292,14 +3300,7 @@ static bool write_decoded_frame(struct state_vulkan_decompress *s, frame_data_t 
 		dst_mem[lumaSize + chromaSize + i] = Cr;
 	}
 
-	time_ns_t t3 = get_time_in_ns(); //DEBUG
-	
 	vkUnmapMemory(s->device, s->outputImageMemory);
-
-	//DEBUG
-	time_ns_t t4 = get_time_in_ns();
-	//printf("NV12 to I420 - whole: %f ms, luma: %f ms, chroma: %f ms\n",
-	//		(t4 - t0) / NS_IN_MS_DBL, (t2 - t1) / NS_IN_MS_DBL, (t3 - t2) / NS_IN_MS_DBL);
 
 	return true;
 }
@@ -3588,8 +3589,12 @@ static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_i
 
 static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *src, unsigned int src_len,
 							 int frame_seq, slice_info_t *slice_info,
-							 time_ns_t *t_parse, time_ns_t *t_decode)
+							 time_ns_t *parse_time, time_ns_t *queue_time, time_ns_t *convert_time)
 {
+	#ifdef DECODE_TIMING
+		time_ns_t parse_time_begin = get_time_in_ns();
+	#endif
+
 	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
 	const VkExtent2D videoSize = { s->width, s->height };
 
@@ -3732,7 +3737,11 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 	end_bitstream_writing(s);
 	bitstream = NULL; // just to be sure
  	assert(bitstream_written <= bitstream_max_size);
-	*t_parse = get_time_in_ns();
+	
+	#ifdef DECODE_TIMING
+		time_ns_t parse_time_end = get_time_in_ns();
+		*parse_time = parse_time_end - parse_time_begin; 
+	#endif
 
 	if (slice_offsets_count == 0)
 	{
@@ -3926,8 +3935,6 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 		return false;
 	}
 
-	*t_decode = get_time_in_ns();
-
 	// ---Getting potential query results---
 	if (enable_queries)
 	{
@@ -3949,6 +3956,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 		}
 
 		// Time query
+		#ifdef DECODE_TIMING
 		if (enable_time_queries)
 		{
 			uint64_t queryTime[2] = { 0 };
@@ -3964,25 +3972,11 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 			else
 			{
 				uint64_t elapsedTicks = queryTime[1] - queryTime[0];
-				// timestampPerioud is in ns - 1000000.f division converts it to ms
-				float elapsedTime_in_ms = (float)elapsedTicks * s->timestampPeriod / 1000000.f;
-
-				//log_msg(LOG_LEVEL_NOTICE, "[vulkan_decode] Decode query time: %f ms.\n", elapsedTime_in_ms); //TODO different log level
-				if (s->timings_count >= DECODE_TIMING_CYCLE)
-				{
-					float sum = 0;
-					for (size_t i = 0; i < DECODE_TIMING_CYCLE; ++i) sum += s->timings[i];
-					float average = sum / DECODE_TIMING_CYCLE;
-
-					log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Average decode query time: %f ms (per %u frames).\n",
-							average, DECODE_TIMING_CYCLE);
-					s->timings_count = 0;
-				}
-
-				s->timings[s->timings_count] = elapsedTime_in_ms;
-				++(s->timings_count);
+				float elapsedTime_in_ns = (float)elapsedTicks * s->timestampPeriod;
+				*queue_time = (time_ns_t)elapsedTime_in_ns;
 			}
 		}
+		#endif
 	}
 
 	// ---Try to detect if POC wrapping occurred---
@@ -3996,11 +3990,18 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 	frame_data_t *decoded_frame = make_new_entry_in_output_queue(s, *slice_info);
 
 	// ---Writing the newly decoded frame data into output queue slot---
+	#ifdef DECODE_TIMING
+		time_ns_t convert_time_begin = get_time_in_ns(); 
+	#endif
 	if (!write_decoded_frame(s, decoded_frame))
 	{
 		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to write the decoded frame into the destination buffer!\n");
 		return false;
 	}
+	#ifdef DECODE_TIMING
+		time_ns_t convert_time_end = get_time_in_ns();
+		*convert_time = convert_time_end - convert_time_begin;
+	#endif
 
 	return true;
 }
@@ -4009,6 +4010,8 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
                 unsigned int src_len, int frame_seq, struct video_frame_callbacks *callbacks,
                 struct pixfmt_desc *internal_prop)
 {
+	time_ns_t decompress_time_begin = get_time_in_ns();
+
 	UNUSED(callbacks);
 	struct state_vulkan_decompress *s = (struct state_vulkan_decompress *)state;
     //log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Decompress - dst: %p, src: %p, src_len: %u, frame_seq: %d\n",
@@ -4031,8 +4034,6 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	}
 
 	assert(s->codecOperation != VK_VIDEO_CODEC_OPERATION_NONE_KHR);
-
-	time_ns_t t0 = get_time_in_ns();
 
 	if (!s->sps_vps_found && !find_first_sps_vps(s, src, src_len))
 	{
@@ -4070,10 +4071,10 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 								.dpbIndex = smallest_dpb_index_not_in_queue(s) };
 
 	// potential err msg gets printed inside of parse_and_decode
-	time_ns_t t1 = get_time_in_ns(), t2, t3;
-	bool ret_decode = parse_and_decode(s, src, src_len, frame_seq, &slice_info, &t2, &t3);
+	time_ns_t parse_time = 0, queue_time = 0, nv12_convert_time = 0;
+	bool ret_decode = parse_and_decode(s, src, src_len, frame_seq, &slice_info,
+									   &parse_time, &queue_time, &nv12_convert_time);
 	UNUSED(ret_decode);
-	time_ns_t t4 = get_time_in_ns();
 
 	// ---Getting next frame to be displayed (in display order) from output queue---
 	const frame_data_t *display_frame = output_queue_get_next_frame(s);
@@ -4082,17 +4083,50 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
 	else res = DECODER_GOT_FRAME;
 
 	// ---Copying data of display frame into dst buffer---
+	#ifdef DECODE_TIMING
+		time_ns_t copy_to_dst_begin = get_time_in_ns();
+	#endif
 	uint8_t *display_data = s->outputFrameQueue_data + display_frame->data_idx * s->outputFrameQueue_data_size;
 	memcpy(dst, display_data, display_frame->data_len);
 
 	s->last_displayed_frame_seq = display_frame->frame_seq;
 	s->last_displayed_poc = display_frame->poc;
 
-	time_ns_t t5 = get_time_in_ns();
+	#ifdef DECODE_TIMING
+		time_ns_t copy_to_dst_end = get_time_in_ns();
+		time_ns_t copy_to_dst_time = copy_to_dst_end - copy_to_dst_begin;
+		time_ns_t decompress_time = copy_to_dst_end - decompress_time_begin;
 
-	log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Decompressing took: %f ms, prepare: %f ms, parse: %f ms, decode: %f ms, get decoded frame: %f ms, copy decoded frame: %f ms.\n",
-							 (t5 - t0) / NS_IN_MS_DBL, (t1 - t0) / NS_IN_MS_DBL, (t2 - t1) / NS_IN_MS_DBL, (t3 - t2) / NS_IN_MS_DBL,
-							 (t4 - t3) / NS_IN_MS_DBL, (t5 - t4) / NS_IN_MS_DBL);
+		if (s->timings_count >= DECODE_TIMING_CYCLE)
+		{
+			float avg_decompress_time = s->decompress_time_sum / DECODE_TIMING_CYCLE;
+			float avg_parsing_time = s->parsing_time_sum / DECODE_TIMING_CYCLE;
+			float avg_vk_queue_time = s->vk_queue_time_sum / DECODE_TIMING_CYCLE;
+			float avg_nv12_convert_time = s->nv12_convert_time_sum / DECODE_TIMING_CYCLE;
+			float avg_copy_to_dst_time = s->copy_to_dst_time_sum / DECODE_TIMING_CYCLE;
+
+			log_msg(DECODE_TIMING_LOG_LEVEL, "[vulkan_decode] Average times (per %u frames) - decompress: %f ms, parsing: %f ms, "
+											"vk_queue: %f ms, nv12_convert: %f ms, copy_to_dst: %f ms.\n",
+											DECODE_TIMING_CYCLE, avg_decompress_time, avg_parsing_time,
+											avg_vk_queue_time, avg_nv12_convert_time, avg_copy_to_dst_time);
+			
+			s->decompress_time_sum = 0;
+			s->parsing_time_sum = 0;
+			s->vk_queue_time_sum = 0;
+			s->nv12_convert_time_sum = 0;
+			s->copy_to_dst_time_sum = 0;
+			
+			s->timings_count = 0;
+		}
+
+		s->decompress_time_sum += (float)decompress_time / NS_IN_MS_DBL;
+		s->parsing_time_sum += (float)parse_time / NS_IN_MS_DBL;
+		s->vk_queue_time_sum += (float)queue_time / NS_IN_MS_DBL;
+		s->nv12_convert_time_sum += (float)nv12_convert_time / NS_IN_MS_DBL;
+		s->copy_to_dst_time_sum += (float)copy_to_dst_time / NS_IN_MS_DBL;
+
+		++(s->timings_count);
+	#endif
 
     return res;
 };

@@ -242,7 +242,7 @@ typedef struct
     } drpm; // decoded ref pic marking
 } slice_header_t;
 
-static void print_pps(const pps_t *pps) //DEBUG
+/*static void print_pps(const pps_t *pps) //DEBUG
 {
 	printf("pic_parameter_set_id: %d, seq_parameter_set_id: %d, num_slice_groups_minus1 %d, slice_group_map_type: %d, "
 			"num_ref_idx_l0_active_minus1 %d, num_ref_idx_l1_active_minus1 %d\n",
@@ -346,7 +346,7 @@ static void print_sps(sps_t *sps) //DEBUG
     printf(" cpb_removal_delay_length_minus1 : %d \n", sps->hrd.cpb_removal_delay_length_minus1 );
     printf(" dpb_output_delay_length_minus1 : %d \n", sps->hrd.dpb_output_delay_length_minus1 );
     printf(" time_offset_length : %d \n", sps->hrd.time_offset_length );
-}
+}*/
 
 /*static void print_sh(slice_header_t *sh) //DEBUG
 {
