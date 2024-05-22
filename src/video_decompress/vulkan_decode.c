@@ -58,7 +58,7 @@
 // time query prints the execution time of the whole vulkan queue
 #define VULKAN_QUERIES
 // log level of the result query logging
-#define RESULT_QUERY_LOG_LEVEL
+#define RESULT_QUERY_LOG_LEVEL LOG_LEVEL_DEBUG
 
 // activates time measuring of the decompress function if defined
 #define DECODE_TIMING
@@ -142,6 +142,7 @@ static PFN_vkCmdWriteTimestamp vkCmdWriteTimestamp = NULL;
 
 static bool load_vulkan_functions_globals(PFN_vkGetInstanceProcAddr loader)
 {
+	// Loads vulkan functions that do not need VkInstance
 	vkCreateInstance = (PFN_vkCreateInstance)loader(NULL, "vkCreateInstance");
 	vkEnumerateInstanceExtensionProperties = (PFN_vkEnumerateInstanceExtensionProperties)
 												loader(NULL, "vkEnumerateInstanceExtensionProperties");
@@ -155,6 +156,7 @@ static bool load_vulkan_functions_globals(PFN_vkGetInstanceProcAddr loader)
 
 static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader, VkInstance instance)
 {
+	// Loads the rest of used Vulkan functions (those that need VkInstance)
 	vkDestroyInstance = (PFN_vkDestroyInstance)loader(instance, "vkDestroyInstance");
 	#ifdef VULKAN_VALIDATE
 	vkCreateDebugUtilsMessengerEXT = (PFN_vkCreateDebugUtilsMessengerEXT)
@@ -297,7 +299,7 @@ typedef struct	// structure used to pass around variables related to currently d
 
 } slice_info_t;
 
-typedef struct
+typedef struct	// structure representing output frame, stored in outputFrameQueue
 {
 	size_t data_idx; // index (data_idx * s->outputFrameQueue_data_size) into s->outputFrameQueue_data
 	size_t data_len; // now is the same as s->outputFrameQueue_data_size
@@ -308,7 +310,7 @@ typedef struct
 	int poc_wrap;
 } frame_data_t;
 
-struct state_vulkan_decompress
+struct state_vulkan_decompress // state of vulkan_decode module
 {
 #ifdef VK_USE_PLATFORM_WIN32_KHR
 	HMODULE vulkanLib;							// needs to be destroyed if valid
@@ -399,6 +401,7 @@ struct state_vulkan_decompress
 	#endif
 };
 
+
 static void free_buffers(struct state_vulkan_decompress *s);
 static void destroy_output_image(struct state_vulkan_decompress *s);
 static void destroy_dpb(struct state_vulkan_decompress *s);
@@ -407,6 +410,8 @@ static void destroy_queries(struct state_vulkan_decompress *s);
 
 static bool load_vulkan(struct state_vulkan_decompress *s)
 {
+	// This function dynamically loads the Vulkan Loader in a manner relevant to your OS,
+	// returns true when success
 	#ifdef VK_USE_PLATFORM_WIN32_KHR // windows
 	const char vulkan_lib_filename[] = "vulkan-1.dll";
 	const char vulkan_proc_name[] = "vkGetInstanceProcAddr";
@@ -448,6 +453,7 @@ static bool load_vulkan(struct state_vulkan_decompress *s)
 
 static void unload_vulkan(struct state_vulkan_decompress *s)
 {
+	// Unload the dynamically loaded Vulkan Loader
 	#ifdef VK_USE_PLATFORM_WIN32_KHR
 	FreeLibrary(s->vulkanLib);
 	#else
@@ -455,13 +461,14 @@ static void unload_vulkan(struct state_vulkan_decompress *s)
 	#endif
 }
 
-static bool check_for_instance_extensions(const char * const requiredInstanceextensions[])
+static bool check_for_instance_extensions(const char * const requiredInstanceExtensions[])
 {
+	// Checks whether Vulkan on the system is supporting given instance extensions
 	uint32_t extensions_count = 0;
 	vkEnumerateInstanceExtensionProperties(NULL, &extensions_count, NULL);
 	if (extensions_count == 0)
 	{
-		if (requiredInstanceextensions[0] != NULL)
+		if (requiredInstanceExtensions[0] != NULL)
 		{
 			log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] No instance extensions supported.\n");
 			return false;
@@ -481,12 +488,12 @@ static bool check_for_instance_extensions(const char * const requiredInstanceext
 	vkEnumerateInstanceExtensionProperties(NULL, &extensions_count, extensions);
 
 	// Checking for required ones
-	for (size_t i = 0; requiredInstanceextensions[i] != NULL; ++i)
+	for (size_t i = 0; requiredInstanceExtensions[i] != NULL; ++i)
 	{
 		bool found = false;
 		for (uint32_t j = 0; j < extensions_count; ++j)
 		{
-			if (!strcmp(requiredInstanceextensions[i], extensions[j].extensionName))
+			if (!strcmp(requiredInstanceExtensions[i], extensions[j].extensionName))
 			{
 				found = true;
 				break;
@@ -496,7 +503,7 @@ static bool check_for_instance_extensions(const char * const requiredInstanceext
 		if (!found)
 		{
 			log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Required instance extension: '%s' was not found!\n",
-									 requiredInstanceextensions[i]);
+									 requiredInstanceExtensions[i]);
 			free(extensions);
 			return false;
 		}
@@ -509,6 +516,7 @@ static bool check_for_instance_extensions(const char * const requiredInstanceext
 #ifdef VULKAN_VALIDATE
 static bool check_for_validation_layers(const char * const validationLayers[])
 {
+	// Checks whether Vulkan on the system is supporting given validation layers
 	uint32_t properties_count = 0;
 	VkResult result = vkEnumerateInstanceLayerProperties(&properties_count, NULL);
 	if (result != VK_SUCCESS) return false;
@@ -546,6 +554,7 @@ static bool check_for_validation_layers(const char * const validationLayers[])
 
 static bool check_for_device_extensions(VkPhysicalDevice physDevice, const char* const requiredDeviceExtensions[])
 {
+	// Checks whether the given physical device supports given device extensions
 	uint32_t extensions_count = 0;
 	vkEnumerateDeviceExtensionProperties(physDevice, NULL, &extensions_count, NULL);
 	if (extensions_count == 0)
@@ -602,10 +611,11 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
 								const VkDebugUtilsMessengerCallbackDataEXT*      pCallbackData,
 								void*                                            pUserData)
 {
+	// This function is called when vulkan validation layers want to print something on the output
 	UNUSED(messageTypes);
 	UNUSED(pUserData);
 
-	if (messageSeverity >= VULKAN_VALIDATE_SHOW_SEVERITY)
+	if (messageSeverity >= VULKAN_VALIDATE_SHOW_SEVERITY) // filter messages by severity
 	{
 		log_msg(LOG_LEVEL_WARNING, "VULKAN VALIDATION: '%s'\n", pCallbackData->pMessage);
 	}
@@ -615,6 +625,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
 
 static VkResult create_debug_messenger(VkInstance instance, VkDebugUtilsMessengerEXT *debugMessenger_ptr)
 {
+	// Creates the debug messenge with debug_callback
 	VkDebugUtilsMessengerCreateInfoEXT messengerCreateInfo = { .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
 												   			   .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
 								 				   			 	VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
@@ -631,9 +642,9 @@ static VkResult create_debug_messenger(VkInstance instance, VkDebugUtilsMessenge
 
 static void destroy_debug_messenger(VkInstance instance, VkDebugUtilsMessengerEXT debugMessenger)
 {
-	//destroys debug messenger when VULKAN_VALIDATE is defined and destructor exists
-	//this function is defined even when VULKAN_VALIDATE is not just to avoid too many
-	//ifdefs everywhere where destroying needs to happen
+	// Destroys debug messenger when VULKAN_VALIDATE is defined and destructor exists
+	// this function is defined even when VULKAN_VALIDATE is not just to avoid too many
+	// ifdefs everywhere where destroying needs to happen
 	#ifdef VULKAN_VALIDATE
 	if (vkDestroyDebugUtilsMessengerEXT != NULL && instance != VK_NULL_HANDLE)
 				vkDestroyDebugUtilsMessengerEXT(instance, debugMessenger, NULL);
@@ -1082,6 +1093,7 @@ static void free_video_session_memory(struct state_vulkan_decompress *s)
 
 static void vulkan_decompress_done(void *state)
 {
+	// Free all allocated resources
 	struct state_vulkan_decompress *s = (struct state_vulkan_decompress *)state;
 	if (!s) return;
 
@@ -1135,6 +1147,7 @@ static VkVideoCodecOperationFlagsKHR codec_to_vulkan_flag(codec_t codec)
 
 static bool configure_with(struct state_vulkan_decompress *s, struct video_desc desc)
 {
+	// Configures module with given video parameters, returns true if success
 	const char *spec_name = get_codec_name_long(desc.color_spec);
 
 	s->codecOperation = VK_VIDEO_CODEC_OPERATION_NONE_KHR;
@@ -1208,9 +1221,6 @@ static int vulkan_decompress_reconfigure(void *state, struct video_desc desc,
 	UNUSED(rshift);
 	UNUSED(gshift);
 	UNUSED(bshift);
-	/*s->rshift = rshift;
-	s->gshift = gshift;
-	s->bshift = bshift;*/
 
 	s->pitch = pitch;
 	s->out_codec = out_codec;
@@ -1245,8 +1255,8 @@ static int vulkan_decompress_get_property(void *state, int property, void *val, 
 
 static int vulkan_decompress_get_priority(codec_t compression, struct pixfmt_desc internal, codec_t ugc)
 {
-	if (ugc != VIDEO_CODEC_NONE && ugc != I420) return 500;
-	if (internal.subsampling != 4200) return 400;
+	if (ugc != VIDEO_CODEC_NONE && ugc != I420) return 500; // I420 is currently only supported output codec
+	if (internal.subsampling != 4200) return 400; // we currently do not support other subsampling
 
 	VkVideoCodecOperationFlagsKHR vulkanFlag = codec_to_vulkan_flag(compression);
 
@@ -1323,6 +1333,7 @@ static bool check_format(const VkVideoFormatPropertiesKHR *props, const VkFormat
 static bool check_for_vulkan_format(VkPhysicalDevice physDevice, VkPhysicalDeviceVideoFormatInfoKHR videoFormatInfo,
 									VkVideoFormatPropertiesKHR *formatProperties)
 {
+	// Tries to find usable VkFormat, if success return true and set the output formatProperties with the found format
 	uint32_t properties_count = 0;
 
 	VkResult result = vkGetPhysicalDeviceVideoFormatPropertiesKHR(physDevice, &videoFormatInfo,
@@ -1407,6 +1418,8 @@ static bool check_for_vulkan_format(VkPhysicalDevice physDevice, VkPhysicalDevic
 static bool find_memory_type(struct state_vulkan_decompress *s, uint32_t typeFilter,
 								 VkMemoryPropertyFlags reqProperties, uint32_t *idx)
 {
+	// Tries to find index of memory type that support wanted properties
+	// if success return true and set the memory type index
 	assert(s->physicalDevice != VK_NULL_HANDLE);
 
 	VkPhysicalDeviceMemoryProperties memoryProperties = { 0 };
@@ -1430,6 +1443,7 @@ static bool find_memory_type(struct state_vulkan_decompress *s, uint32_t typeFil
 static bool allocate_buffers(struct state_vulkan_decompress *s, VkVideoProfileListInfoKHR videoProfileList,
 							 const VkVideoCapabilitiesKHR videoCapabilities)
 {
+	// allocates VkBuffer and it's memory for bitstream, returns true if success
 	assert(s->bitstreamBuffer == VK_NULL_HANDLE);
 	assert(s->bitstreamBufferMemory == VK_NULL_HANDLE);
 
@@ -1514,6 +1528,7 @@ static void free_buffers(struct state_vulkan_decompress *s)
 
 static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
 {
+	// allocates needed memory for vulkan video session, returns true if success
 	assert(s->device != VK_NULL_HANDLE);
 	assert(s->videoSession != VK_NULL_HANDLE);
 	assert(s->videoSessionMemory == NULL); // videoSessionMemory should be properly freed beforehand
@@ -1614,8 +1629,8 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
 
 static bool begin_cmd_buffer(struct state_vulkan_decompress *s)
 {
-	//maybe pointless since VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT flag
-	VkResult result = vkResetCommandBuffer(s->cmdBuffer, 0);
+	// Puts the cmd buffer into recording state
+	VkResult result = vkResetCommandBuffer(s->cmdBuffer, 0); // maybe pointless since VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT flag
 	if (result != VK_SUCCESS)
 	{
 		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to reset the vulkan command buffer!\n");
@@ -1636,6 +1651,7 @@ static bool begin_cmd_buffer(struct state_vulkan_decompress *s)
 
 static bool end_cmd_buffer(struct state_vulkan_decompress *s)
 {
+	// Ends the recording of the cmd buffer
 	VkResult result = vkEndCommandBuffer(s->cmdBuffer);
 	if (result == VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR)
 	{
@@ -1722,6 +1738,7 @@ static void transfer_image_layout(VkCommandBuffer cmdBuffer, VkImage image,
 
 static bool create_output_image(struct state_vulkan_decompress *s)
 {
+	// creates VkImage handles and underlying memory for decoded output image, returns true if success
 	assert(s->device != VK_NULL_HANDLE);
 	assert(s->outputLumaPlane == VK_NULL_HANDLE);
 	assert(s->outputChromaPlane == VK_NULL_HANDLE);
@@ -2104,6 +2121,7 @@ static size_t get_unused_output_queue_data_index(struct state_vulkan_decompress 
 
 static void output_queue_swap_frames(struct state_vulkan_decompress *s, size_t index1, size_t index2)
 {
+	// swaps two frames in the output queue on given indices
 	assert(index1 != index2);
 	assert(index1 < s->outputFrameQueue_count);
 	assert(index2 < s->outputFrameQueue_count);
@@ -2149,6 +2167,9 @@ static size_t output_queue_bubble_index_forward(struct state_vulkan_decompress *
 
 static frame_data_t * make_new_entry_in_output_queue(struct state_vulkan_decompress *s, slice_info_t slice_info)
 {
+	// makes a new entry in the output queue and returns pointer to it,
+	// if the queue was full then it drops the first frame in it,
+	// it attempts to keep the output queue sorted by bubbling the newly added frame in regard to display order
 	assert(s->outputFrameQueue_count <= s->outputFrameQueue_capacity);
 
 	if (s->outputFrameQueue_count == s->outputFrameQueue_capacity) // the output queue is full => make space
@@ -2193,8 +2214,10 @@ static frame_data_t * output_queue_pop_first(struct state_vulkan_decompress *s)
 
 static frame_data_t * output_queue_get_next_frame(struct state_vulkan_decompress *s)
 {
-	//output_queue_print(s);
+	// returns the first frame from the queue or NULL
+	// it tries to deduce if the first frame in the output queue should be displayed now or some time later
 
+	//output_queue_print(s);
 	if (s->outputFrameQueue_count == 0)
 	{
 		return NULL; // empty queue case
@@ -2284,6 +2307,7 @@ static void destroy_queries(struct state_vulkan_decompress *s)
 
 static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 {
+	// allocates all needed resources for video decoding that were not allocated/initialized in init
 	assert(!s->prepared); //this function should be called only when decompress is not prepared
 
 	*wrong_pixfmt = false;
@@ -2888,6 +2912,7 @@ static void fill_ref_picture_infos(struct state_vulkan_decompress *s,
 
 static void begin_video_coding_scope(struct state_vulkan_decompress *s, VkVideoReferenceSlotInfoKHR *slotInfos, uint32_t slotInfos_count)
 {
+	// starts the video coding scope with given slots
 	VkVideoBeginCodingInfoKHR beginCodingInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_BEGIN_CODING_INFO_KHR,
 												  .flags = 0,
 												  .videoSession = s->videoSession,
@@ -3059,6 +3084,7 @@ static void destroy_rbsp(uint8_t *rbsp)
 
 static bool get_video_info_from_sps(struct state_vulkan_decompress *s, const unsigned char *sps_src, size_t sps_src_len)
 {
+	// extracts the important info about incoming video from SPS NAL data given by sps_src pointer
 	uint8_t *rbsp = NULL;
 	int rbsp_len = 0;
 
@@ -3159,6 +3185,7 @@ static bool find_first_sps_vps(struct state_vulkan_decompress *s, const unsigned
 
 static void * begin_bitstream_writing(struct state_vulkan_decompress *s)
 {
+	// maps the bitstream memory and returns pointer onto it's beginning
 	void *memoryPtr = NULL;
 
 	VkResult result = vkMapMemory(s->device, s->bitstreamBufferMemory, 0, VK_WHOLE_SIZE, 0, &memoryPtr);
@@ -3203,6 +3230,7 @@ static VkDeviceSize write_bitstream(uint8_t *bitstream, VkDeviceSize bitstream_l
 
 static void end_bitstream_writing(struct state_vulkan_decompress *s)
 {
+	// unmaps the mapped memory for bitstream
 	if (vkUnmapMemory == NULL || s->device == VK_NULL_HANDLE) return;
 
 	vkUnmapMemory(s->device, s->bitstreamBufferMemory);
@@ -3228,6 +3256,7 @@ static bool detect_poc_wrapping(struct state_vulkan_decompress *s)
 
 static void copy_decoded_image(struct state_vulkan_decompress *s, VkImage srcDpbImage)
 {
+	// copy the data of decoded image (data on GPU) to images that have memory on CPU
 	assert(s->cmdBuffer != VK_NULL_HANDLE);
 	assert(s->outputLumaPlane != VK_NULL_HANDLE);
 	assert(s->outputLumaPlane != VK_NULL_HANDLE);
@@ -3264,6 +3293,9 @@ static void copy_decoded_image(struct state_vulkan_decompress *s, VkImage srcDpb
 
 static bool write_decoded_frame(struct state_vulkan_decompress *s, frame_data_t *dst_frame)
 {
+	// writes data of decoded frame from luma and chroma planes into dst_frame
+	// assumes that decoded frame is in NV12 format and output is wanted in I42O format,
+	// so it manually does the conversion 
 	assert(s->device != VK_NULL_HANDLE);
 	assert(s->outputImageMemory != VK_NULL_HANDLE);
 	assert(dst_frame != NULL);
@@ -3449,6 +3481,7 @@ static bool handle_pps_nalu(struct state_vulkan_decompress *s, uint8_t *rbsp, in
 
 static void fill_slice_info(struct state_vulkan_decompress *s, slice_info_t *si, const slice_header_t *sh)
 {
+	// fills important info from slice header into slice info struct
 	si->is_intra = sh->slice_type == SH_SLICE_TYPE_I || sh->slice_type == SH_SLICE_TYPE_I_ONLY;
 
 	assert(si->idr_pic_id == -1 || si->idr_pic_id == sh->idr_pic_id);
@@ -3502,6 +3535,7 @@ static VkDeviceSize handle_vcl(struct state_vulkan_decompress *s,
 							   uint8_t *rbsp, int rbsp_len, unsigned char nal_header, slice_info_t *slice_info,
 							   uint32_t slice_offsets[], uint32_t *slice_offsets_count, bool long_startcode)
 {
+	// handles nal data related to slices
 	bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
 	assert(isH264); //TODO H.265
 	int nal_type = NALU_HDR_GET_TYPE(nal_header, !isH264);
@@ -3591,6 +3625,9 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 							 int frame_seq, slice_info_t *slice_info,
 							 time_ns_t *parse_time, time_ns_t *queue_time, time_ns_t *convert_time)
 {
+	// first parses the data from src buffer and then it attempts to decode it,
+	// decoded frame is then inserted into reference queue and in converted format also into output queue 
+	// returns true if success (there's new decoded frame in output queue)
 	#ifdef DECODE_TIMING
 		time_ns_t parse_time_begin = get_time_in_ns();
 	#endif
@@ -3952,7 +3989,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 		else
 		{
 			VkQueryResultStatusKHR *status = (VkQueryResultStatusKHR*)queryResult;
-			log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Decode query result: %d.\n", *status);
+			log_msg(RESULT_QUERY_LOG_LEVEL, "[vulkan_decode] Decode query result: %d.\n", *status);
 		}
 
 		// Time query
