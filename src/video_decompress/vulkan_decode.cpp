@@ -104,7 +104,7 @@ struct state_vulkan_decompress // state of vulkan_decode module
         VkQueueFamilyProperties2 queueFamilyProperties;
         VkQueue decodeQueue;
         VkVideoCodecOperationFlagsKHR queueVideoFlags;
-        VkVideoCodecOperationFlagsKHR codecOperation;
+        VkVideoCodecOperationFlagBitsKHR codecOperation;
         bool prepared, sps_vps_found, resetVideoCoding;
         VkFence fence;
         VkBuffer bitstreamBuffer;                                        // needs to be destroyed if valid
@@ -502,14 +502,14 @@ static VkPhysicalDevice choose_physical_device(VkPhysicalDevice devices[], uint3
 static void * vulkan_decompress_init(void)
 {
         // ---Allocation of the vulkan_decompress state and sps/pps arrays---
-        struct state_vulkan_decompress *s = calloc(1, sizeof(struct state_vulkan_decompress));
+        struct state_vulkan_decompress *s = new state_vulkan_decompress;
         if (s == NULL)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Couldn't allocate memory for state struct!\n");
                 return NULL;
         }
 
-        sps_t *sps_array = calloc(MAX_SPS_IDS, sizeof(sps_t));
+        sps_t *sps_array = (sps_t *) calloc(MAX_SPS_IDS, sizeof(sps_t));
         if (sps_array == NULL)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Couldn't allocate memory for SPS array (num of members: %u)!\n", MAX_SPS_IDS);
@@ -517,7 +517,7 @@ static void * vulkan_decompress_init(void)
                 return NULL;
         }
 
-        pps_t *pps_array = calloc(MAX_PPS_IDS, sizeof(pps_t));
+        pps_t *pps_array = (pps_t *) calloc(MAX_PPS_IDS, sizeof(pps_t));
         if (pps_array == NULL)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Couldn't allocate memory for PPS array (num of members: %u)!\n", MAX_PPS_IDS);
@@ -575,16 +575,16 @@ static void * vulkan_decompress_init(void)
                                                                   .pEngineName = "No Engine",
                                                                   .engineVersion = VK_MAKE_VERSION(1, 0, 0),
                                                                   .apiVersion = VK_API_VERSION_1_3 };
-        VkInstanceCreateInfo createInfo = { .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-                                                                                .pApplicationInfo = &appInfo,
-                                                                                //-1 for not counting the NULL ptr
-                                                                                .enabledExtensionCount = sizeof(requiredInstanceExtensions) / sizeof(requiredInstanceExtensions[0]) -1,
-                                                                                .ppEnabledExtensionNames = requiredInstanceExtensions,
+        VkInstanceCreateInfo createInfo = {};
+        createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+        createInfo.pApplicationInfo = &appInfo;
+        createInfo.enabledExtensionCount = sizeof(requiredInstanceExtensions) / sizeof(requiredInstanceExtensions[0]) -1; //-1 for not counting the NULL ptr
+        createInfo.ppEnabledExtensionNames = requiredInstanceExtensions;
         #ifdef VULKAN_VALIDATE
-                                                                                .enabledLayerCount = sizeof(validationLayers) / sizeof(validationLayers[0]) - 1,
-                                                                                .ppEnabledLayerNames = validationLayers };
+        createInfo.enabledLayerCount = sizeof(validationLayers) / sizeof(validationLayers[0]) - 1;
+        createInfo.ppEnabledLayerNames = validationLayers;
         #else
-                                                                                .enabledLayerCount = 0 };
+        createInfo.enabledLayerCount = 0;
         #endif
         VkResult result = vkCreateInstance(&createInfo, NULL, &s->instance);
         if (result != VK_SUCCESS)
@@ -697,15 +697,16 @@ static void * vulkan_decompress_init(void)
                                                                                                 .queueFamilyIndex = s->queueFamilyIdx,
                                                                                                 .queueCount = 1,
                                                                                                 .pQueuePriorities = &queue_priorities };
-        VkDeviceCreateInfo createDeviceInfo = { .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-                                                                                        .pNext = (void*)&enabledDeviceFeatures13,
-                                                                                        .flags = 0,
-                                                                                        .queueCreateInfoCount = 1,
-                                                                                        .pQueueCreateInfos = &queueCreateInfo,
-                                                                                        .pEnabledFeatures = NULL,
-                                                                                        //-1 because of NULL at the end of the array
-                                                                                        .enabledExtensionCount = sizeof(requiredDeviceExtensions) / sizeof(requiredDeviceExtensions[0]) - 1,
-                                                                                        .ppEnabledExtensionNames = requiredDeviceExtensions };
+        VkDeviceCreateInfo createDeviceInfo = {};
+        createDeviceInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        createDeviceInfo.pNext = (void*)&enabledDeviceFeatures13;
+        createDeviceInfo.flags = 0;
+        createDeviceInfo.queueCreateInfoCount = 1;
+        createDeviceInfo.pQueueCreateInfos = &queueCreateInfo;
+        createDeviceInfo.pEnabledFeatures = NULL;
+        //-1 because of NULL at the end of the array
+        createDeviceInfo.enabledExtensionCount = sizeof(requiredDeviceExtensions) / sizeof(requiredDeviceExtensions[0]) - 1;
+        createDeviceInfo.ppEnabledExtensionNames = requiredDeviceExtensions;
         
         result = vkCreateDevice(s->physicalDevice, &createDeviceInfo, NULL, &s->device);
         if (result != VK_SUCCESS)
@@ -820,10 +821,10 @@ static void vulkan_decompress_done(void *state)
 
         free(s->pps_array);
         free(s->sps_array);
-        free(s);
+        delete s;
 }
 
-static VkVideoCodecOperationFlagsKHR codec_to_vulkan_flag(codec_t codec)
+static VkVideoCodecOperationFlagBitsKHR codec_to_vulkan_flag(codec_t codec)
 {
         switch(codec)
         {
@@ -840,7 +841,7 @@ static bool configure_with(struct state_vulkan_decompress *s, struct video_desc 
         const char *spec_name = get_codec_name_long(desc.color_spec);
 
         s->codecOperation = VK_VIDEO_CODEC_OPERATION_NONE_KHR;
-        VkVideoCodecOperationFlagsKHR videoCodecOperation = codec_to_vulkan_flag(desc.color_spec);
+        VkVideoCodecOperationFlagBitsKHR videoCodecOperation = codec_to_vulkan_flag(desc.color_spec);
 
         if (!(s->queueVideoFlags & videoCodecOperation))
         {
@@ -1111,7 +1112,7 @@ static bool find_memory_type(struct state_vulkan_decompress *s, uint32_t typeFil
         // if success return true and set the memory type index
         assert(s->physicalDevice != VK_NULL_HANDLE);
 
-        VkPhysicalDeviceMemoryProperties memoryProperties = { 0 };
+        VkPhysicalDeviceMemoryProperties memoryProperties = {};
         vkGetPhysicalDeviceMemoryProperties(s->physicalDevice, &memoryProperties);
 
         assert(memoryProperties.memoryTypeCount <= 32);
@@ -1140,14 +1141,15 @@ static bool allocate_buffers(struct state_vulkan_decompress *s, VkVideoProfileLi
         s->bitstreambufferSizeAlignment = videoCapabilities.minBitstreamBufferSizeAlignment;
         s->bitstreamBufferSize = (wantedBitstreamBufferSize + (s->bitstreambufferSizeAlignment - 1))
                                                          & ~(s->bitstreambufferSizeAlignment - 1); //alignment bit mask magic
-        VkBufferCreateInfo bitstreamBufferInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                                                                                             .pNext = (void*)&videoProfileList,
-                                                                                             .flags = 0,
-                                                                                             .usage = VK_BUFFER_USAGE_VIDEO_DECODE_SRC_BIT_KHR,
-                                                                                             .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-                                                                                             .size = s->bitstreamBufferSize,
-                                                                                             .queueFamilyIndexCount = 1,
-                                                                                             .pQueueFamilyIndices = &s->queueFamilyIdx };
+        VkBufferCreateInfo bitstreamBufferInfo = {};
+        bitstreamBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bitstreamBufferInfo.pNext = (void*)&videoProfileList;
+        bitstreamBufferInfo.flags = 0;
+        bitstreamBufferInfo.usage = VK_BUFFER_USAGE_VIDEO_DECODE_SRC_BIT_KHR;
+        bitstreamBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        bitstreamBufferInfo.size = s->bitstreamBufferSize;
+        bitstreamBufferInfo.queueFamilyIndexCount = 1;
+        bitstreamBufferInfo.pQueueFamilyIndices = &s->queueFamilyIdx;
         VkResult result = vkCreateBuffer(s->device, &bitstreamBufferInfo, NULL, &s->bitstreamBuffer);
         if (result != VK_SUCCESS)
         {
@@ -1436,22 +1438,23 @@ static bool create_output_image(struct state_vulkan_decompress *s)
         const VkExtent3D videoSize = { s->width, s->height, 1 }; //depth must be 1 for VK_IMAGE_TYPE_2D
 
         // ---Creating the luma plane---
-        VkImageCreateInfo lumaPlaneInfo = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-                                                                                 .pNext = NULL,
-                                                                                 .flags = 0,
-                                                                                 .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                                                                                  VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                                                                                 .imageType = VK_IMAGE_TYPE_2D,
-                                                                                 .mipLevels = 1,
-                                                                                 .samples = VK_SAMPLE_COUNT_1_BIT,
-                                                                                 .format = VK_FORMAT_R8_UNORM,
-                                                                                 .extent = videoSize,
-                                                                                 .arrayLayers = 1,
-                                                                                 .tiling = VK_IMAGE_TILING_LINEAR,
-                                                                                 .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-                                                                                 .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-                                                                                 .queueFamilyIndexCount = 1,
-                                                                                 .pQueueFamilyIndices = &s->queueFamilyIdx };
+        VkImageCreateInfo lumaPlaneInfo = {};
+        lumaPlaneInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        lumaPlaneInfo.pNext = NULL;
+        lumaPlaneInfo.flags = 0;
+        lumaPlaneInfo.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        lumaPlaneInfo.imageType = VK_IMAGE_TYPE_2D;
+        lumaPlaneInfo.mipLevels = 1;
+        lumaPlaneInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        lumaPlaneInfo.format = VK_FORMAT_R8_UNORM;
+        lumaPlaneInfo.extent = videoSize;
+        lumaPlaneInfo.arrayLayers = 1;
+        lumaPlaneInfo.tiling = VK_IMAGE_TILING_LINEAR;
+        lumaPlaneInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        lumaPlaneInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        lumaPlaneInfo.queueFamilyIndexCount = 1;
+        lumaPlaneInfo.pQueueFamilyIndices = &s->queueFamilyIdx;
         VkResult result = vkCreateImage(s->device, &lumaPlaneInfo, NULL, &s->outputLumaPlane);
         if (result != VK_SUCCESS)
         {
@@ -1461,22 +1464,23 @@ static bool create_output_image(struct state_vulkan_decompress *s)
         }
 
         // ---Creating the chroma plane---
-        VkImageCreateInfo chromaPlaneInfo = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-                                                                                    .pNext = NULL,
-                                                                                    .flags = 0,
-                                                                                    .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                                                                                            VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                                                                                    .imageType = VK_IMAGE_TYPE_2D,
-                                                                                    .mipLevels = 1,
-                                                                                    .samples = VK_SAMPLE_COUNT_1_BIT,
-                                                                                    .format = VK_FORMAT_R8G8_UNORM,
-                                                                                    .extent = { videoSize.width / 2, videoSize.height / 2, 1 },
-                                                                                    .arrayLayers = 1,
-                                                                                    .tiling = VK_IMAGE_TILING_LINEAR,
-                                                                                    .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-                                                                                    .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-                                                                                    .queueFamilyIndexCount = 1,
-                                                                                    .pQueueFamilyIndices = &s->queueFamilyIdx };
+        VkImageCreateInfo chromaPlaneInfo = {};
+        chromaPlaneInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        chromaPlaneInfo.pNext = NULL;
+        chromaPlaneInfo.flags = 0;
+        chromaPlaneInfo.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        chromaPlaneInfo.imageType = VK_IMAGE_TYPE_2D;
+        chromaPlaneInfo.mipLevels = 1;
+        chromaPlaneInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        chromaPlaneInfo.format = VK_FORMAT_R8G8_UNORM;
+        chromaPlaneInfo.extent = { videoSize.width / 2, videoSize.height / 2, 1 };
+        chromaPlaneInfo.arrayLayers = 1;
+        chromaPlaneInfo.tiling = VK_IMAGE_TILING_LINEAR;
+        chromaPlaneInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        chromaPlaneInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        chromaPlaneInfo.queueFamilyIndexCount = 1;
+        chromaPlaneInfo.pQueueFamilyIndices = &s->queueFamilyIdx;
         result = vkCreateImage(s->device, &chromaPlaneInfo, NULL, &s->outputChromaPlane);
         if (result != VK_SUCCESS)
         {
@@ -1570,23 +1574,24 @@ static bool create_dpb(struct state_vulkan_decompress *s, VkVideoProfileListInfo
         //imageCreateMaxMipLevels, imageCreateMaxArrayLayers, imageCreateMaxExtent, and imageCreateSampleCounts
 
         // ---Creating DPB VkImages---
-        VkImageCreateInfo dpbImgInfo = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-                                                                         .pNext = (void*)videoProfileList,
-                                                                         .flags = 0,
-                                                                         .usage = VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR |
-                                                                                           //VK_IMAGE_USAGE_VIDEO_DECODE_SRC_BIT_KHR |
-                                                                                              VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR |
-                                                                                           VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-                                                                         .imageType = imageType,
-                                                                         .mipLevels = 1,
-                                                                         .samples = VK_SAMPLE_COUNT_1_BIT,
-                                                                         .format = s->dpbFormat,
-                                                                         .extent = videoSize,
-                                                                         .arrayLayers = 1,
-                                                                         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-                                                                         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-                                                                         .queueFamilyIndexCount = 1,
-                                                                         .pQueueFamilyIndices = &s->queueFamilyIdx };
+        VkImageCreateInfo dpbImgInfo = {};
+        dpbImgInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        dpbImgInfo.pNext = (void*)videoProfileList;
+        dpbImgInfo.flags = 0;
+        dpbImgInfo.usage = VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR |
+                //VK_IMAGE_USAGE_VIDEO_DECODE_SRC_BIT_KHR |
+                VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR |
+                VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        dpbImgInfo.imageType = imageType;
+        dpbImgInfo.mipLevels = 1;
+        dpbImgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        dpbImgInfo.format = s->dpbFormat;
+        dpbImgInfo.extent = videoSize;
+        dpbImgInfo.arrayLayers = 1;
+        dpbImgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        dpbImgInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        dpbImgInfo.queueFamilyIndexCount = 1;
+        dpbImgInfo.pQueueFamilyIndices = &s->queueFamilyIdx;
 
         size_t dpb_len = sizeof(s->dpb) / sizeof(s->dpb[0]);
 
@@ -1787,7 +1792,7 @@ static size_t get_unused_output_queue_data_index(struct state_vulkan_decompress 
         // returns the first index to s->outputFrameQueue_data that's not used by any
         // other entry in the output queue (s->outputFrameQueue)
         // such index must exist as the output queue is smaller than capacity by at least 1
-        bool checks[MAX_OUTPUT_FRAMES_QUEUE_SIZE] = { 0 };
+        bool checks[MAX_OUTPUT_FRAMES_QUEUE_SIZE] = {};
 
         for (size_t i = 0; i < s->outputFrameQueue_count; ++i)
         {
@@ -2104,7 +2109,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         }
 
         VkVideoDecodeCapabilityFlagsKHR decodeCapabilitiesFlags = decodeCapabilities.flags;
-        VkVideoFormatPropertiesKHR pictureFormatProperites = { 0 }, referencePictureFormatProperties = { 0 };
+        VkVideoFormatPropertiesKHR pictureFormatProperites = {}, referencePictureFormatProperties = {};
         VkFormat pictureFormat = VK_FORMAT_UNDEFINED, referencePictureFormat = VK_FORMAT_UNDEFINED;
 
         VkVideoProfileListInfoKHR videoProfileList = { .sType = VK_STRUCTURE_TYPE_VIDEO_PROFILE_LIST_INFO_KHR,
@@ -2456,7 +2461,7 @@ static uint32_t smallest_dpb_index_not_in_queue(struct state_vulkan_decompress *
 {
         // returns the smallest index into DPB that's not in the reference queue
         // such index must exist as the reference queue is smaller than capacity by at least 1
-        bool checks[MAX_REF_FRAMES + 1] = { 0 };
+        bool checks[MAX_REF_FRAMES + 1] = {};
 
         for (uint32_t i = 0; i < s->referenceSlotsQueue_count; ++i)
         {
@@ -2579,7 +2584,7 @@ static void fill_ref_picture_infos(struct state_vulkan_decompress *s,
                 VkImageView view = s->dpbViews[slice_info.dpbIndex];
                 assert(view != VK_NULL_HANDLE);
 
-                h264Infos[i] = (StdVideoDecodeH264ReferenceInfo){ .flags = { 0 }, .FrameNum = slice_info.frame_num,
+                h264Infos[i] = (StdVideoDecodeH264ReferenceInfo){ .flags = {}, .FrameNum = slice_info.frame_num,
                                                                                                                   .PicOrderCnt = { slice_info.poc, slice_info.poc, } };
                 h264SlotInfos[i] = (VkVideoDecodeH264DpbSlotInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR,
                                                                                                                           .pStdReferenceInfo = h264Infos + i };
@@ -2784,8 +2789,8 @@ static bool get_video_info_from_sps(struct state_vulkan_decompress *s, const uns
         }
         assert(rbsp != NULL);
 
-        sps_t sps = { 0 };
-        bs_t b = { 0 };
+        sps_t sps = {};
+        bs_t b = {};
         bs_init(&b, rbsp, rbsp_len);
 
         read_sps(&sps, &b);
@@ -3032,11 +3037,11 @@ static bool update_video_session_params(struct state_vulkan_decompress *s, bool 
 {
         assert(s->device != VK_NULL_HANDLE && s->videoSession != VK_NULL_HANDLE);
 
-        StdVideoH264SequenceParameterSet vk_sps = { 0 };
-        StdVideoH264SequenceParameterSetVui vk_vui = { 0 };
-        StdVideoH264HrdParameters vk_hrd = { 0 };
-        StdVideoH264PictureParameterSet vk_pps = { 0 };
-        StdVideoH264ScalingLists vk_scalinglist = { 0 };
+        StdVideoH264SequenceParameterSet vk_sps = {};
+        StdVideoH264SequenceParameterSetVui vk_vui = {};
+        StdVideoH264HrdParameters vk_hrd = {};
+        StdVideoH264PictureParameterSet vk_pps = {};
+        StdVideoH264ScalingLists vk_scalinglist = {};
 
         uint32_t added_sps_count = 0;
         if (added_sps != NULL)
@@ -3111,14 +3116,14 @@ static bool handle_sps_nalu(struct state_vulkan_decompress *s, uint8_t *rbsp, in
         assert(rbsp != NULL);
         assert(rbsp_len > 0);
 
-        bs_t b = { 0 };
-        sps_t sps = { 0 };
+        bs_t b = {};
+        sps_t sps = {};
 
         bs_init(&b, rbsp, rbsp_len);
-        
+
         read_sps(&sps, &b);
-        b = (bs_t){ 0 }; // just to be sure
-        //print_sps(&sps);
+        b = (bs_t){}; // just to be sure
+                      //print_sps(&sps);
 
         assert(sps.pic_order_cnt_type == 0 || sps.pic_order_cnt_type == 2); //TODO handle other types as well
 
@@ -3145,14 +3150,14 @@ static bool handle_pps_nalu(struct state_vulkan_decompress *s, uint8_t *rbsp, in
         assert(rbsp != NULL);
         assert(rbsp_len > 0);
 
-        bs_t b = { 0 };
-        pps_t pps = { 0 };
+        bs_t b = {};
+        pps_t pps = {};
 
         bs_init(&b, rbsp, rbsp_len);
 
         read_pps(&pps, &b);
-        b = (bs_t){ 0 }; // just to be sure
-        //print_pps(&pps);
+        b = (bs_t){}; // just to be sure
+                      //print_pps(&pps);
 
         int id = pps.pic_parameter_set_id;
         if (id < 0 || id >= MAX_PPS_IDS)
@@ -3199,9 +3204,9 @@ static bool handle_sh_nalu(struct state_vulkan_decompress *s, uint8_t *rbsp, int
         // reads slice header from given buffer range
         assert(slice_info != NULL);
         assert(rbsp != NULL);
-        
-        bs_t b = { 0 };
-        slice_header_t sh = { 0 };
+
+        bs_t b = {};
+        slice_header_t sh = {};
 
         bs_init(&b, rbsp, rbsp_len);
 
@@ -3266,12 +3271,15 @@ static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_i
         //assert(take_references >= 0);
         //assert(take_references <= refSlotInfos_count);
 
+        StdVideoDecodeH264PictureInfoFlags picInfoFlags = {};
+        picInfoFlags.field_pic_flag = 0;
+        picInfoFlags.is_intra = slice_info.is_intra;
+        picInfoFlags.is_reference = slice_info.is_reference;
+        picInfoFlags.IdrPicFlag = slice_info.is_idr;
+
+
         // ---Filling infos related to bitstream---
-        StdVideoDecodeH264PictureInfo h264DecodeStdInfo = { .flags = { .field_pic_flag = 0,
-                                                                                                                                   .is_intra = slice_info.is_intra,
-                                                                                                                                   .is_reference = slice_info.is_reference,
-                                                                                                                                   .IdrPicFlag = slice_info.is_idr,
-                                                                                                                                   },
+        StdVideoDecodeH264PictureInfo h264DecodeStdInfo = { .flags = picInfoFlags,
                                                                                                                 .seq_parameter_set_id = slice_info.sps_id,
                                                                                                                 .pic_parameter_set_id = slice_info.pps_id,
                                                                                                                 .frame_num = slice_info.frame_num,
@@ -3325,8 +3333,8 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
         const VkExtent2D videoSize = { s->width, s->height };
 
         //int prev_idr_frame_seq = s->idr_frame_seq;
-        
-        uint32_t slice_offsets[MAX_SLICES] = { 0 };
+
+        uint32_t slice_offsets[MAX_SLICES] = {};
         uint32_t slice_offsets_count = 0; 
 
         // ---Copying NAL units into s->bitstreamBuffer---
@@ -3549,13 +3557,13 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
                 assert(slice_info->sps_id < MAX_SPS_IDS);
 
                 sps_t *sps = s->sps_array + slice_info->sps_id;
-                
+
                 // Filling the references infos
                 uint32_t slotInfos_ref_count = 0;
-                StdVideoDecodeH264ReferenceInfo h264StdInfos[MAX_REF_FRAMES + 1] = { 0 };
-                VkVideoDecodeH264DpbSlotInfoKHR h264SlotInfos[MAX_REF_FRAMES + 1] = { 0 };
-                VkVideoPictureResourceInfoKHR picInfos[MAX_REF_FRAMES + 1] = { 0 };
-                VkVideoReferenceSlotInfoKHR slotInfos[MAX_REF_FRAMES + 1] = { 0 };
+                StdVideoDecodeH264ReferenceInfo h264StdInfos[MAX_REF_FRAMES + 1] = {};
+                VkVideoDecodeH264DpbSlotInfoKHR h264SlotInfos[MAX_REF_FRAMES + 1] = {};
+                VkVideoPictureResourceInfoKHR picInfos[MAX_REF_FRAMES + 1] = {};
+                VkVideoReferenceSlotInfoKHR slotInfos[MAX_REF_FRAMES + 1] = {};
 
                 fill_ref_picture_infos(s, slotInfos, picInfos, h264SlotInfos, h264StdInfos, MAX_REF_FRAMES, sps->num_ref_frames,
                                                            isH264, &slotInfos_ref_count);
@@ -3567,7 +3575,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
                                                                                                   &s->prev_poc_msb, &s->prev_poc_lsb,
                                                                                                   &s->prev_frame_num, &s->prev_frame_num_offset);
 
-                h264StdInfos[slotInfos_ref_count] = (StdVideoDecodeH264ReferenceInfo){ .flags = { 0 },
+                h264StdInfos[slotInfos_ref_count] = (StdVideoDecodeH264ReferenceInfo){ .flags = {},
                                                                                                                                                               .FrameNum = slice_info->frame_num,
                                                                                                                                                               .PicOrderCnt = { slice_info->poc, slice_info->poc } };
                 h264SlotInfos[slotInfos_ref_count] = (VkVideoDecodeH264DpbSlotInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR,
@@ -3665,7 +3673,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
         if (enable_queries)
         {
                 // Result query
-                int32_t queryResult[1] = { 0 };
+                int32_t queryResult[1] = {};
                 size_t queryResult_size = sizeof(queryResult);
 
                 result = vkGetQueryPoolResults(s->device, s->queryPoolRes, 0, 1,
@@ -3685,7 +3693,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
                 #ifdef DECODE_TIMING
                 if (enable_time_queries)
                 {
-                        uint64_t queryTime[2] = { 0 };
+                        uint64_t queryTime[2] = {};
                         size_t queryTime_size = sizeof(queryTime);
 
                         result = vkGetQueryPoolResults(s->device, s->queryPoolTime, 0, 2,
@@ -3791,10 +3799,18 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
         }
 
         // gets filled in parse_and_decode
-        slice_info_t slice_info = { .is_reference = false, .is_intra = false, .is_idr = false,
-                                                                .nal_idc = 0, .idr_pic_id = -1, .sps_id = -1, .pps_id = -1,
-                                                                .frame_num = -1, .frame_seq = frame_seq, .poc_lsb = -1,
-                                                                .dpbIndex = smallest_dpb_index_not_in_queue(s) };
+        slice_info_t slice_info = {};
+        slice_info.is_reference = false;
+        slice_info.is_intra = false;
+        slice_info.is_idr = false;
+        slice_info.nal_idc = 0;
+        slice_info.idr_pic_id = -1;
+        slice_info.sps_id = -1;
+        slice_info.pps_id = -1;
+        slice_info.frame_num = -1;
+        slice_info.frame_seq = frame_seq;
+        slice_info.poc_lsb = -1;
+        slice_info.dpbIndex = smallest_dpb_index_not_in_queue(s);
 
         // potential err msg gets printed inside of parse_and_decode
         time_ns_t parse_time = 0, queue_time = 0, nv12_convert_time = 0;
