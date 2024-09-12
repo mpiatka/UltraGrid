@@ -58,7 +58,7 @@
 // result query prints result value for each decode command (one per decoded frame)
 // typical query result values are: -1 => error, 1 => success, 1000331003 => ???
 // time query prints the execution time of the whole vulkan queue
-#define VULKAN_QUERIES
+//#define VULKAN_QUERIES
 // log level of the result query logging
 #define RESULT_QUERY_LOG_LEVEL LOG_LEVEL_DEBUG
 
@@ -745,8 +745,7 @@ static VkPhysicalDevice choose_physical_device(VkPhysicalDevice devices[], uint3
                         VkQueueFlags flags = properties[j].queueFamilyProperties.queueFlags & queueFlagsFilter;
                         VkVideoCodecOperationFlagsKHR videoFlags = video_properties[j].videoCodecOperations;
 
-                        if (requestedQueueFamilyFlags == (flags & requestedQueueFamilyFlags) && videoFlags &&
-                                (!requireQueries || query_properties[j].queryResultStatusSupport))
+                        if (requestedQueueFamilyFlags == (flags & requestedQueueFamilyFlags) && videoFlags)
                         {
                                 preferred_queue_family = j;
                                 approved = true;
@@ -932,10 +931,10 @@ static void * vulkan_decompress_init(void)
         VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME,
                 VK_KHR_VIDEO_DECODE_H264_EXTENSION_NAME,
                 VK_KHR_VIDEO_DECODE_H265_EXTENSION_NAME,
-                VK_KHR_VIDEO_MAINTENANCE_1_EXTENSION_NAME,
+//                VK_KHR_VIDEO_MAINTENANCE_1_EXTENSION_NAME,
                 VK_KHR_MAINTENANCE_4_EXTENSION_NAME,                //maxBuffSize
         NULL };
-        const bool requireQueries = true;
+        const bool requireQueries = false;
 
         uint32_t physDevices_count = 0;
         vkEnumeratePhysicalDevices(s->instance, &physDevices_count, NULL);
