@@ -23,17 +23,9 @@
 #include "utils/bs.h"
 #include "rtp/rtpdec_h264.h"
 
-#ifdef VK_USE_PLATFORM_WIN32_KHR
-//#include <windows.h>        //LoadLibrary
-#else
-#include <dlfcn.h>                //dlopen, dlsym, dlclose
-#endif
+#define VOLK_IMPLEMENTATION
+#include <volk.h>
 
-#ifndef VK_NO_PROTOTYPES
-#define VK_NO_PROTOTYPES
-#endif
-
-#include <vulkan/vulkan.h>
 #include <vk_video/vulkan_video_codec_h264std.h>
 #include <vk_video/vulkan_video_codec_h264std_decode.h>
 
@@ -74,218 +66,7 @@
 #define MAX_OUTPUT_FRAMES_QUEUE_SIZE 32
 #define BITSTREAM_STARTCODE 0, 0, 1
 
-static PFN_vkCreateInstance vkCreateInstance = NULL;
-static PFN_vkDestroyInstance vkDestroyInstance = NULL;
-#ifdef VULKAN_VALIDATE
-static PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT = NULL;
-static PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT = NULL;
-#endif
-static PFN_vkGetPhysicalDeviceFeatures vkGetPhysicalDeviceFeatures = NULL;
-static PFN_vkGetPhysicalDeviceFeatures2 vkGetPhysicalDeviceFeatures2 = NULL;
-static PFN_vkGetPhysicalDeviceQueueFamilyProperties2 vkGetPhysicalDeviceQueueFamilyProperties2 = NULL;
-static PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices = NULL;
-static PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties = NULL;
-static PFN_vkGetPhysicalDeviceProperties2KHR vkGetPhysicalDeviceProperties2KHR = NULL;
-static PFN_vkCreateDevice vkCreateDevice = NULL;
-static PFN_vkDestroyDevice vkDestroyDevice = NULL;
-static PFN_vkEnumerateInstanceExtensionProperties vkEnumerateInstanceExtensionProperties = NULL;
-static PFN_vkEnumerateInstanceLayerProperties vkEnumerateInstanceLayerProperties = NULL;
-static PFN_vkEnumerateDeviceExtensionProperties vkEnumerateDeviceExtensionProperties = NULL;
-static PFN_vkGetDeviceQueue vkGetDeviceQueue = NULL;
-static PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties = NULL;
-static PFN_vkAllocateMemory vkAllocateMemory = NULL;
-static PFN_vkFreeMemory vkFreeMemory = NULL;
-static PFN_vkGetPhysicalDeviceVideoCapabilitiesKHR vkGetPhysicalDeviceVideoCapabilitiesKHR = NULL;
-static PFN_vkGetPhysicalDeviceVideoFormatPropertiesKHR vkGetPhysicalDeviceVideoFormatPropertiesKHR = NULL;
-static PFN_vkCreateBuffer vkCreateBuffer = NULL;
-static PFN_vkDestroyBuffer vkDestroyBuffer = NULL;
-static PFN_vkGetBufferMemoryRequirements vkGetBufferMemoryRequirements = NULL;
-static PFN_vkBindBufferMemory vkBindBufferMemory = NULL;
-static PFN_vkCreateCommandPool vkCreateCommandPool = NULL;
-static PFN_vkDestroyCommandPool vkDestroyCommandPool = NULL;
-static PFN_vkAllocateCommandBuffers vkAllocateCommandBuffers = NULL;
-static PFN_vkBeginCommandBuffer vkBeginCommandBuffer = NULL;
-static PFN_vkEndCommandBuffer vkEndCommandBuffer = NULL;
-static PFN_vkResetCommandBuffer vkResetCommandBuffer = NULL;
-static PFN_vkCreateVideoSessionKHR vkCreateVideoSessionKHR = NULL;
-static PFN_vkDestroyVideoSessionKHR vkDestroyVideoSessionKHR = NULL;
-static PFN_vkGetVideoSessionMemoryRequirementsKHR vkGetVideoSessionMemoryRequirementsKHR = NULL;
-static PFN_vkBindVideoSessionMemoryKHR vkBindVideoSessionMemoryKHR = NULL;
-static PFN_vkCreateVideoSessionParametersKHR vkCreateVideoSessionParametersKHR = NULL;
-static PFN_vkDestroyVideoSessionParametersKHR vkDestroyVideoSessionParametersKHR = NULL;
-static PFN_vkUpdateVideoSessionParametersKHR vkUpdateVideoSessionParametersKHR = NULL;
-static PFN_vkCmdBeginVideoCodingKHR vkCmdBeginVideoCodingKHR = NULL;
-static PFN_vkCmdEndVideoCodingKHR vkCmdEndVideoCodingKHR = NULL;
-static PFN_vkCmdControlVideoCodingKHR vkCmdControlVideoCodingKHR = NULL;
-static PFN_vkMapMemory vkMapMemory = NULL;
-static PFN_vkUnmapMemory vkUnmapMemory = NULL;
-static PFN_vkQueueSubmit vkQueueSubmit = NULL;
-static PFN_vkCreateFence vkCreateFence = NULL;
-static PFN_vkDestroyFence vkDestroyFence = NULL;
-static PFN_vkGetFenceStatus vkGetFenceStatus = NULL;
-static PFN_vkResetFences vkResetFences = NULL;
-static PFN_vkWaitForFences vkWaitForFences = NULL;
-static PFN_vkCreateImage vkCreateImage = NULL;
-static PFN_vkDestroyImage vkDestroyImage = NULL;
-static PFN_vkGetImageMemoryRequirements vkGetImageMemoryRequirements = NULL;
-static PFN_vkBindImageMemory vkBindImageMemory = NULL;
-static PFN_vkCreateImageView vkCreateImageView = NULL;
-static PFN_vkDestroyImageView vkDestroyImageView = NULL;
-static PFN_vkCmdDecodeVideoKHR vkCmdDecodeVideoKHR = NULL;
-static PFN_vkCmdPipelineBarrier2KHR vkCmdPipelineBarrier2KHR = NULL;
-static PFN_vkCmdCopyImageToBuffer vkCmdCopyImageToBuffer = NULL;
-static PFN_vkCmdCopyImage vkCmdCopyImage = NULL;
-static PFN_vkGetPhysicalDeviceFormatProperties2 vkGetPhysicalDeviceFormatProperties2 = NULL;
-static PFN_vkCreateQueryPool vkCreateQueryPool = NULL;
-static PFN_vkDestroyQueryPool vkDestroyQueryPool = NULL;
-static PFN_vkCmdResetQueryPool vkCmdResetQueryPool = NULL;
-static PFN_vkGetQueryPoolResults vkGetQueryPoolResults = NULL;
-static PFN_vkCmdWriteTimestamp vkCmdWriteTimestamp = NULL;
-
-static bool load_vulkan_functions_globals(PFN_vkGetInstanceProcAddr loader)
-{
-        // Loads vulkan functions that do not need VkInstance
-        vkCreateInstance = (PFN_vkCreateInstance)loader(NULL, "vkCreateInstance");
-        vkEnumerateInstanceExtensionProperties = (PFN_vkEnumerateInstanceExtensionProperties)
-                                                                                                loader(NULL, "vkEnumerateInstanceExtensionProperties");
-        vkEnumerateInstanceLayerProperties = (PFN_vkEnumerateInstanceLayerProperties)
-                                                                                                loader(NULL, "vkEnumerateInstanceLayerProperties");
-        
-        return vkCreateInstance &&
-                   vkEnumerateInstanceExtensionProperties &&
-                   vkEnumerateInstanceLayerProperties;
-}
-
-static bool load_vulkan_functions_with_instance(PFN_vkGetInstanceProcAddr loader, VkInstance instance)
-{
-        // Loads the rest of used Vulkan functions (those that need VkInstance)
-        vkDestroyInstance = (PFN_vkDestroyInstance)loader(instance, "vkDestroyInstance");
-        #ifdef VULKAN_VALIDATE
-        vkCreateDebugUtilsMessengerEXT = (PFN_vkCreateDebugUtilsMessengerEXT)
-                                                                                loader(instance, "vkCreateDebugUtilsMessengerEXT");
-        vkDestroyDebugUtilsMessengerEXT = (PFN_vkDestroyDebugUtilsMessengerEXT)
-                                                                                loader(instance, "vkDestroyDebugUtilsMessengerEXT");
-        #endif
-        vkGetPhysicalDeviceFeatures = (PFN_vkGetPhysicalDeviceFeatures)
-                                                                                loader(instance, "vkGetPhysicalDeviceFeatures");
-        vkGetPhysicalDeviceFeatures2 = (PFN_vkGetPhysicalDeviceFeatures2)
-                                                                                loader(instance, "vkGetPhysicalDeviceFeatures2");
-        vkGetPhysicalDeviceQueueFamilyProperties2 = (PFN_vkGetPhysicalDeviceQueueFamilyProperties2)
-                                                                                loader(instance, "vkGetPhysicalDeviceQueueFamilyProperties2");
-        vkEnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)
-                                                                                loader(instance, "vkEnumeratePhysicalDevices");
-        vkGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)
-                                                                                loader(instance, "vkGetPhysicalDeviceProperties");
-        vkGetPhysicalDeviceProperties2KHR = (PFN_vkGetPhysicalDeviceProperties2KHR)
-                                                                                loader(instance, "vkGetPhysicalDeviceProperties2KHR");
-        vkCreateDevice = (PFN_vkCreateDevice)loader(instance, "vkCreateDevice");
-        vkDestroyDevice = (PFN_vkDestroyDevice)loader(instance, "vkDestroyDevice");
-        vkEnumerateDeviceExtensionProperties = (PFN_vkEnumerateDeviceExtensionProperties)
-                                                                                                loader(instance, "vkEnumerateDeviceExtensionProperties");
-        vkGetDeviceQueue = (PFN_vkGetDeviceQueue)loader(instance, "vkGetDeviceQueue");
-        vkGetPhysicalDeviceMemoryProperties = (PFN_vkGetPhysicalDeviceMemoryProperties)
-                                                                                                loader(instance, "vkGetPhysicalDeviceMemoryProperties");
-        vkAllocateMemory = (PFN_vkAllocateMemory)loader(instance, "vkAllocateMemory");
-        vkFreeMemory = (PFN_vkFreeMemory)loader(instance, "vkFreeMemory");
-        vkGetPhysicalDeviceVideoCapabilitiesKHR = (PFN_vkGetPhysicalDeviceVideoCapabilitiesKHR)
-                                                                                                loader(instance, "vkGetPhysicalDeviceVideoCapabilitiesKHR");
-        vkGetPhysicalDeviceVideoFormatPropertiesKHR = (PFN_vkGetPhysicalDeviceVideoFormatPropertiesKHR)
-                                                                                                loader(instance, "vkGetPhysicalDeviceVideoFormatPropertiesKHR");
-        vkCreateBuffer = (PFN_vkCreateBuffer)loader(instance, "vkCreateBuffer");
-        vkDestroyBuffer = (PFN_vkDestroyBuffer)loader(instance, "vkDestroyBuffer");
-        vkGetBufferMemoryRequirements = (PFN_vkGetBufferMemoryRequirements)
-                                                                                                loader(instance, "vkGetBufferMemoryRequirements");
-        vkBindBufferMemory = (PFN_vkBindBufferMemory)loader(instance, "vkBindBufferMemory");
-        vkCreateCommandPool = (PFN_vkCreateCommandPool)loader(instance, "vkCreateCommandPool");
-        vkDestroyCommandPool = (PFN_vkDestroyCommandPool)loader(instance, "vkDestroyCommandPool");
-        vkAllocateCommandBuffers = (PFN_vkAllocateCommandBuffers)loader(instance, "vkAllocateCommandBuffers");
-        vkBeginCommandBuffer = (PFN_vkBeginCommandBuffer)loader(instance, "vkBeginCommandBuffer");
-        vkEndCommandBuffer = (PFN_vkEndCommandBuffer)loader(instance, "vkEndCommandBuffer");
-        vkResetCommandBuffer = (PFN_vkResetCommandBuffer)loader(instance, "vkResetCommandBuffer");
-        vkCreateVideoSessionKHR = (PFN_vkCreateVideoSessionKHR)loader(instance, "vkCreateVideoSessionKHR");
-        vkDestroyVideoSessionKHR = (PFN_vkDestroyVideoSessionKHR)loader(instance, "vkDestroyVideoSessionKHR");
-        vkGetVideoSessionMemoryRequirementsKHR = (PFN_vkGetVideoSessionMemoryRequirementsKHR)
-                                                                                                loader(instance, "vkGetVideoSessionMemoryRequirementsKHR");
-        vkBindVideoSessionMemoryKHR = (PFN_vkBindVideoSessionMemoryKHR)
-                                                                                                loader(instance, "vkBindVideoSessionMemoryKHR");
-        vkCreateVideoSessionParametersKHR = (PFN_vkCreateVideoSessionParametersKHR)
-                                                                                                loader(instance, "vkCreateVideoSessionParametersKHR");
-        vkDestroyVideoSessionParametersKHR = (PFN_vkDestroyVideoSessionParametersKHR)
-                                                                                                loader(instance, "vkDestroyVideoSessionParametersKHR");
-        vkUpdateVideoSessionParametersKHR = (PFN_vkUpdateVideoSessionParametersKHR)
-                                                                                                loader(instance, "vkUpdateVideoSessionParametersKHR");
-        vkCmdBeginVideoCodingKHR = (PFN_vkCmdBeginVideoCodingKHR)loader(instance, "vkCmdBeginVideoCodingKHR");
-        vkCmdEndVideoCodingKHR = (PFN_vkCmdEndVideoCodingKHR)loader(instance, "vkCmdEndVideoCodingKHR");
-        vkCmdControlVideoCodingKHR = (PFN_vkCmdControlVideoCodingKHR)
-                                                                                                loader(instance, "vkCmdControlVideoCodingKHR");
-        vkMapMemory = (PFN_vkMapMemory)loader(instance, "vkMapMemory");
-        vkUnmapMemory = (PFN_vkUnmapMemory)loader(instance, "vkUnmapMemory");
-        vkQueueSubmit = (PFN_vkQueueSubmit)loader(instance, "vkQueueSubmit");
-        vkCreateFence = (PFN_vkCreateFence)loader(instance, "vkCreateFence");
-        vkDestroyFence = (PFN_vkDestroyFence)loader(instance, "vkDestroyFence");
-        vkGetFenceStatus = (PFN_vkGetFenceStatus)loader(instance, "vkGetFenceStatus");
-        vkResetFences = (PFN_vkResetFences)loader(instance, "vkResetFences");
-        vkWaitForFences = (PFN_vkWaitForFences)loader(instance, "vkWaitForFences");
-        vkCreateImage = (PFN_vkCreateImage)loader(instance, "vkCreateImage");
-        vkDestroyImage = (PFN_vkDestroyImage)loader(instance, "vkDestroyImage");
-        vkGetImageMemoryRequirements = (PFN_vkGetImageMemoryRequirements)
-                                                                                                loader(instance, "vkGetImageMemoryRequirements");
-        vkBindImageMemory = (PFN_vkBindImageMemory)loader(instance, "vkBindImageMemory");
-        vkCreateImageView = (PFN_vkCreateImageView)loader(instance, "vkCreateImageView");
-        vkDestroyImageView = (PFN_vkDestroyImageView)loader(instance, "vkDestroyImageView");
-        vkCmdDecodeVideoKHR = (PFN_vkCmdDecodeVideoKHR)loader(instance, "vkCmdDecodeVideoKHR");
-        vkCmdCopyImageToBuffer = (PFN_vkCmdCopyImageToBuffer)loader(instance, "vkCmdCopyImageToBuffer");
-        vkCmdCopyImage = (PFN_vkCmdCopyImage)loader(instance, "vkCmdCopyImage");
-        vkCmdPipelineBarrier2KHR = (PFN_vkCmdPipelineBarrier2)loader(instance, "vkCmdPipelineBarrier2KHR");
-        vkGetPhysicalDeviceFormatProperties2 = (PFN_vkGetPhysicalDeviceFormatProperties2)
-                                                                                                loader(instance, "vkGetPhysicalDeviceFormatProperties2");
-        vkCreateQueryPool = (PFN_vkCreateQueryPool)loader(instance, "vkCreateQueryPool");
-        vkDestroyQueryPool = (PFN_vkDestroyQueryPool)loader(instance, "vkDestroyQueryPool");
-        vkCmdResetQueryPool = (PFN_vkCmdResetQueryPool)loader(instance, "vkCmdResetQueryPool");
-        vkGetQueryPoolResults = (PFN_vkGetQueryPoolResults)loader(instance, "vkGetQueryPoolResults");
-        vkCmdWriteTimestamp = (PFN_vkCmdWriteTimestamp)loader(instance, "vkCmdWriteTimestamp");
-
-        return vkDestroyInstance &&
-        #ifdef VULKAN_VALIDATE
-                   vkCreateDebugUtilsMessengerEXT && vkDestroyDebugUtilsMessengerEXT &&
-        #endif
-                   vkGetPhysicalDeviceFeatures && vkGetPhysicalDeviceFeatures2 &&
-                   vkGetPhysicalDeviceQueueFamilyProperties2 && vkEnumeratePhysicalDevices &&
-                   vkGetPhysicalDeviceProperties && vkGetPhysicalDeviceProperties2KHR &&
-                   vkCreateDevice && vkDestroyDevice &&
-                   vkEnumerateDeviceExtensionProperties &&
-                   vkGetDeviceQueue &&
-                   vkGetPhysicalDeviceMemoryProperties &&
-                   vkAllocateMemory && vkFreeMemory &&
-                   vkGetPhysicalDeviceVideoCapabilitiesKHR &&
-                   vkGetPhysicalDeviceVideoFormatPropertiesKHR &&
-                   vkCreateBuffer && vkDestroyBuffer &&
-                   vkGetBufferMemoryRequirements && vkBindBufferMemory &&
-                   vkCreateCommandPool && vkDestroyCommandPool &&
-                   vkAllocateCommandBuffers &&
-                   vkBeginCommandBuffer && vkEndCommandBuffer &&
-                   vkResetCommandBuffer &&
-                   vkCreateVideoSessionKHR && vkDestroyVideoSessionKHR &&
-                   vkGetVideoSessionMemoryRequirementsKHR && vkBindVideoSessionMemoryKHR &&
-                   vkCreateVideoSessionParametersKHR && vkDestroyVideoSessionParametersKHR &&
-                   vkUpdateVideoSessionParametersKHR &&
-                   vkCmdBeginVideoCodingKHR && vkCmdEndVideoCodingKHR &&
-                   vkCmdControlVideoCodingKHR &&
-                   vkMapMemory && vkUnmapMemory &&
-                   vkQueueSubmit &&
-                   vkCreateFence && vkDestroyFence&&
-                   vkGetFenceStatus && vkResetFences &&
-                   vkWaitForFences &&
-                   vkCreateImage && vkDestroyImage && 
-                   vkGetImageMemoryRequirements && vkBindImageMemory &&
-                   vkCreateImageView && vkDestroyImageView &&
-                   vkCmdDecodeVideoKHR &&
-                   vkCmdCopyImageToBuffer && vkCmdCopyImage &&
-                   vkCmdPipelineBarrier2KHR && vkGetPhysicalDeviceFormatProperties2 &&
-                   vkCreateQueryPool && vkDestroyQueryPool &&
-                   vkCmdResetQueryPool && vkGetQueryPoolResults &&
-                   vkCmdWriteTimestamp;
-}
+#define MOD_NAME "[vulkan_decode] "
 
 typedef struct        // structure used to pass around variables related to currently decoded frame (slice)
 {
@@ -314,13 +95,7 @@ typedef struct        // structure representing output frame, stored in outputFr
 
 struct state_vulkan_decompress // state of vulkan_decode module
 {
-#ifdef VK_USE_PLATFORM_WIN32_KHR
-        HMODULE vulkanLib;                                                        // needs to be destroyed if valid
-#else
-        void *vulkanLib;
-#endif
         VkInstance instance;                                                 // needs to be destroyed if valid
-        PFN_vkGetInstanceProcAddr loader;
         //maybe this could be present only when VULKAN_VALIDATE is defined?
         VkDebugUtilsMessengerEXT debugMessenger;        // needs to be destroyed if valid
         VkPhysicalDevice physicalDevice;
@@ -409,59 +184,6 @@ static void destroy_output_image(struct state_vulkan_decompress *s);
 static void destroy_dpb(struct state_vulkan_decompress *s);
 static void destroy_output_queue(struct state_vulkan_decompress *s);
 static void destroy_queries(struct state_vulkan_decompress *s);
-
-static bool load_vulkan(struct state_vulkan_decompress *s)
-{
-        // This function dynamically loads the Vulkan Loader in a manner relevant to your OS,
-        // returns true when success
-        #ifdef VK_USE_PLATFORM_WIN32_KHR // windows
-        const char vulkan_lib_filename[] = "vulkan-1.dll";
-        const char vulkan_proc_name[] = "vkGetInstanceProcAddr";
-
-    s->vulkanLib = LoadLibrary(vulkan_lib_filename);
-        if (s->vulkanLib == NULL)
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Vulkan loader file '%s' not found!\n", vulkan_lib_filename);
-                return false;
-        }
-
-        s->loader = (PFN_vkGetInstanceProcAddr)GetProcAddress(s->vulkanLib, vulkan_proc_name);
-    if (s->loader == NULL) {
-
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Vulkan function '%s' not found!\n", vulkan_proc_name);
-        return false;
-    }
-        #else // non windows
-        const char vulkan_lib_filename[] = "libvulkan.so.1";
-        const char vulkan_proc_name[] = "vkGetInstanceProcAddr";
-
-        s->vulkanLib = dlopen(vulkan_lib_filename, RTLD_LAZY);
-        if (s->vulkanLib == NULL)
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Vulkan loader file '%s' not found!\n", vulkan_lib_filename);
-                return false;
-        }
-        
-        s->loader = (PFN_vkGetInstanceProcAddr)dlsym(s->vulkanLib, vulkan_proc_name);
-    if (s->loader == NULL) {
-
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Vulkan function '%s' not found!\n", vulkan_proc_name);
-        return false;
-    }
-        #endif
-
-        return true;
-}
-
-static void unload_vulkan(struct state_vulkan_decompress *s)
-{
-        // Unload the dynamically loaded Vulkan Loader
-        #ifdef VK_USE_PLATFORM_WIN32_KHR
-        FreeLibrary(s->vulkanLib);
-        #else
-        dlclose(s->vulkanLib);
-        #endif
-}
 
 static bool check_for_instance_extensions(const char * const requiredInstanceExtensions[])
 {
@@ -807,25 +529,9 @@ static void * vulkan_decompress_init(void)
         s->sps_array = sps_array;
         s->pps_array = pps_array;
 
-        // ---Dynamic loading of the vulkan loader library and loader function---
-        if (!load_vulkan(s))
-        {
-                // err msg printed inside of load_vulkan
-                free(pps_array);
-                free(sps_array);
-                free(s);
-                return false;
-        }
-
-        // ---Loading function pointers where the instance is not needed---
-        if (!load_vulkan_functions_globals(s->loader))
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to load all vulkan functions!\n");
-                unload_vulkan(s);
-                free(pps_array);
-                free(sps_array);
-                free(s);
-        return NULL;
+        if(volkInitialize() < 0){
+                log_msg(LOG_LEVEL_ERROR, MOD_NAME "Failed to initialize volk\n");
+                return NULL;
         }
 
         // ---Enabling validation layers---
@@ -837,7 +543,6 @@ static void * vulkan_decompress_init(void)
         if (!check_for_validation_layers(validationLayers))
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Required vulkan validation layers not found!\n");
-                unload_vulkan(s);
                 free(pps_array);
                 free(sps_array);
                 free(s);
@@ -857,7 +562,6 @@ static void * vulkan_decompress_init(void)
         if (!check_for_instance_extensions(requiredInstanceExtensions))
         {
                 //error msg should be printed inside of check_for_extensions
-                unload_vulkan(s);
                 free(pps_array);
                 free(sps_array);
                 free(s);
@@ -886,23 +590,13 @@ static void * vulkan_decompress_init(void)
         if (result != VK_SUCCESS)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan instance! Error: %d\n", result);
-        unload_vulkan(s);
                 free(pps_array);
                 free(sps_array);
                 free(s);
                 return NULL;
         }
 
-        if (!load_vulkan_functions_with_instance(s->loader, s->instance))
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to load all instance related vulkan functions!\n");
-                if (vkDestroyInstance != NULL) vkDestroyInstance(s->instance, NULL);
-                unload_vulkan(s);
-                free(pps_array);
-                free(sps_array);
-                free(s);
-        return NULL;
-        }
+        volkLoadInstance(s->instance);
 
         // ---Setting up Debug messenger---
         #ifdef VULKAN_VALIDATE
@@ -911,7 +605,6 @@ static void * vulkan_decompress_init(void)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to setup debug messenger!\n");
                 vkDestroyInstance(s->instance, NULL);
-        unload_vulkan(s);
                 free(pps_array);
                 free(sps_array);
                 free(s);
@@ -944,7 +637,6 @@ static void * vulkan_decompress_init(void)
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] No physical devices found!\n");
                 destroy_debug_messenger(s->instance, s->debugMessenger);
                 vkDestroyInstance(s->instance, NULL);
-        unload_vulkan(s);
                 free(pps_array);
                 free(sps_array);
                 free(s);
@@ -957,7 +649,6 @@ static void * vulkan_decompress_init(void)
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate array for devices!\n");
                 destroy_debug_messenger(s->instance, s->debugMessenger);
                 vkDestroyInstance(s->instance, NULL);
-        unload_vulkan(s);
                 free(pps_array);
                 free(sps_array);
                 free(s);
@@ -975,7 +666,6 @@ static void * vulkan_decompress_init(void)
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to choose a appropriate physical device!\n");
                 destroy_debug_messenger(s->instance, s->debugMessenger);
                 vkDestroyInstance(s->instance, NULL);
-        unload_vulkan(s);
                 free(pps_array);
                 free(sps_array);
                 free(s);
@@ -1023,7 +713,6 @@ static void * vulkan_decompress_init(void)
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create a appropriate vulkan logical device!\n");
                 destroy_debug_messenger(s->instance, s->debugMessenger);
                 vkDestroyInstance(s->instance, NULL);
-        unload_vulkan(s);
                 free(pps_array);
                 free(sps_array);
                 free(s);
@@ -1128,7 +817,6 @@ static void vulkan_decompress_done(void *state)
 
         if (vkDestroyInstance != NULL) vkDestroyInstance(s->instance, NULL);
 
-        unload_vulkan(s);
 
         free(s->pps_array);
         free(s->sps_array);

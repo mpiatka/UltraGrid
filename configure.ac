@@ -1305,7 +1305,8 @@ if test "$vulkan_req" != no; then
 
         if test $found_vulkan = yes; then
                 VULKAN_DECODE_OBJ="src/video_decompress/vulkan_decode.o"
-                VULAKN_DECODE_LIBS="$VULKAN_LIBS"
+                VULAKN_DECODE_LIBS=""
+                INC="$INC -I$srcdir/ext-deps/volk"
                 add_module vdecompress_vulkan_decode "$VULKAN_DECODE_OBJ" "$VULKAN_DECODE_LIBS"
                 vulkan_decode=yes
 
