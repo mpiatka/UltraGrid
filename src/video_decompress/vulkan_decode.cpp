@@ -945,15 +945,22 @@ static int vulkan_decompress_get_property(void *state, int property, void *val, 
 
 static int vulkan_decompress_get_priority(codec_t compression, struct pixfmt_desc internal, codec_t ugc)
 {
-        if (ugc != VIDEO_CODEC_NONE && ugc != I420) return 500; // I420 is currently only supported output codec
-        if (internal.subsampling != 4200) return 400; // we currently do not support other subsampling
+        if(compression != H264)
+                return -1;
 
-        VkVideoCodecOperationFlagsKHR vulkanFlag = codec_to_vulkan_flag(compression);
+        switch(ugc){
+                case VIDEO_CODEC_NONE:
+                        return 50;
+                case I420:
+                        break;
+                default:
+                        return -1;
+        }
 
-        if (vulkanFlag == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR) return 100;
-        if (vulkanFlag == VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR) return -1; //TODO H.265
+        if (internal.subsampling != 4200)
+                return -1; // we currently do not support other subsampling
 
-        return -1; 
+        return VDEC_PRIO_PREFERRED; 
 }
 
 static VkVideoChromaSubsamplingFlagBitsKHR subsampling_to_vulkan_flag(int subs)
