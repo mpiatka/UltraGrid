@@ -1304,7 +1304,7 @@ if test "$vulkan_req" != no; then
         AC_CHECK_HEADERS([vulkan/vulkan.h], [], [found_vulkan=no])
 
         if test $found_vulkan = yes; then
-                VULKAN_DECODE_OBJ="src/video_decompress/vulkan_decode.o"
+                VULKAN_DECODE_OBJ="src/video_decompress/vulkan_decode.o src/vulkan/volk_impl.o"
                 VULAKN_DECODE_LIBS=""
                 INC="$INC -I$srcdir/ext-deps/volk"
                 add_module vdecompress_vulkan_decode "$VULKAN_DECODE_OBJ" "$VULKAN_DECODE_LIBS"

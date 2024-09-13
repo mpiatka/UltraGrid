@@ -23,7 +23,6 @@
 #include "utils/bs.h"
 #include "rtp/rtpdec_h264.h"
 
-#define VOLK_IMPLEMENTATION
 #include <volk.h>
 
 #include <vk_video/vulkan_video_codec_h264std.h>
