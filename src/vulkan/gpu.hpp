@@ -4,16 +4,15 @@
 #include "vulkan_wrapper.hpp"
 
 struct Gpu{
-	bool init();
+        bool init();
 
-	VkSemaphoreUniq getSemaphore();
-	VkFenceUniq getFence(bool signaled);
+        VkSemaphoreUniq getSemaphore();
+        VkFenceUniq getFence(bool signaled);
 
-	VkbInstanceUniq inst;
-	VkbDeviceUniq dev;
+        VkbInstanceUniq inst;
+        VkbDeviceUniq dev;
 
-	VkQueue graphicsQueue;
-	VkQueue presentQueue;
+        VkQueue graphicsQueue;
 };
 
 #endif
