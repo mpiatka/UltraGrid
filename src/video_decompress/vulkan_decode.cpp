@@ -520,8 +520,7 @@ static bool check_format(const VkVideoFormatPropertiesKHR *props, const VkFormat
         return props->format == VK_FORMAT_G8_B8R8_2PLANE_420_UNORM && //TODO allow different formats
                    optFlags & VK_FORMAT_FEATURE_2_VIDEO_DECODE_DPB_BIT_KHR &&
                    optFlags & VK_FORMAT_FEATURE_2_VIDEO_DECODE_OUTPUT_BIT_KHR && //only for VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR
-                   optFlags & VK_FORMAT_FEATURE_2_TRANSFER_SRC_BIT_KHR &&
-                   optFlags & VK_FORMAT_FEATURE_2_HOST_IMAGE_TRANSFER_BIT_EXT;
+                   optFlags & VK_FORMAT_FEATURE_2_TRANSFER_SRC_BIT_KHR;
 }
 
 static bool check_for_vulkan_format(VkPhysicalDevice physDevice, VkPhysicalDeviceVideoFormatInfoKHR videoFormatInfo,
@@ -586,10 +585,9 @@ static bool check_for_vulkan_format(VkPhysicalDevice physDevice, VkPhysicalDevic
                 bool decodeDPB = VK_FORMAT_FEATURE_2_VIDEO_DECODE_DPB_BIT_KHR & extraProps.optimalTilingFeatures ? 1 : 0;
                 bool transferSrc = VK_FORMAT_FEATURE_2_TRANSFER_SRC_BIT_KHR & extraProps.optimalTilingFeatures ? 1 : 0;
                 bool transferDst = VK_FORMAT_FEATURE_2_TRANSFER_DST_BIT_KHR  & extraProps.optimalTilingFeatures ? 1 : 0;
-                bool hostTransfer = VK_FORMAT_FEATURE_2_HOST_IMAGE_TRANSFER_BIT_EXT & extraProps.optimalTilingFeatures ? 1 : 0;
                 
-                log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] format %d - blit: %d %d, decode out: %d, decode dpb: %d, transfer: %d %d, host transfer: %d\n",
-                                                                 format, blitSrc, blitDst, decodeOutput, decodeDPB, transferSrc, transferDst, hostTransfer);
+                log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] format %d - blit: %d %d, decode out: %d, decode dpb: %d, transfer: %d %d\n",
+                                                                 format, blitSrc, blitDst, decodeOutput, decodeDPB, transferSrc, transferDst);
                 VkComponentMapping swizzle = properties[i].componentMapping;
                 log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] format %d - swizzle identity - r: %d, g: %d, b: %d, a: %d\n", format,
                                                                  swizzle.r == VK_COMPONENT_SWIZZLE_IDENTITY, swizzle.g == VK_COMPONENT_SWIZZLE_IDENTITY,
