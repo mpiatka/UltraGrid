@@ -20,10 +20,13 @@
 #include "video_decompress.h"
 #include "tv.h" //get_time_in_ns
 
+#include <memory>
+
 #include "utils/bs.h"
 #include "rtp/rtpdec_h264.h"
 
-#include <volk.h>
+#include "vulkan/vulkan_wrapper.hpp"
+#include "vulkan/gpu.hpp"
 
 #include <vk_video/vulkan_video_codec_h264std.h>
 #include <vk_video/vulkan_video_codec_h264std_decode.h>
@@ -94,6 +97,8 @@ typedef struct        // structure representing output frame, stored in outputFr
 
 struct state_vulkan_decompress // state of vulkan_decode module
 {
+        Gpu gpu;
+
         VkInstance instance;                                                 // needs to be destroyed if valid
         //maybe this could be present only when VULKAN_VALIDATE is defined?
         VkDebugUtilsMessengerEXT debugMessenger;        // needs to be destroyed if valid
@@ -501,18 +506,12 @@ static VkPhysicalDevice choose_physical_device(VkPhysicalDevice devices[], uint3
 static void * vulkan_decompress_init(void)
 {
         // ---Allocation of the vulkan_decompress state and sps/pps arrays---
-        struct state_vulkan_decompress *s = new state_vulkan_decompress;
-        if (s == NULL)
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Couldn't allocate memory for state struct!\n");
-                return NULL;
-        }
+        auto s = std::make_unique<state_vulkan_decompress>();
 
         sps_t *sps_array = (sps_t *) calloc(MAX_SPS_IDS, sizeof(sps_t));
         if (sps_array == NULL)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Couldn't allocate memory for SPS array (num of members: %u)!\n", MAX_SPS_IDS);
-                free(s);
                 return NULL;
         }
 
@@ -521,7 +520,6 @@ static void * vulkan_decompress_init(void)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Couldn't allocate memory for PPS array (num of members: %u)!\n", MAX_PPS_IDS);
                 free(sps_array);
-                free(s);
                 return NULL;
         }
 
@@ -544,7 +542,6 @@ static void * vulkan_decompress_init(void)
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Required vulkan validation layers not found!\n");
                 free(pps_array);
                 free(sps_array);
-                free(s);
         return NULL;
         }
         #endif
@@ -563,7 +560,6 @@ static void * vulkan_decompress_init(void)
                 //error msg should be printed inside of check_for_extensions
                 free(pps_array);
                 free(sps_array);
-                free(s);
         return NULL;
         }
 
@@ -591,7 +587,6 @@ static void * vulkan_decompress_init(void)
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan instance! Error: %d\n", result);
                 free(pps_array);
                 free(sps_array);
-                free(s);
                 return NULL;
         }
 
@@ -606,7 +601,6 @@ static void * vulkan_decompress_init(void)
                 vkDestroyInstance(s->instance, NULL);
                 free(pps_array);
                 free(sps_array);
-                free(s);
                 return NULL;
         }
         #endif
@@ -638,7 +632,6 @@ static void * vulkan_decompress_init(void)
                 vkDestroyInstance(s->instance, NULL);
                 free(pps_array);
                 free(sps_array);
-                free(s);
                 return NULL;
         }
 
@@ -650,7 +643,6 @@ static void * vulkan_decompress_init(void)
                 vkDestroyInstance(s->instance, NULL);
                 free(pps_array);
                 free(sps_array);
-                free(s);
                 return NULL;
         }
 
@@ -667,7 +659,6 @@ static void * vulkan_decompress_init(void)
                 vkDestroyInstance(s->instance, NULL);
                 free(pps_array);
                 free(sps_array);
-                free(s);
                 return NULL;
         }
 
@@ -715,7 +706,6 @@ static void * vulkan_decompress_init(void)
                 vkDestroyInstance(s->instance, NULL);
                 free(pps_array);
                 free(sps_array);
-                free(s);
                 return NULL;
         }
 
@@ -763,7 +753,7 @@ static void * vulkan_decompress_init(void)
         s->copy_to_dst_time_sum = 0;
 
         log_msg(LOG_LEVEL_INFO, "[vulkan_decode] Initialization finished successfully.\n");
-        return s;
+        return s.release();
 }
 
 static void free_video_session_memory(struct state_vulkan_decompress *s)
