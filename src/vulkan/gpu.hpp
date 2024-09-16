@@ -12,7 +12,10 @@ struct Gpu{
         VkbInstanceUniq inst;
         VkbDeviceUniq dev;
 
-        VkQueue graphicsQueue;
+        VkQueue graphicsQueue = VK_NULL_HANDLE;
+
+        VkQueue videoDecodeQueue = VK_NULL_HANDLE;
+        uint32_t videoDecodeQueueIdx = UINT32_MAX;
 };
 
 #endif
