@@ -101,13 +101,11 @@ struct state_vulkan_decompress // state of vulkan_decode module
 
         VkInstance instance;                                                 // needs to be destroyed if valid
         //maybe this could be present only when VULKAN_VALIDATE is defined?
-        VkDebugUtilsMessengerEXT debugMessenger;        // needs to be destroyed if valid
         VkPhysicalDevice physicalDevice;
         VkDevice device;                                                        // needs to be destroyed if valid
         uint32_t queueFamilyIdx;
-        VkQueueFamilyProperties2 queueFamilyProperties;
+        VkQueueFamilyProperties2 queueFamilyProperties; //TODO
         VkQueue decodeQueue;
-        VkVideoCodecOperationFlagsKHR queueVideoFlags;
         VkVideoCodecOperationFlagBitsKHR codecOperation;
         bool prepared, sps_vps_found, resetVideoCoding;
         VkFence fence;
@@ -189,320 +187,6 @@ static void destroy_dpb(struct state_vulkan_decompress *s);
 static void destroy_output_queue(struct state_vulkan_decompress *s);
 static void destroy_queries(struct state_vulkan_decompress *s);
 
-static bool check_for_instance_extensions(const char * const requiredInstanceExtensions[])
-{
-        // Checks whether Vulkan on the system is supporting given instance extensions
-        uint32_t extensions_count = 0;
-        vkEnumerateInstanceExtensionProperties(NULL, &extensions_count, NULL);
-        if (extensions_count == 0)
-        {
-                if (requiredInstanceExtensions[0] != NULL)
-                {
-                        log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] No instance extensions supported.\n");
-                        return false;
-                }
-                
-                log_msg(LOG_LEVEL_INFO, "[vulkan_decode] No instance extensions found and none required.\n");
-                return true;
-        }
-
-        VkExtensionProperties *extensions = (VkExtensionProperties*)calloc(extensions_count, sizeof(VkExtensionProperties));
-        if (extensions == NULL)
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate array for instance extensions!\n");
-                return false;
-        }
-
-        vkEnumerateInstanceExtensionProperties(NULL, &extensions_count, extensions);
-
-        // Checking for required ones
-        for (size_t i = 0; requiredInstanceExtensions[i] != NULL; ++i)
-        {
-                bool found = false;
-                for (uint32_t j = 0; j < extensions_count; ++j)
-                {
-                        if (!strcmp(requiredInstanceExtensions[i], extensions[j].extensionName))
-                        {
-                                found = true;
-                                break;
-                        }
-                }
-
-                if (!found)
-                {
-                        log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Required instance extension: '%s' was not found!\n",
-                                                                         requiredInstanceExtensions[i]);
-                        free(extensions);
-                        return false;
-                }
-        }
-
-        free(extensions);
-        return true;
-}
-
-#ifdef VULKAN_VALIDATE
-static bool check_for_validation_layers(const char * const validationLayers[])
-{
-        // Checks whether Vulkan on the system is supporting given validation layers
-        uint32_t properties_count = 0;
-        VkResult result = vkEnumerateInstanceLayerProperties(&properties_count, NULL);
-        if (result != VK_SUCCESS) return false;
-
-        VkLayerProperties *properties = (VkLayerProperties*)calloc(properties_count, sizeof(VkLayerProperties));
-        if (!properties) return false;
-
-        result = vkEnumerateInstanceLayerProperties(&properties_count, properties);
-        if (result != VK_SUCCESS) return false;
-
-        for (size_t i = 0; validationLayers[i]; ++i)
-        {
-                bool found = false;
-
-                for (uint32_t j = 0; j < properties_count; ++j)
-                {
-                        if (!strcmp(validationLayers[i], properties[j].layerName))
-                        {
-                                found = true;
-                                break;
-                        }
-                }
-
-                if (!found)
-                {
-                        free(properties);
-                        return false;
-                }
-        }
-
-        free(properties);
-        return true;
-}
-#endif
-
-static bool check_for_device_extensions(VkPhysicalDevice physDevice, const char* const requiredDeviceExtensions[])
-{
-        // Checks whether the given physical device supports given device extensions
-        uint32_t extensions_count = 0;
-        vkEnumerateDeviceExtensionProperties(physDevice, NULL, &extensions_count, NULL);
-        if (extensions_count == 0)
-        {
-                if (requiredDeviceExtensions[0] != NULL)
-                {
-                        log_msg(LOG_LEVEL_WARNING, "[vulkan_decode] No device extensions supported.\n");
-                        return false;
-                }
-
-                log_msg(LOG_LEVEL_INFO, "[vulkan_decode] No device extensions found and none required.\n");
-                return true;
-        }
-
-        VkExtensionProperties *extensions = (VkExtensionProperties*)calloc(extensions_count, sizeof(VkExtensionProperties));
-        if (extensions == NULL)
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate array for device extensions!\n");
-                return false;
-        }
-
-        vkEnumerateDeviceExtensionProperties(physDevice, NULL, &extensions_count, extensions);
-
-        // Checking for required ones
-        for (size_t i = 0; requiredDeviceExtensions[i] != NULL; ++i)
-        {
-                bool found = false;
-                for (uint32_t j = 0; j < extensions_count; ++j)
-                {
-                        if (!strcmp(requiredDeviceExtensions[i], extensions[j].extensionName))
-                        {
-                                found = true;
-                                break;
-                        }
-                }
-
-                if (!found)
-                {
-                        log_msg(LOG_LEVEL_WARNING, "[vulkan_decode] Required device extension: '%s' was not found!\n",
-                                                requiredDeviceExtensions[i]);
-                        free(extensions);
-                        return false;
-                }
-        }
-
-        free(extensions);
-        return true;
-}
-
-#ifdef VULKAN_VALIDATE
-static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
-                                                                VkDebugUtilsMessageSeverityFlagBitsEXT           messageSeverity,
-                                                                VkDebugUtilsMessageTypeFlagsEXT                  messageTypes,
-                                                                const VkDebugUtilsMessengerCallbackDataEXT*      pCallbackData,
-                                                                void*                                            pUserData)
-{
-        // This function is called when vulkan validation layers want to print something on the output
-        UNUSED(messageTypes);
-        UNUSED(pUserData);
-
-        if (messageSeverity >= VULKAN_VALIDATE_SHOW_SEVERITY) // filter messages by severity
-        {
-                log_msg(LOG_LEVEL_WARNING, "VULKAN VALIDATION: '%s'\n", pCallbackData->pMessage);
-        }
-
-        return VK_FALSE;
-}
-
-static VkResult create_debug_messenger(VkInstance instance, VkDebugUtilsMessengerEXT *debugMessenger_ptr)
-{
-        // Creates the debug messenge with debug_callback
-        VkDebugUtilsMessengerCreateInfoEXT messengerCreateInfo = { .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
-                                                                                                                              .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
-                                                                                                                                     VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
-                                                                                                                                 VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-                                                                                                                                 VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
-                                                                                                                               .messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
-                                                                                                                             VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-                                                                                                                                 VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
-                                                                                                                               .pfnUserCallback = debug_callback };
-
-        return vkCreateDebugUtilsMessengerEXT(instance, &messengerCreateInfo, NULL, debugMessenger_ptr);
-}
-#endif
-
-static void destroy_debug_messenger(VkInstance instance, VkDebugUtilsMessengerEXT debugMessenger)
-{
-        // Destroys debug messenger when VULKAN_VALIDATE is defined and destructor exists
-        // this function is defined even when VULKAN_VALIDATE is not just to avoid too many
-        // ifdefs everywhere where destroying needs to happen
-        #ifdef VULKAN_VALIDATE
-        if (vkDestroyDebugUtilsMessengerEXT != NULL && instance != VK_NULL_HANDLE)
-                                vkDestroyDebugUtilsMessengerEXT(instance, debugMessenger, NULL);
-        #else
-        UNUSED(instance);
-        UNUSED(debugMessenger);
-        #endif
-}
-
-static VkPhysicalDevice choose_physical_device(VkPhysicalDevice devices[], uint32_t devices_count,
-                                                                                           VkQueueFlags requestedQueueFamilyFlags,
-                                                                                           const char* const requiredDeviceExtensions[],
-                                                                                           bool requireQueries,
-                                                                                           uint32_t *queue_family_idx, VkQueueFamilyProperties2 *queue_family,
-                                                                                           VkQueueFamilyVideoPropertiesKHR *queue_video_props)
-{
-        // chooses the preferred physical device from array of given devices (of length atleast 1)
-        // queue_family_idx and if queue_family and queue_video_props pointers are non-NULL it will fill
-        // them with queue family properties and video properties of preferred queue of the chosen device and the family index
-        // returns VK_NULL_HANDLE and does not set queue_family if no suitable physical device found
-        assert(devices_count > 0);
-
-        VkPhysicalDevice chosen = VK_NULL_HANDLE;
-
-        for (uint32_t i = 0; i < devices_count; ++i)
-        {
-                VkPhysicalDeviceProperties deviceProperties;
-                vkGetPhysicalDeviceProperties(devices[i], &deviceProperties);
-
-                if (!check_for_device_extensions(devices[i], requiredDeviceExtensions))
-                {
-                        log_msg(LOG_LEVEL_NOTICE, "[vulkan_decode] Device '%s' does not have required extensions.\n",
-                                                                          deviceProperties.deviceName);
-                        continue;
-                }
-
-                VkPhysicalDeviceVideoMaintenance1FeaturesKHR videoFeatures1 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_MAINTENANCE_1_FEATURES_KHR };
-                VkPhysicalDeviceVulkan13Features deviceFeatures13 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-                                                                                                                          .pNext = (void*)&videoFeatures1 };
-                VkPhysicalDeviceFeatures2 deviceFeatures = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-                                                                                                         .pNext = (void*)&deviceFeatures13 };
-                vkGetPhysicalDeviceFeatures2(devices[i], &deviceFeatures);
-
-                if (!deviceFeatures13.synchronization2 || !deviceFeatures13.maintenance4 ||
-                        (requireQueries && !videoFeatures1.videoMaintenance1))
-                {
-                        log_msg(LOG_LEVEL_NOTICE, "[vulkan_decode] Device '%s' does not have required features.\n",
-                                                                          deviceProperties.deviceName);
-                        continue;
-                }
-
-                uint32_t queues_count = 0;
-                vkGetPhysicalDeviceQueueFamilyProperties2(devices[i], &queues_count, NULL);
-
-                if (queues_count == 0)
-                {
-                        log_msg(LOG_LEVEL_NOTICE, "[vulkan_decode] Device '%s' has no queue families.\n",
-                                                                          deviceProperties.deviceName);
-                        continue;
-                }
-                
-                VkQueueFamilyProperties2 *properties = (VkQueueFamilyProperties2*)calloc(queues_count, sizeof(VkQueueFamilyProperties2));
-                VkQueueFamilyVideoPropertiesKHR *video_properties = (VkQueueFamilyVideoPropertiesKHR*)calloc(queues_count, sizeof(VkQueueFamilyVideoPropertiesKHR));
-                VkQueueFamilyQueryResultStatusPropertiesKHR *query_properties = (VkQueueFamilyQueryResultStatusPropertiesKHR*)
-                                                                                                                                                calloc(queues_count, sizeof(VkQueueFamilyQueryResultStatusPropertiesKHR));
-                if (properties == NULL || video_properties == NULL || query_properties == NULL)
-                {
-                        log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate properties and/or video_properties arrays!\n");
-                        free(properties);
-                        free(video_properties);
-                        free(query_properties);
-                        break;
-                }
-
-                for (uint32_t j = 0; j < queues_count; ++j)
-                {
-                        query_properties[j] = (VkQueueFamilyQueryResultStatusPropertiesKHR){ .sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_QUERY_RESULT_STATUS_PROPERTIES_KHR };
-                        video_properties[j] = (VkQueueFamilyVideoPropertiesKHR){ .sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_VIDEO_PROPERTIES_KHR,
-                                                                                                                                         .pNext = (void*)(query_properties + j) };
-                        properties[j] = (VkQueueFamilyProperties2){ .sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2,
-                                                                                                                .pNext = (void*)(video_properties + j) };
-                }
-
-                vkGetPhysicalDeviceQueueFamilyProperties2(devices[i], &queues_count, properties);
-
-                // the only important queue flags for us
-                const VkQueueFlags queueFlagsFilter = (VK_QUEUE_GRAPHICS_BIT |
-                                               VK_QUEUE_COMPUTE_BIT |
-                                               VK_QUEUE_TRANSFER_BIT |
-                                               VK_QUEUE_VIDEO_DECODE_BIT_KHR |
-                                               VK_QUEUE_VIDEO_ENCODE_BIT_KHR);
-                bool approved = false;
-                uint32_t preferred_queue_family = 0;
-                for (uint32_t j = 0; j < queues_count; ++j)
-                {
-                        VkQueueFlags flags = properties[j].queueFamilyProperties.queueFlags & queueFlagsFilter;
-                        VkVideoCodecOperationFlagsKHR videoFlags = video_properties[j].videoCodecOperations;
-
-                        if (requestedQueueFamilyFlags == (flags & requestedQueueFamilyFlags) && videoFlags)
-                        {
-                                preferred_queue_family = j;
-                                approved = true;
-                                break; // the first suitable queue family should be the preferred one
-                        }
-                }
-                
-                if (approved)
-                {
-                        chosen = devices[i];
-                        if (queue_family_idx) *queue_family_idx = preferred_queue_family;
-                        if (queue_family)
-                        {
-                                *queue_family = properties[preferred_queue_family];
-                                queue_family->pNext = NULL; // prevent dangling pointer
-                        }
-                        if (queue_video_props)
-                        {
-                                *queue_video_props = video_properties[preferred_queue_family];
-                                queue_video_props->pNext = NULL; // prevent dangling pointer
-                        }
-                }
-
-                free(properties);
-                free(video_properties);
-                free(query_properties);
-        }
-
-        return chosen;
-}
-
 static void * vulkan_decompress_init(void)
 {
         // ---Allocation of the vulkan_decompress state and sps/pps arrays---
@@ -526,190 +210,18 @@ static void * vulkan_decompress_init(void)
         s->sps_array = sps_array;
         s->pps_array = pps_array;
 
-        if(volkInitialize() < 0){
-                log_msg(LOG_LEVEL_ERROR, MOD_NAME "Failed to initialize volk\n");
-                return NULL;
+        if(!s->gpu.init()){
+                log_msg(LOG_LEVEL_ERROR, "Failed to init vulkan gpu\n");
+                return nullptr;
         }
 
-        // ---Enabling validation layers---
-        #ifdef VULKAN_VALIDATE
-        const char* const validationLayers[] = {
-                                                "VK_LAYER_KHRONOS_validation",
-                                                NULL };
-        
-        if (!check_for_validation_layers(validationLayers))
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Required vulkan validation layers not found!\n");
-                free(pps_array);
-                free(sps_array);
-        return NULL;
-        }
-        #endif
+        s->instance = s->gpu.inst.get();
+        s->physicalDevice = s->gpu.dev->physical_device;
+        s->device = s->gpu.dev.get();
+        s->queueFamilyIdx = s->gpu.videoDecodeQueueIdx;
+        s->decodeQueue = s->gpu.videoDecodeQueue;
 
-        // ---Checking for extensions---
-        const char* const requiredInstanceExtensions[] = {
-                                                //VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
-        #ifdef VULKAN_VALIDATE
-                                                VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
-        #endif
-                                                VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
-                                                NULL };
-        
-        if (!check_for_instance_extensions(requiredInstanceExtensions))
-        {
-                //error msg should be printed inside of check_for_extensions
-                free(pps_array);
-                free(sps_array);
-        return NULL;
-        }
-
-        // ---Creating the vulkan instance---
-        VkApplicationInfo appInfo = { .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-                                                                  .pApplicationName = "UltraGrid vulkan_decode",
-                                                                  .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
-                                                                  .pEngineName = "No Engine",
-                                                                  .engineVersion = VK_MAKE_VERSION(1, 0, 0),
-                                                                  .apiVersion = VK_API_VERSION_1_3 };
-        VkInstanceCreateInfo createInfo = {};
-        createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-        createInfo.pApplicationInfo = &appInfo;
-        createInfo.enabledExtensionCount = sizeof(requiredInstanceExtensions) / sizeof(requiredInstanceExtensions[0]) -1; //-1 for not counting the NULL ptr
-        createInfo.ppEnabledExtensionNames = requiredInstanceExtensions;
-        #ifdef VULKAN_VALIDATE
-        createInfo.enabledLayerCount = sizeof(validationLayers) / sizeof(validationLayers[0]) - 1;
-        createInfo.ppEnabledLayerNames = validationLayers;
-        #else
-        createInfo.enabledLayerCount = 0;
-        #endif
-        VkResult result = vkCreateInstance(&createInfo, NULL, &s->instance);
-        if (result != VK_SUCCESS)
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan instance! Error: %d\n", result);
-                free(pps_array);
-                free(sps_array);
-                return NULL;
-        }
-
-        volkLoadInstance(s->instance);
-
-        // ---Setting up Debug messenger---
-        #ifdef VULKAN_VALIDATE
-        result = create_debug_messenger(s->instance, &s->debugMessenger);
-        if (result != VK_SUCCESS)
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to setup debug messenger!\n");
-                vkDestroyInstance(s->instance, NULL);
-                free(pps_array);
-                free(sps_array);
-                return NULL;
-        }
-        #endif
-
-        // ---Choosing of physical device---
-        const VkQueueFlags requestedFamilyQueueFlags = VK_QUEUE_VIDEO_DECODE_BIT_KHR | VK_QUEUE_TRANSFER_BIT;
-        const char* const requiredDeviceExtensions[] = {
-        //#if defined(__linux) || defined(__linux__) || defined(linux)
-    //    VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,        //?
-    //    VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME,        //?
-        //#endif
-        VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,        //required by VK_KHR_VIDEO_QUEUE extension
-        VK_KHR_VIDEO_QUEUE_EXTENSION_NAME,
-        VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME,
-                VK_KHR_VIDEO_DECODE_H264_EXTENSION_NAME,
-                VK_KHR_VIDEO_DECODE_H265_EXTENSION_NAME,
-//                VK_KHR_VIDEO_MAINTENANCE_1_EXTENSION_NAME,
-                VK_KHR_MAINTENANCE_4_EXTENSION_NAME,                //maxBuffSize
-        NULL };
-        const bool requireQueries = false;
-
-        uint32_t physDevices_count = 0;
-        vkEnumeratePhysicalDevices(s->instance, &physDevices_count, NULL);
-        log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Found %d physical devices.\n", physDevices_count);
-        if (physDevices_count == 0)
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] No physical devices found!\n");
-                destroy_debug_messenger(s->instance, s->debugMessenger);
-                vkDestroyInstance(s->instance, NULL);
-                free(pps_array);
-                free(sps_array);
-                return NULL;
-        }
-
-        VkPhysicalDevice *physDevices = (VkPhysicalDevice*)calloc(physDevices_count, sizeof(VkPhysicalDevice));
-        if (physDevices == NULL)
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate array for devices!\n");
-                destroy_debug_messenger(s->instance, s->debugMessenger);
-                vkDestroyInstance(s->instance, NULL);
-                free(pps_array);
-                free(sps_array);
-                return NULL;
-        }
-
-        vkEnumeratePhysicalDevices(s->instance, &physDevices_count, physDevices);
-        VkQueueFamilyVideoPropertiesKHR chosen_queue_video_props;
-        s->physicalDevice = choose_physical_device(physDevices, physDevices_count, requestedFamilyQueueFlags,
-                                                                                           requiredDeviceExtensions, requireQueries,
-                                                                                           &s->queueFamilyIdx, &s->queueFamilyProperties, &chosen_queue_video_props);
-        free(physDevices);
-        if (s->physicalDevice == VK_NULL_HANDLE)
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to choose a appropriate physical device!\n");
-                destroy_debug_messenger(s->instance, s->debugMessenger);
-                vkDestroyInstance(s->instance, NULL);
-                free(pps_array);
-                free(sps_array);
-                return NULL;
-        }
-
-        s->queueVideoFlags = chosen_queue_video_props.videoCodecOperations;
-        assert(s->queueFamilyProperties.pNext == NULL && chosen_queue_video_props.pNext == NULL);
-        assert(s->queueVideoFlags != 0);
-
-        VkPhysicalDeviceMaintenance4PropertiesKHR physDevicePropertiesExtra =
-                                                                                                { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_PROPERTIES };
-        VkPhysicalDeviceProperties2KHR physDeviceProperties = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-                                                                                                                         .pNext = &physDevicePropertiesExtra };
-        vkGetPhysicalDeviceProperties2KHR(s->physicalDevice, &physDeviceProperties);
-
-        log_msg(LOG_LEVEL_INFO, "[vulkan_decode] Chosen physical device is: '%s', chosen queue family index is: %d\n", 
-                                                        physDeviceProperties.properties.deviceName, s->queueFamilyIdx);
-
-        // ---Creating a logical device---
-        VkPhysicalDeviceVideoMaintenance1FeaturesKHR enabledDeviceVideoFeatures1 =
-                                                        { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_MAINTENANCE_1_FEATURES_KHR,
-                                                          .videoMaintenance1 = VK_TRUE };
-        VkPhysicalDeviceVulkan13Features enabledDeviceFeatures13 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-                                                                                                                                 .pNext = requireQueries ? (void*)&enabledDeviceVideoFeatures1 : NULL,
-                                                                                                                                 .synchronization2 = 1, .maintenance4 = 1 };
-        float queue_priorities = 1.0f;
-        VkDeviceQueueCreateInfo queueCreateInfo = { .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-                                                                                                .queueFamilyIndex = s->queueFamilyIdx,
-                                                                                                .queueCount = 1,
-                                                                                                .pQueuePriorities = &queue_priorities };
-        VkDeviceCreateInfo createDeviceInfo = {};
-        createDeviceInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-        createDeviceInfo.pNext = (void*)&enabledDeviceFeatures13;
-        createDeviceInfo.flags = 0;
-        createDeviceInfo.queueCreateInfoCount = 1;
-        createDeviceInfo.pQueueCreateInfos = &queueCreateInfo;
-        createDeviceInfo.pEnabledFeatures = NULL;
-        //-1 because of NULL at the end of the array
-        createDeviceInfo.enabledExtensionCount = sizeof(requiredDeviceExtensions) / sizeof(requiredDeviceExtensions[0]) - 1;
-        createDeviceInfo.ppEnabledExtensionNames = requiredDeviceExtensions;
-        
-        result = vkCreateDevice(s->physicalDevice, &createDeviceInfo, NULL, &s->device);
-        if (result != VK_SUCCESS)
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create a appropriate vulkan logical device!\n");
-                destroy_debug_messenger(s->instance, s->debugMessenger);
-                vkDestroyInstance(s->instance, NULL);
-                free(pps_array);
-                free(sps_array);
-                return NULL;
-        }
-
-        vkGetDeviceQueue(s->device, s->queueFamilyIdx, 0, &s->decodeQueue);
+        //TODO set queues
 
         s->fence = VK_NULL_HANDLE;
         s->bitstreamBuffer = VK_NULL_HANDLE; //buffer gets created in allocate_buffers function
@@ -799,14 +311,7 @@ static void vulkan_decompress_done(void *state)
         free_buffers(s);
 
         if (vkDestroyFence != NULL && s->device != VK_NULL_HANDLE)
-                        vkDestroyFence(s->device, s->fence, NULL);
-        
-        if (vkDestroyDevice != NULL) vkDestroyDevice(s->device, NULL);
-
-        destroy_debug_messenger(s->instance, s->debugMessenger);
-
-        if (vkDestroyInstance != NULL) vkDestroyInstance(s->instance, NULL);
-
+                vkDestroyFence(s->device, s->fence, NULL);
 
         free(s->pps_array);
         free(s->sps_array);
@@ -832,11 +337,13 @@ static bool configure_with(struct state_vulkan_decompress *s, struct video_desc 
         s->codecOperation = VK_VIDEO_CODEC_OPERATION_NONE_KHR;
         VkVideoCodecOperationFlagBitsKHR videoCodecOperation = codec_to_vulkan_flag(desc.color_spec);
 
+        /* TODO
         if (!(s->queueVideoFlags & videoCodecOperation))
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Wanted color spec: '%s' is not supported by chosen vulkan queue family!\n", spec_name);
                 return false;
         }
+        */
 
         assert(videoCodecOperation != VK_VIDEO_CODEC_OPERATION_NONE_KHR);
 
