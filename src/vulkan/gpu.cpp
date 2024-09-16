@@ -26,6 +26,7 @@ bool Gpu::init(){
 
         vkb::PhysicalDeviceSelector devSelector(inst);
         auto phys_ret = devSelector.set_minimum_version(1, 1)
+                .require_present(false)
                 .select();
 
         if(!phys_ret){
@@ -48,20 +49,6 @@ bool Gpu::init(){
                 return false;
         }
         graphicsQueue = queue_ret.value();
-
-        queue_ret = dev->get_queue(vkb::QueueType::present);
-        if(!queue_ret){
-                log_msg(LOG_LEVEL_ERROR, MOD_NAME "Failed to get queue. Err: %s\n", queue_ret.error().message().c_str());
-                return false;
-        }
-
-        queue_ret = dev->get_queue(vkb::QueueType::present);
-        if(!queue_ret){
-                log_msg(LOG_LEVEL_ERROR, MOD_NAME "Failed to get queue. Err: %s\n", queue_ret.error().message().c_str());
-                return false;
-        }
-        presentQueue = queue_ret.value();
-        presentQueue = queue_ret.value();
 
         return true;
 }
