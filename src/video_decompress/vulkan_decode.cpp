@@ -31,6 +31,7 @@
 #include <vk_video/vulkan_video_codec_h264std.h>
 #include <vk_video/vulkan_video_codec_h264std_decode.h>
 
+
 // helper functions for parsing H.264:
 #include "vulkan_decode_h264.h"
 
@@ -1566,14 +1567,14 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         VkResult result = vkGetPhysicalDeviceVideoCapabilitiesKHR(s->physicalDevice, &videoProfile, &videoCapabilities);
         if (result != VK_SUCCESS)
         {
-                if (result == VK_ERROR_FORMAT_NOT_SUPPORTED)
+                if (result == VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR)
                 {
                         log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Incoming video format is not supported by vulkan or chosen physical device!\n");
                         *wrong_pixfmt = true;
                 }
                 else
                 {
-                        log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to get physical device video capabilities (error: %d)!\n", result);
+                        log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to get physical device video capabilities (error: %x)!\n", result);
                         // it's not obvious if to set '*wrong_pixfmt = true;'
                 }
                 return false;
