@@ -902,40 +902,43 @@ static void deduce_stage_and_access_from_layout(VkImageLayout layout, VkPipeline
 }
 
 static void transfer_image_layout(VkCommandBuffer cmdBuffer, VkImage image,
-                                                                  VkImageLayout oldLayout, VkImageLayout newLayout)
+                VkImageLayout oldLayout, VkImageLayout newLayout,
+                uint32_t oldQueue = VK_QUEUE_FAMILY_IGNORED,
+                uint32_t newQueue = VK_QUEUE_FAMILY_IGNORED)
 {
         // transfers image layout (and also does the image's synchronization) using pipeline barrier
         // it records the barrier even when oldLayout == newLayout, cmdBuffer must be in recording state!
         assert(cmdBuffer != VK_NULL_HANDLE);
         assert(image != VK_NULL_HANDLE);
 
-        VkPipelineStageFlags2 srcStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                                                  dstStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        VkPipelineStageFlags2 srcStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        VkPipelineStageFlags2 dstStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
         VkAccessFlags2 srcAccess = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
                                    dstAccess = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
 
-        deduce_stage_and_access_from_layout(oldLayout, &srcStage, &srcAccess);
-        deduce_stage_and_access_from_layout(newLayout, &dstStage, &dstAccess);
+        VkImageMemoryBarrier2 imgBarrier = {};
+        imgBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+        imgBarrier.srcStageMask = srcStage;
+        imgBarrier.srcAccessMask = srcAccess;
+        imgBarrier.dstStageMask = dstStage;
+        imgBarrier.dstAccessMask = dstAccess;
+        imgBarrier.oldLayout = oldLayout;
+        imgBarrier.newLayout = newLayout;
+        imgBarrier.srcQueueFamilyIndex = oldQueue;
+        imgBarrier.dstQueueFamilyIndex = newQueue;
+        imgBarrier.image = image;
+        imgBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT; // all img planes
+        imgBarrier.subresourceRange.baseMipLevel = 0;
+        imgBarrier.subresourceRange.levelCount = 1;
+        imgBarrier.subresourceRange.baseArrayLayer = 0;
+        imgBarrier.subresourceRange.layerCount = 1;
 
-        VkImageMemoryBarrier2 imgBarrier = { .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-                                                                                 .srcStageMask = srcStage,
-                                                                                 .srcAccessMask = srcAccess,
-                                                                                 .dstStageMask = dstStage,
-                                                                                 .dstAccessMask = dstAccess,
-                                                                                 .oldLayout = oldLayout,
-                                                                                 .newLayout = newLayout,
-                                                                                 .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                                                                                 .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                                                                                 .image = image,
-                                                                                 .subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, // all img planes
-                                                                                                                            .baseMipLevel = 0,
-                                                                                                                            .levelCount = 1,
-                                                                                                                            .baseArrayLayer = 0,
-                                                                                                                            .layerCount = 1 } };
-        VkDependencyInfo barrierInfo = { .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                                                                         .dependencyFlags = 0,
-                                                                         .imageMemoryBarrierCount = 1,
-                                                                         .pImageMemoryBarriers = &imgBarrier };
+        VkDependencyInfo barrierInfo = {};
+        barrierInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        barrierInfo.dependencyFlags = 0;
+        barrierInfo.imageMemoryBarrierCount = 1;
+        barrierInfo.pImageMemoryBarriers = &imgBarrier;
+
         vkCmdPipelineBarrier2KHR(cmdBuffer, &barrierInfo);
 }
 
@@ -1696,6 +1699,8 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan fence for synchronization!\n");
                 return false;
         }
+
+        s->decodeDoneSem = s->gpu.getSemaphore();
 
         // ---Creating bitstreamBuffer for encoded NAL bitstream---
         if (!allocate_buffers(s, videoProfileList, videoCapabilities))
@@ -2461,9 +2466,9 @@ static void copy_decoded_image(struct state_vulkan_decompress *s, VkImage srcDpb
                                                                  .dstOffset = { 0, 0, 0 },
                                                                  .extent = { s->width / 2, s->height / 2, 1 } };
         
-        vkCmdCopyImage(s->decodeCmdBuf, srcDpbImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        vkCmdCopyImage(s->computeCmdBuf, srcDpbImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                                    s->outputLumaPlane, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &lumaRegion);
-        vkCmdCopyImage(s->decodeCmdBuf, srcDpbImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        vkCmdCopyImage(s->computeCmdBuf, srcDpbImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                                    s->outputChromaPlane, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &chromaRegion);
 }
 
@@ -2999,38 +3004,26 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
         }
 
         // ---VkImage layout transfering before video coding scope---
-        if (!s->dpbHasDefinedLayout)        // if VkImages in DPB are in undefined layout we need to transfer them into decode layout
+        for (size_t i = 0; i < MAX_REF_FRAMES + 1; ++i)
         {
-                for (size_t i = 0; i < MAX_REF_FRAMES + 1; ++i)
-                {
-                        assert(s->dpb[i] != VK_NULL_HANDLE);
-                        transfer_image_layout(s->decodeCmdBuf, s->dpb[i],
-                                                                 VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR);
+                VkImageLayout srcLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+                uint32_t srcQueueFam = s->computeQueueIdx;
+                if(!s->dpbHasDefinedLayout){
+                        srcLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                        srcQueueFam = s->decodeQueueIdx;
                 }
-
-                // also transfer the output image planes into defined layout
-                assert(s->outputLumaPlane != VK_NULL_HANDLE && s->outputChromaPlane != VK_NULL_HANDLE);
-                transfer_image_layout(s->decodeCmdBuf, s->outputLumaPlane,
-                                                          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-                transfer_image_layout(s->decodeCmdBuf, s->outputChromaPlane,
-                                                          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-
-                s->dpbHasDefinedLayout = true;
+                transfer_image_layout(s->decodeCmdBuf, s->dpb[i],
+                                srcLayout, VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR,
+                                srcQueueFam, s->decodeQueueIdx);
         }
-        else                                                        // otherwise we also transfer them, but from transfer src optimal layout
-        {
-                for (size_t i = 0; i < MAX_REF_FRAMES + 1; ++i)
-                {
-                        transfer_image_layout(s->decodeCmdBuf, s->dpb[i],
-                                                                  VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR);
-                }
+        s->dpbHasDefinedLayout = true;
 
-                // also transfer the output image planes into tranfer dst layout
-                transfer_image_layout(s->decodeCmdBuf, s->outputLumaPlane,
-                                                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-                transfer_image_layout(s->decodeCmdBuf, s->outputChromaPlane,
-                                                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        }
+        // also transfer the output image planes into tranfer dst layout
+        transfer_image_layout(s->computeCmdBuf, s->outputLumaPlane,
+                        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        transfer_image_layout(s->computeCmdBuf, s->outputChromaPlane,
+                        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
 
         // ---Video coding scope---
         {
@@ -3086,17 +3079,28 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
         // ---VkImage synchronization and layout transfering after video coding scope---
         for (size_t i = 0; i < MAX_REF_FRAMES + 1; ++i)
         {
-                transfer_image_layout(s->decodeCmdBuf, s->dpb[i], //VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR
-                                                          VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+                transfer_image_layout(s->decodeCmdBuf, s->dpb[i],
+                                                          VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                                          s->decodeQueueIdx, s->computeQueueIdx);
+                transfer_image_layout(s->computeCmdBuf, s->dpb[i],
+                                                          VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                                          s->decodeQueueIdx, s->computeQueueIdx);
         }
         
         // ---Copying decoded DPB image into output image---
         assert(s->dpbFormat == VK_FORMAT_G8_B8R8_2PLANE_420_UNORM); //TODO handle other potential formats too
         copy_decoded_image(s, s->dpb[slice_info->dpbIndex]);
-        transfer_image_layout(s->decodeCmdBuf, s->outputLumaPlane,
+        transfer_image_layout(s->computeCmdBuf, s->outputLumaPlane,
                                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-        transfer_image_layout(s->decodeCmdBuf, s->outputChromaPlane,
+        transfer_image_layout(s->computeCmdBuf, s->outputChromaPlane,
                                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
+        for (size_t i = 0; i < MAX_REF_FRAMES + 1; ++i)
+        {
+                transfer_image_layout(s->computeCmdBuf, s->dpb[i],
+                                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR,
+                                s->computeQueueIdx, s->decodeQueueIdx);
+        }
 
         // ---Ending the queue timing---
         if (enable_time_queries)
@@ -3110,33 +3114,38 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
                 return false;
         }
 
-	// ---Submiting the decode commands into queue---
+        // ---Submiting the decode commands into queue---
         VkSemaphore decodeSem = s->decodeDoneSem;
 
-	VkSubmitInfo decodeSubmit = {};
+        VkSubmitInfo decodeSubmit = {};
         decodeSubmit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         decodeSubmit.commandBufferCount = 1;
         decodeSubmit.pCommandBuffers = &s->decodeCmdBuf;
         decodeSubmit.signalSemaphoreCount = 1;
         decodeSubmit.pSignalSemaphores = &decodeSem;
 
-        VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-	VkSubmitInfo computeSubmit = {};
-        decodeSubmit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        decodeSubmit.waitSemaphoreCount = 1;
-        decodeSubmit.pWaitSemaphores = &decodeSem;
-        decodeSubmit.pWaitDstStageMask = &waitStage;
-        decodeSubmit.commandBufferCount = 1;
-        decodeSubmit.pCommandBuffers = &s->computeCmdBuf;
+        VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        VkSubmitInfo computeSubmit = {};
+        computeSubmit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        computeSubmit.waitSemaphoreCount = 1;
+        computeSubmit.pWaitSemaphores = &decodeSem;
+        computeSubmit.pWaitDstStageMask = &waitStage;
+        computeSubmit.commandBufferCount = 1;
+        computeSubmit.pCommandBuffers = &s->computeCmdBuf;
 
-        VkSubmitInfo toSubmit[] = {decodeSubmit, computeSubmit};
+        VkResult result = vkQueueSubmit(s->decodeQueue, 1, &decodeSubmit, nullptr);
+        if (result != VK_SUCCESS)
+        {
+                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to submit the decode cmd buffer into queue!\n");
+                return false;
+        }
 
-	VkResult result = vkQueueSubmit(s->decodeQueue, std::size(toSubmit), toSubmit, s->fence);
-	if (result != VK_SUCCESS)
-	{
-		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to submit the decode cmd buffer into queue!\n");
-		return false;
-	}
+        result = vkQueueSubmit(s->computeQueue, 1, &computeSubmit, s->fence);
+        if (result != VK_SUCCESS)
+        {
+                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to submit the compute cmd buffer into queue!\n");
+                return false;
+        }
 
         // ---Reference queue management---
         // can be done before synchronization as we only work with slice_infos
