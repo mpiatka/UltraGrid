@@ -104,8 +104,10 @@ struct state_vulkan_decompress // state of vulkan_decode module
         VkDeviceSize bitstreamBufferSize;
         VkDeviceSize bitstreambufferSizeAlignment;
         VkDeviceMemory bitstreamBufferMemory;                // allocated memory for bitstreamBuffer, needs to be freed if valid
-        VkCommandPoolUniq decodeCmdPool;                                        // needs to be destroyed if valid
+        VkCommandPoolUniq decodeCmdPool;
         VkCommandBuffer decodeCmdBuf;
+        VkCommandPoolUniq computeCmdPool;
+        VkCommandBuffer computeCmdBuf;
         VkVideoSessionKHR videoSession;                                // needs to be destroyed if valid
         uint32_t videoSessionMemory_count;
         // array of size videoSessionMemory_count, needs to be freed and VkvideoSessionMemory deallocated
@@ -212,13 +214,15 @@ static void * vulkan_decompress_init(void)
         s->decodeQueueIdx = s->gpu.videoDecodeQueueIdx;
         s->decodeQueue = s->gpu.videoDecodeQueue;
 
-        auto computeQueueRes = s->gpu.dev->get_queue(vkb::QueueType::compute);
+        //FIXME: vbk returns a compute queue only if there is a compute queue separate from the graphics queue
+        //Vulkan guarantees that there exists a Graphics + Compute queue, so hope that it is the first
+        auto computeQueueRes = s->gpu.dev->get_queue(vkb::QueueType::graphics);
         if(!computeQueueRes){
                 log_msg(LOG_LEVEL_ERROR, MOD_NAME "Failed to get compute queue: %s\n", computeQueueRes.error().message().c_str());
                 return nullptr;
         }
         s->computeQueue = computeQueueRes.value();
-        s->computeQueueIdx = s->gpu.dev->get_queue_index(vkb::QueueType::compute).value();
+        s->computeQueueIdx = s->gpu.dev->get_queue_index(vkb::QueueType::graphics).value();
 
         s->fence = VK_NULL_HANDLE;
         s->bitstreamBuffer = VK_NULL_HANDLE; //buffer gets created in allocate_buffers function
@@ -820,6 +824,12 @@ static bool begin_cmd_buffer(struct state_vulkan_decompress *s)
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to reset the vulkan decode command pool!\n");
                 return false;
         }
+        result = vkResetCommandPool(s->gpu.dev.get(), s->computeCmdPool, 0);
+        if (result != VK_SUCCESS)
+        {
+                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to reset the vulkan compute command pool!\n");
+                return false;
+        }
         
         VkCommandBufferBeginInfo cmdBufferBeginInfo = {};
         cmdBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -827,17 +837,24 @@ static bool begin_cmd_buffer(struct state_vulkan_decompress *s)
         result = vkBeginCommandBuffer(s->decodeCmdBuf, &cmdBufferBeginInfo);
         if (result != VK_SUCCESS)
         {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to begin command buffer recording!\n");
+                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to begin decode command buffer recording!\n");
+                return false;
+        }
+
+        result = vkBeginCommandBuffer(s->computeCmdBuf, &cmdBufferBeginInfo);
+        if (result != VK_SUCCESS)
+        {
+                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to begin compute command buffer recording!\n");
                 return false;
         }
 
         return true;
 }
 
-static bool end_cmd_buffer(struct state_vulkan_decompress *s)
+static bool end_cmd_buffer(VkCommandBuffer cmdBuf)
 {
         // Ends the recording of the cmd buffer
-        VkResult result = vkEndCommandBuffer(s->decodeCmdBuf);
+        VkResult result = vkEndCommandBuffer(cmdBuf);
         if (result == VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to end command buffer recording - Invalid video standard parameters\n");
@@ -1694,9 +1711,10 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 
         // ---Creating command pool---
         s->decodeCmdPool = s->gpu.getCmdPool(s->decodeQueueIdx);
-        if (!s->decodeCmdPool)
+        s->computeCmdPool = s->gpu.getCmdPool(s->computeQueueIdx);
+        if (!s->decodeCmdPool || !s->computeCmdPool)
         {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan command pool!\n");
+                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan command pools!\n");
                 free_buffers(s);
                 if (vkDestroyFence != NULL)
                 {
@@ -1708,14 +1726,23 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         }
 
         // ---Allocate command buffer---
-        VkCommandBufferAllocateInfo cmdBufferInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-                                                                                                  .commandPool = s->decodeCmdPool,
-                                                                                                  .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-                                                                                                  .commandBufferCount = 1 };
+        VkCommandBufferAllocateInfo cmdBufferInfo = {};
+        cmdBufferInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        cmdBufferInfo.commandPool = s->decodeCmdPool;
+        cmdBufferInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        cmdBufferInfo.commandBufferCount = 1;
         result = vkAllocateCommandBuffers(s->device, &cmdBufferInfo, &s->decodeCmdBuf);
         if (result != VK_SUCCESS)
+                s->decodeCmdBuf = VK_NULL_HANDLE;
+
+        cmdBufferInfo.commandPool = s->computeCmdPool;
+        result = vkAllocateCommandBuffers(s->device, &cmdBufferInfo, &s->computeCmdBuf);
+        if (result != VK_SUCCESS)
+                s->computeCmdBuf = VK_NULL_HANDLE;
+
+        if (!s->computeCmdBuf || !s->decodeCmdBuf)
         {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate vulkan command buffer!\n");
+                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate vulkan command buffers!\n");
                 free_buffers(s);
                 if (vkDestroyFence != NULL)
                 {
@@ -3076,7 +3103,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
                 vkCmdWriteTimestamp(s->decodeCmdBuf, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, s->queryPoolTime, 1);
         }
 
-        if (!end_cmd_buffer(s))
+        if (!end_cmd_buffer(s->decodeCmdBuf) || !end_cmd_buffer(s->computeCmdBuf))
         {
                 // relevant err msg printed inside of end_cmd_buffer
                 return false;
