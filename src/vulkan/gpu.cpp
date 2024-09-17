@@ -108,3 +108,15 @@ VkFenceUniq Gpu::getFence(bool signaled){
         return VkFenceUniq(dev.get(), fence);
 }
 
+VkCommandPoolUniq Gpu::getCmdPool(uint32_t queueFamIdx){
+        VkCommandPoolCreateInfo poolInfo = {};
+        poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        poolInfo.queueFamilyIndex = queueFamIdx;
+
+        VkCommandPool pool;
+        auto result = vkCreateCommandPool(dev.get(), &poolInfo, nullptr, &pool);
+        if (result != VK_SUCCESS)
+                return {};
+
+        return VkCommandPoolUniq(dev.get(), pool);
+}

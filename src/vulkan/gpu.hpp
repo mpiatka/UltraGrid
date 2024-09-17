@@ -9,6 +9,8 @@ struct Gpu{
         VkSemaphoreUniq getSemaphore();
         VkFenceUniq getFence(bool signaled);
 
+        VkCommandPoolUniq getCmdPool(uint32_t queueFamIdx);
+
         VkbInstanceUniq inst;
         VkbDeviceUniq dev;
 
