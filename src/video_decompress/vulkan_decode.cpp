@@ -92,9 +92,11 @@ struct state_vulkan_decompress // state of vulkan_decode module
         //maybe this could be present only when VULKAN_VALIDATE is defined?
         VkPhysicalDevice physicalDevice;
         VkDevice device;                                                        // needs to be destroyed if valid
-        uint32_t queueFamilyIdx;
         VkQueueFamilyProperties2 queueFamilyProperties; //TODO
         VkQueue decodeQueue;
+        uint32_t decodeQueueIdx;
+        VkQueue computeQueue; //Also used for transfers (Transfer cmds are always supported on compute queues)
+        uint32_t computeQueueIdx;
         VkVideoCodecOperationFlagBitsKHR codecOperation;
         bool prepared, sps_vps_found, resetVideoCoding;
         VkFence fence;
@@ -207,8 +209,16 @@ static void * vulkan_decompress_init(void)
         s->instance = s->gpu.inst.get();
         s->physicalDevice = s->gpu.dev->physical_device;
         s->device = s->gpu.dev.get();
-        s->queueFamilyIdx = s->gpu.videoDecodeQueueIdx;
+        s->decodeQueueIdx = s->gpu.videoDecodeQueueIdx;
         s->decodeQueue = s->gpu.videoDecodeQueue;
+
+        auto computeQueueRes = s->gpu.dev->get_queue(vkb::QueueType::compute);
+        if(!computeQueueRes){
+                log_msg(LOG_LEVEL_ERROR, MOD_NAME "Failed to get compute queue: %s\n", computeQueueRes.error().message().c_str());
+                return nullptr;
+        }
+        s->computeQueue = computeQueueRes.value();
+        s->computeQueueIdx = s->gpu.dev->get_queue_index(vkb::QueueType::compute).value();
 
         s->fence = VK_NULL_HANDLE;
         s->bitstreamBuffer = VK_NULL_HANDLE; //buffer gets created in allocate_buffers function
@@ -637,7 +647,7 @@ static bool allocate_buffers(struct state_vulkan_decompress *s, VkVideoProfileLi
         bitstreamBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         bitstreamBufferInfo.size = s->bitstreamBufferSize;
         bitstreamBufferInfo.queueFamilyIndexCount = 1;
-        bitstreamBufferInfo.pQueueFamilyIndices = &s->queueFamilyIdx;
+        bitstreamBufferInfo.pQueueFamilyIndices = &s->decodeQueueIdx;
         VkResult result = vkCreateBuffer(s->device, &bitstreamBufferInfo, NULL, &s->bitstreamBuffer);
         if (result != VK_SUCCESS)
         {
@@ -942,7 +952,7 @@ static bool create_output_image(struct state_vulkan_decompress *s)
         lumaPlaneInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         lumaPlaneInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         lumaPlaneInfo.queueFamilyIndexCount = 1;
-        lumaPlaneInfo.pQueueFamilyIndices = &s->queueFamilyIdx;
+        lumaPlaneInfo.pQueueFamilyIndices = &s->decodeQueueIdx;
         VkResult result = vkCreateImage(s->device, &lumaPlaneInfo, NULL, &s->outputLumaPlane);
         if (result != VK_SUCCESS)
         {
@@ -968,7 +978,7 @@ static bool create_output_image(struct state_vulkan_decompress *s)
         chromaPlaneInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         chromaPlaneInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         chromaPlaneInfo.queueFamilyIndexCount = 1;
-        chromaPlaneInfo.pQueueFamilyIndices = &s->queueFamilyIdx;
+        chromaPlaneInfo.pQueueFamilyIndices = &s->decodeQueueIdx;
         result = vkCreateImage(s->device, &chromaPlaneInfo, NULL, &s->outputChromaPlane);
         if (result != VK_SUCCESS)
         {
@@ -1079,7 +1089,7 @@ static bool create_dpb(struct state_vulkan_decompress *s, VkVideoProfileListInfo
         dpbImgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         dpbImgInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         dpbImgInfo.queueFamilyIndexCount = 1;
-        dpbImgInfo.pQueueFamilyIndices = &s->queueFamilyIdx;
+        dpbImgInfo.pQueueFamilyIndices = &s->decodeQueueIdx;
 
         size_t dpb_len = sizeof(s->dpb) / sizeof(s->dpb[0]);
 
@@ -1691,7 +1701,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 
         VkCommandPoolCreateInfo poolInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
                                                                                  .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-                                                                                 .queueFamilyIndex = s->queueFamilyIdx };
+                                                                                 .queueFamilyIndex = s->decodeQueueIdx };
         result = vkCreateCommandPool(s->device, &poolInfo, NULL, &s->commandPool);
         if (result != VK_SUCCESS)
         {
@@ -1807,7 +1817,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 
         VkVideoSessionCreateInfoKHR sessionInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_SESSION_CREATE_INFO_KHR,
                                                                                                 .pNext = NULL,
-                                                                                                .queueFamilyIndex = s->queueFamilyIdx,
+                                                                                                .queueFamilyIndex = s->decodeQueueIdx,
                                                                                                 .flags = query_ret ? VK_VIDEO_SESSION_CREATE_INLINE_QUERIES_BIT_KHR : 0,
                                                                                                 .pVideoProfile = &videoProfile,
                                                                                                 .pictureFormat = pictureFormat,
