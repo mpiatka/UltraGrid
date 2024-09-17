@@ -97,6 +97,7 @@ struct state_vulkan_decompress // state of vulkan_decode module
         uint32_t decodeQueueIdx;
         VkQueue computeQueue; //Also used for transfers (Transfer cmds are always supported on compute queues)
         uint32_t computeQueueIdx;
+        VkSemaphoreUniq decodeDoneSem;
         VkVideoCodecOperationFlagBitsKHR codecOperation;
         bool prepared, sps_vps_found, resetVideoCoding;
         VkFence fence;
@@ -3109,18 +3110,33 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
                 return false;
         }
 
-        // ---Submiting the decode commands into queue---
-        VkSubmitInfo submitInfo = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-                                                                .waitSemaphoreCount = 0,
-                                                                .commandBufferCount = 1,
-                                                                .pCommandBuffers = &s->decodeCmdBuf,
-                                                                .signalSemaphoreCount = 0 };
-        VkResult result = vkQueueSubmit(s->decodeQueue, 1, &submitInfo, s->fence);
-        if (result != VK_SUCCESS)
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to submit the decode cmd buffer into queue!\n");
-                return false;
-        }
+	// ---Submiting the decode commands into queue---
+        VkSemaphore decodeSem = s->decodeDoneSem;
+
+	VkSubmitInfo decodeSubmit = {};
+        decodeSubmit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        decodeSubmit.commandBufferCount = 1;
+        decodeSubmit.pCommandBuffers = &s->decodeCmdBuf;
+        decodeSubmit.signalSemaphoreCount = 1;
+        decodeSubmit.pSignalSemaphores = &decodeSem;
+
+        VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+	VkSubmitInfo computeSubmit = {};
+        decodeSubmit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        decodeSubmit.waitSemaphoreCount = 1;
+        decodeSubmit.pWaitSemaphores = &decodeSem;
+        decodeSubmit.pWaitDstStageMask = &waitStage;
+        decodeSubmit.commandBufferCount = 1;
+        decodeSubmit.pCommandBuffers = &s->computeCmdBuf;
+
+        VkSubmitInfo toSubmit[] = {decodeSubmit, computeSubmit};
+
+	VkResult result = vkQueueSubmit(s->decodeQueue, std::size(toSubmit), toSubmit, s->fence);
+	if (result != VK_SUCCESS)
+	{
+		log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to submit the decode cmd buffer into queue!\n");
+		return false;
+	}
 
         // ---Reference queue management---
         // can be done before synchronization as we only work with slice_infos
