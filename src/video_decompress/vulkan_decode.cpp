@@ -37,18 +37,6 @@
 
 #define min(a, b) ((a) < (b) ? (a) :(b)) 
 
-// activates vulkan validation layers if defined
-// if defined your vulkan loader needs to know where to find the validation layer manifest
-// (for example through VK_LAYER_PATH or VK_ADD_LAYER_PATH env. variables)
-//#define VULKAN_VALIDATE
-
-// one of value from enum VkDebugUtilsMessageSeverityFlagBitsEXT included from vulkan.h
-// (definition in vulkan_core.h)
-//#define VULKAN_VALIDATE_SHOW_SEVERITY VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT
-#define VULKAN_VALIDATE_SHOW_SEVERITY VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
-//#define VULKAN_VALIDATE_SHOW_SEVERITY VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT
-//#define VULKAN_VALIDATE_SHOW_SEVERITY VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
-
 // activates vukan queries if defined
 // result query prints result value for each decode command (one per decoded frame)
 // typical query result values are: -1 => error, 1 => success, 1000331003 => ???
@@ -221,8 +209,6 @@ static void * vulkan_decompress_init(void)
         s->device = s->gpu.dev.get();
         s->queueFamilyIdx = s->gpu.videoDecodeQueueIdx;
         s->decodeQueue = s->gpu.videoDecodeQueue;
-
-        //TODO set queues
 
         s->fence = VK_NULL_HANDLE;
         s->bitstreamBuffer = VK_NULL_HANDLE; //buffer gets created in allocate_buffers function
