@@ -104,8 +104,8 @@ struct state_vulkan_decompress // state of vulkan_decode module
         VkDeviceSize bitstreamBufferSize;
         VkDeviceSize bitstreambufferSizeAlignment;
         VkDeviceMemory bitstreamBufferMemory;                // allocated memory for bitstreamBuffer, needs to be freed if valid
-        VkCommandPool commandPool;                                        // needs to be destroyed if valid
-        VkCommandBuffer cmdBuffer;
+        VkCommandPool decodeCmdPool;                                        // needs to be destroyed if valid
+        VkCommandBuffer decodeCmdBuf;
         VkVideoSessionKHR videoSession;                                // needs to be destroyed if valid
         uint32_t videoSessionMemory_count;
         // array of size videoSessionMemory_count, needs to be freed and VkvideoSessionMemory deallocated
@@ -224,8 +224,8 @@ static void * vulkan_decompress_init(void)
         s->bitstreamBuffer = VK_NULL_HANDLE; //buffer gets created in allocate_buffers function
         s->bitstreamBufferMemory = VK_NULL_HANDLE;
         s->bitstreambufferSizeAlignment = 0;
-        s->commandPool = VK_NULL_HANDLE;           //command pool gets created in prepare function
-        s->cmdBuffer = VK_NULL_HANDLE;                   //same
+        s->decodeCmdPool = VK_NULL_HANDLE;           //command pool gets created in prepare function
+        s->decodeCmdBuf = VK_NULL_HANDLE;                   //same
         s->videoSession = VK_NULL_HANDLE;          //video session gets created in prepare function
         s->videoSessionParams = VK_NULL_HANDLE; //same
         //s->videoSessionParams_update_count = 0;
@@ -301,9 +301,9 @@ static void vulkan_decompress_done(void *state)
         destroy_output_image(s);
 
         destroy_dpb(s);
-        
+
         if (vkDestroyCommandPool != NULL && s->device != VK_NULL_HANDLE)
-                        vkDestroyCommandPool(s->device, s->commandPool, NULL);
+                vkDestroyCommandPool(s->device, s->decodeCmdPool, NULL);
 
         free_buffers(s);
 
@@ -819,7 +819,7 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
 static bool begin_cmd_buffer(struct state_vulkan_decompress *s)
 {
         // Puts the cmd buffer into recording state
-        VkResult result = vkResetCommandBuffer(s->cmdBuffer, 0); // maybe pointless since VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT flag
+        VkResult result = vkResetCommandBuffer(s->decodeCmdBuf, 0); // maybe pointless since VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT flag
         if (result != VK_SUCCESS)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to reset the vulkan command buffer!\n");
@@ -828,7 +828,7 @@ static bool begin_cmd_buffer(struct state_vulkan_decompress *s)
         
         VkCommandBufferBeginInfo cmdBufferBeginInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                                                                                         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
-        result = vkBeginCommandBuffer(s->cmdBuffer, &cmdBufferBeginInfo);
+        result = vkBeginCommandBuffer(s->decodeCmdBuf, &cmdBufferBeginInfo);
         if (result != VK_SUCCESS)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to begin command buffer recording!\n");
@@ -841,7 +841,7 @@ static bool begin_cmd_buffer(struct state_vulkan_decompress *s)
 static bool end_cmd_buffer(struct state_vulkan_decompress *s)
 {
         // Ends the recording of the cmd buffer
-        VkResult result = vkEndCommandBuffer(s->cmdBuffer);
+        VkResult result = vkEndCommandBuffer(s->decodeCmdBuf);
         if (result == VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to end command buffer recording - Invalid video standard parameters\n");
@@ -1697,12 +1697,12 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         }
 
         // ---Creating command pool---
-        assert(s->commandPool == VK_NULL_HANDLE);
+        assert(s->decodeCmdPool == VK_NULL_HANDLE);
 
         VkCommandPoolCreateInfo poolInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
                                                                                  .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
                                                                                  .queueFamilyIndex = s->decodeQueueIdx };
-        result = vkCreateCommandPool(s->device, &poolInfo, NULL, &s->commandPool);
+        result = vkCreateCommandPool(s->device, &poolInfo, NULL, &s->decodeCmdPool);
         if (result != VK_SUCCESS)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan command pool!\n");
@@ -1718,17 +1718,17 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 
         // ---Allocate command buffer---
         VkCommandBufferAllocateInfo cmdBufferInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-                                                                                                  .commandPool = s->commandPool,
+                                                                                                  .commandPool = s->decodeCmdPool,
                                                                                                   .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
                                                                                                   .commandBufferCount = 1 };
-        result = vkAllocateCommandBuffers(s->device, &cmdBufferInfo, &s->cmdBuffer);
+        result = vkAllocateCommandBuffers(s->device, &cmdBufferInfo, &s->decodeCmdBuf);
         if (result != VK_SUCCESS)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate vulkan command buffer!\n");
                 if (vkDestroyCommandPool != NULL)
                 {
-                        vkDestroyCommandPool(s->device, s->commandPool, NULL);
-                        s->commandPool = VK_NULL_HANDLE;
+                        vkDestroyCommandPool(s->device, s->decodeCmdPool, NULL);
+                        s->decodeCmdPool = VK_NULL_HANDLE;
                 }
                 free_buffers(s);
                 if (vkDestroyFence != NULL)
@@ -1746,8 +1746,8 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 // err msg should get printed inside of create_dpb
                 if (vkDestroyCommandPool != NULL)
                 {
-                        vkDestroyCommandPool(s->device, s->commandPool, NULL);
-                        s->commandPool = VK_NULL_HANDLE;
+                        vkDestroyCommandPool(s->device, s->decodeCmdPool, NULL);
+                        s->decodeCmdPool = VK_NULL_HANDLE;
                 }
                 free_buffers(s);
                 if (vkDestroyFence != NULL)
@@ -1766,8 +1766,8 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 destroy_dpb(s);
                 if (vkDestroyCommandPool != NULL)
                 {
-                        vkDestroyCommandPool(s->device, s->commandPool, NULL);
-                        s->commandPool = VK_NULL_HANDLE;
+                        vkDestroyCommandPool(s->device, s->decodeCmdPool, NULL);
+                        s->decodeCmdPool = VK_NULL_HANDLE;
                 }
                 free_buffers(s);
                 if (vkDestroyFence != NULL)
@@ -1787,8 +1787,8 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 destroy_dpb(s);
                 if (vkDestroyCommandPool != NULL)
                 {
-                        vkDestroyCommandPool(s->device, s->commandPool, NULL);
-                        s->commandPool = VK_NULL_HANDLE;
+                        vkDestroyCommandPool(s->device, s->decodeCmdPool, NULL);
+                        s->decodeCmdPool = VK_NULL_HANDLE;
                 }
                 free_buffers(s);
                 if (vkDestroyFence != NULL)
@@ -1836,8 +1836,8 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 destroy_dpb(s);
                 if (vkDestroyCommandPool != NULL)
                 {
-                        vkDestroyCommandPool(s->device, s->commandPool, NULL);
-                        s->commandPool = VK_NULL_HANDLE;
+                        vkDestroyCommandPool(s->device, s->decodeCmdPool, NULL);
+                        s->decodeCmdPool = VK_NULL_HANDLE;
                 }
                 free_buffers(s);
                 if (vkDestroyFence != NULL)
@@ -1886,8 +1886,8 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 destroy_dpb(s);
                 if (vkDestroyCommandPool != NULL)
                 {
-                        vkDestroyCommandPool(s->device, s->commandPool, NULL);
-                        s->commandPool = VK_NULL_HANDLE;
+                        vkDestroyCommandPool(s->device, s->decodeCmdPool, NULL);
+                        s->decodeCmdPool = VK_NULL_HANDLE;
                 }
                 free_buffers(s);
                 if (vkDestroyFence != NULL)
@@ -1920,8 +1920,8 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 destroy_dpb(s);
                 if (vkDestroyCommandPool != NULL)
                 {
-                        vkDestroyCommandPool(s->device, s->commandPool, NULL);
-                        s->commandPool = VK_NULL_HANDLE;
+                        vkDestroyCommandPool(s->device, s->decodeCmdPool, NULL);
+                        s->decodeCmdPool = VK_NULL_HANDLE;
                 }
                 free_buffers(s);
                 if (vkDestroyFence != NULL)
@@ -2111,13 +2111,13 @@ static void begin_video_coding_scope(struct state_vulkan_decompress *s, VkVideoR
                                                                                                   .videoSessionParameters = s->videoSessionParams,
                                                                                                   .referenceSlotCount = slotInfos_count,
                                                                                                   .pReferenceSlots = slotInfos };
-        vkCmdBeginVideoCodingKHR(s->cmdBuffer, &beginCodingInfo);
+        vkCmdBeginVideoCodingKHR(s->decodeCmdBuf, &beginCodingInfo);
 
         if (s->resetVideoCoding) // before the first use of vulkan video session we must reset the video coding for that session
         {
                 VkVideoCodingControlInfoKHR vidCodingControlInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_CODING_CONTROL_INFO_KHR,
                                                                                                                          .flags = VK_VIDEO_CODING_CONTROL_RESET_BIT_KHR }; // reset bit
-                vkCmdControlVideoCodingKHR(s->cmdBuffer, &vidCodingControlInfo);
+                vkCmdControlVideoCodingKHR(s->decodeCmdBuf, &vidCodingControlInfo);
 
                 s->resetVideoCoding = false;
         }
@@ -2126,7 +2126,7 @@ static void begin_video_coding_scope(struct state_vulkan_decompress *s, VkVideoR
 static void end_video_coding_scope(struct state_vulkan_decompress *s)
 {
         VkVideoEndCodingInfoKHR endCodingInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_END_CODING_INFO_KHR };
-        vkCmdEndVideoCodingKHR(s->cmdBuffer, &endCodingInfo);
+        vkCmdEndVideoCodingKHR(s->decodeCmdBuf, &endCodingInfo);
 }
 
 //DEBUG
@@ -2449,7 +2449,7 @@ static bool detect_poc_wrapping(struct state_vulkan_decompress *s)
 static void copy_decoded_image(struct state_vulkan_decompress *s, VkImage srcDpbImage)
 {
         // copy the data of decoded image (data on GPU) to images that have memory on CPU
-        assert(s->cmdBuffer != VK_NULL_HANDLE);
+        assert(s->decodeCmdBuf != VK_NULL_HANDLE);
         assert(s->outputLumaPlane != VK_NULL_HANDLE);
         assert(s->outputLumaPlane != VK_NULL_HANDLE);
         assert(srcDpbImage != VK_NULL_HANDLE);
@@ -2477,9 +2477,9 @@ static void copy_decoded_image(struct state_vulkan_decompress *s, VkImage srcDpb
                                                                  .dstOffset = { 0, 0, 0 },
                                                                  .extent = { s->width / 2, s->height / 2, 1 } };
         
-        vkCmdCopyImage(s->cmdBuffer, srcDpbImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        vkCmdCopyImage(s->decodeCmdBuf, srcDpbImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                                    s->outputLumaPlane, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &lumaRegion);
-        vkCmdCopyImage(s->cmdBuffer, srcDpbImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        vkCmdCopyImage(s->decodeCmdBuf, srcDpbImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                                    s->outputChromaPlane, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &chromaRegion);
 }
 
@@ -2813,7 +2813,7 @@ static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_i
                                                                                 .referenceSlotCount = refSlotInfos_count,
                                                                                 .pReferenceSlots = refSlotInfos,
                                                                                 };
-        vkCmdDecodeVideoKHR(s->cmdBuffer, &decodeInfo);
+        vkCmdDecodeVideoKHR(s->decodeCmdBuf, &decodeInfo);
 }
 
 static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *src, unsigned int src_len,
@@ -2986,7 +2986,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
         //                log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Got IDR frame - %d\n", slice_info->idr_pic_id);
         //else log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Got non-IDR frame.\n");
 
-        assert(s->cmdBuffer != VK_NULL_HANDLE);
+        assert(s->decodeCmdBuf != VK_NULL_HANDLE);
         assert(s->videoSession != VK_NULL_HANDLE);
         assert(s->videoSessionParams != VK_NULL_HANDLE);
 
@@ -3005,12 +3005,12 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
         bool enable_time_queries = s->queryPoolTime != VK_NULL_HANDLE;
         if (enable_queries)
         {
-                vkCmdResetQueryPool(s->cmdBuffer, s->queryPoolRes, 0, 1);
+                vkCmdResetQueryPool(s->decodeCmdBuf, s->queryPoolRes, 0, 1);
                 if (enable_time_queries)
                 {
-                        vkCmdResetQueryPool(s->cmdBuffer, s->queryPoolTime, 0, 2);
+                        vkCmdResetQueryPool(s->decodeCmdBuf, s->queryPoolTime, 0, 2);
                         // ---Starting the queue timing---
-                        vkCmdWriteTimestamp(s->cmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, s->queryPoolTime, 0);
+                        vkCmdWriteTimestamp(s->decodeCmdBuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, s->queryPoolTime, 0);
                 }
         }
 
@@ -3020,15 +3020,15 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
                 for (size_t i = 0; i < MAX_REF_FRAMES + 1; ++i)
                 {
                         assert(s->dpb[i] != VK_NULL_HANDLE);
-                        transfer_image_layout(s->cmdBuffer, s->dpb[i],
+                        transfer_image_layout(s->decodeCmdBuf, s->dpb[i],
                                                                  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR);
                 }
 
                 // also transfer the output image planes into defined layout
                 assert(s->outputLumaPlane != VK_NULL_HANDLE && s->outputChromaPlane != VK_NULL_HANDLE);
-                transfer_image_layout(s->cmdBuffer, s->outputLumaPlane,
+                transfer_image_layout(s->decodeCmdBuf, s->outputLumaPlane,
                                                           VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-                transfer_image_layout(s->cmdBuffer, s->outputChromaPlane,
+                transfer_image_layout(s->decodeCmdBuf, s->outputChromaPlane,
                                                           VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
                 s->dpbHasDefinedLayout = true;
@@ -3037,14 +3037,14 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
         {
                 for (size_t i = 0; i < MAX_REF_FRAMES + 1; ++i)
                 {
-                        transfer_image_layout(s->cmdBuffer, s->dpb[i],
+                        transfer_image_layout(s->decodeCmdBuf, s->dpb[i],
                                                                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR);
                 }
 
                 // also transfer the output image planes into tranfer dst layout
-                transfer_image_layout(s->cmdBuffer, s->outputLumaPlane,
+                transfer_image_layout(s->decodeCmdBuf, s->outputLumaPlane,
                                                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-                transfer_image_layout(s->cmdBuffer, s->outputChromaPlane,
+                transfer_image_layout(s->decodeCmdBuf, s->outputChromaPlane,
                                                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
         }
 
@@ -3102,22 +3102,22 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
         // ---VkImage synchronization and layout transfering after video coding scope---
         for (size_t i = 0; i < MAX_REF_FRAMES + 1; ++i)
         {
-                transfer_image_layout(s->cmdBuffer, s->dpb[i], //VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR
+                transfer_image_layout(s->decodeCmdBuf, s->dpb[i], //VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR
                                                           VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
         }
         
         // ---Copying decoded DPB image into output image---
         assert(s->dpbFormat == VK_FORMAT_G8_B8R8_2PLANE_420_UNORM); //TODO handle other potential formats too
         copy_decoded_image(s, s->dpb[slice_info->dpbIndex]);
-        transfer_image_layout(s->cmdBuffer, s->outputLumaPlane,
+        transfer_image_layout(s->decodeCmdBuf, s->outputLumaPlane,
                                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-        transfer_image_layout(s->cmdBuffer, s->outputChromaPlane,
+        transfer_image_layout(s->decodeCmdBuf, s->outputChromaPlane,
                                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
         // ---Ending the queue timing---
         if (enable_time_queries)
         {
-                vkCmdWriteTimestamp(s->cmdBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, s->queryPoolTime, 1);
+                vkCmdWriteTimestamp(s->decodeCmdBuf, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, s->queryPoolTime, 1);
         }
 
         if (!end_cmd_buffer(s))
@@ -3130,7 +3130,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
         VkSubmitInfo submitInfo = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
                                                                 .waitSemaphoreCount = 0,
                                                                 .commandBufferCount = 1,
-                                                                .pCommandBuffers = &s->cmdBuffer,
+                                                                .pCommandBuffers = &s->decodeCmdBuf,
                                                                 .signalSemaphoreCount = 0 };
         VkResult result = vkQueueSubmit(s->decodeQueue, 1, &submitInfo, s->fence);
         if (result != VK_SUCCESS)
