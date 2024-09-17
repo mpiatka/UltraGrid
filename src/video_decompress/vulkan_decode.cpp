@@ -104,7 +104,7 @@ struct state_vulkan_decompress // state of vulkan_decode module
         VkDeviceSize bitstreamBufferSize;
         VkDeviceSize bitstreambufferSizeAlignment;
         VkDeviceMemory bitstreamBufferMemory;                // allocated memory for bitstreamBuffer, needs to be freed if valid
-        VkCommandPool decodeCmdPool;                                        // needs to be destroyed if valid
+        VkCommandPoolUniq decodeCmdPool;                                        // needs to be destroyed if valid
         VkCommandBuffer decodeCmdBuf;
         VkVideoSessionKHR videoSession;                                // needs to be destroyed if valid
         uint32_t videoSessionMemory_count;
@@ -224,7 +224,6 @@ static void * vulkan_decompress_init(void)
         s->bitstreamBuffer = VK_NULL_HANDLE; //buffer gets created in allocate_buffers function
         s->bitstreamBufferMemory = VK_NULL_HANDLE;
         s->bitstreambufferSizeAlignment = 0;
-        s->decodeCmdPool = VK_NULL_HANDLE;           //command pool gets created in prepare function
         s->decodeCmdBuf = VK_NULL_HANDLE;                   //same
         s->videoSession = VK_NULL_HANDLE;          //video session gets created in prepare function
         s->videoSessionParams = VK_NULL_HANDLE; //same
@@ -301,9 +300,6 @@ static void vulkan_decompress_done(void *state)
         destroy_output_image(s);
 
         destroy_dpb(s);
-
-        if (vkDestroyCommandPool != NULL && s->device != VK_NULL_HANDLE)
-                vkDestroyCommandPool(s->device, s->decodeCmdPool, NULL);
 
         free_buffers(s);
 
@@ -818,16 +814,16 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
 
 static bool begin_cmd_buffer(struct state_vulkan_decompress *s)
 {
-        // Puts the cmd buffer into recording state
-        VkResult result = vkResetCommandBuffer(s->decodeCmdBuf, 0); // maybe pointless since VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT flag
+        VkResult result = vkResetCommandPool(s->gpu.dev.get(), s->decodeCmdPool, 0);
         if (result != VK_SUCCESS)
         {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to reset the vulkan command buffer!\n");
+                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to reset the vulkan decode command pool!\n");
                 return false;
         }
         
-        VkCommandBufferBeginInfo cmdBufferBeginInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-                                                                                                        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
+        VkCommandBufferBeginInfo cmdBufferBeginInfo = {};
+        cmdBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        cmdBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         result = vkBeginCommandBuffer(s->decodeCmdBuf, &cmdBufferBeginInfo);
         if (result != VK_SUCCESS)
         {
@@ -1697,13 +1693,8 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         }
 
         // ---Creating command pool---
-        assert(s->decodeCmdPool == VK_NULL_HANDLE);
-
-        VkCommandPoolCreateInfo poolInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-                                                                                 .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-                                                                                 .queueFamilyIndex = s->decodeQueueIdx };
-        result = vkCreateCommandPool(s->device, &poolInfo, NULL, &s->decodeCmdPool);
-        if (result != VK_SUCCESS)
+        s->decodeCmdPool = s->gpu.getCmdPool(s->decodeQueueIdx);
+        if (!s->decodeCmdPool)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan command pool!\n");
                 free_buffers(s);
@@ -1725,11 +1716,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         if (result != VK_SUCCESS)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate vulkan command buffer!\n");
-                if (vkDestroyCommandPool != NULL)
-                {
-                        vkDestroyCommandPool(s->device, s->decodeCmdPool, NULL);
-                        s->decodeCmdPool = VK_NULL_HANDLE;
-                }
                 free_buffers(s);
                 if (vkDestroyFence != NULL)
                 {
@@ -1744,11 +1730,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         if (!create_dpb(s, &videoProfileList))
         {
                 // err msg should get printed inside of create_dpb
-                if (vkDestroyCommandPool != NULL)
-                {
-                        vkDestroyCommandPool(s->device, s->decodeCmdPool, NULL);
-                        s->decodeCmdPool = VK_NULL_HANDLE;
-                }
                 free_buffers(s);
                 if (vkDestroyFence != NULL)
                 {
@@ -1764,11 +1745,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         {
                 // err msg should get printed inside of create_output_image
                 destroy_dpb(s);
-                if (vkDestroyCommandPool != NULL)
-                {
-                        vkDestroyCommandPool(s->device, s->decodeCmdPool, NULL);
-                        s->decodeCmdPool = VK_NULL_HANDLE;
-                }
                 free_buffers(s);
                 if (vkDestroyFence != NULL)
                 {
@@ -1785,11 +1761,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 // err msg should get printed inside of create_output_queue
                 destroy_output_image(s);
                 destroy_dpb(s);
-                if (vkDestroyCommandPool != NULL)
-                {
-                        vkDestroyCommandPool(s->device, s->decodeCmdPool, NULL);
-                        s->decodeCmdPool = VK_NULL_HANDLE;
-                }
                 free_buffers(s);
                 if (vkDestroyFence != NULL)
                 {
@@ -1834,11 +1805,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 destroy_output_queue(s);
                 destroy_output_image(s);
                 destroy_dpb(s);
-                if (vkDestroyCommandPool != NULL)
-                {
-                        vkDestroyCommandPool(s->device, s->decodeCmdPool, NULL);
-                        s->decodeCmdPool = VK_NULL_HANDLE;
-                }
                 free_buffers(s);
                 if (vkDestroyFence != NULL)
                 {
@@ -1884,11 +1850,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 destroy_output_queue(s);
                 destroy_output_image(s);
                 destroy_dpb(s);
-                if (vkDestroyCommandPool != NULL)
-                {
-                        vkDestroyCommandPool(s->device, s->decodeCmdPool, NULL);
-                        s->decodeCmdPool = VK_NULL_HANDLE;
-                }
                 free_buffers(s);
                 if (vkDestroyFence != NULL)
                 {
@@ -1918,11 +1879,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 destroy_output_queue(s);
                 destroy_output_image(s);
                 destroy_dpb(s);
-                if (vkDestroyCommandPool != NULL)
-                {
-                        vkDestroyCommandPool(s->device, s->decodeCmdPool, NULL);
-                        s->decodeCmdPool = VK_NULL_HANDLE;
-                }
                 free_buffers(s);
                 if (vkDestroyFence != NULL)
                 {
