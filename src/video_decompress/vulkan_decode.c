@@ -40,6 +40,8 @@
 // helper functions for parsing H.264:
 #include "vulkan_decode_h264.h"
 
+#define min(a, b) ((a) < (b) ? (a) :(b)) 
+
 // activates vulkan validation layers if defined
 // if defined your vulkan loader needs to know where to find the validation layer manifest
 // (for example through VK_LAYER_PATH or VK_ADD_LAYER_PATH env. variables)
@@ -2994,7 +2996,7 @@ static const unsigned char * get_next_nal(const unsigned char *start, long len, 
 {
         switch ((enum nal_type)type)
         {
-                case NAL_H264_NONIDR:
+                case NAL_H264_NON_IDR:
                         printf("H264 NON-IDR");
                         break;
                 case NAL_H264_IDR:
@@ -3693,7 +3695,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
                         assert(rbsp != NULL);
                         assert(rbsp_len > 0);
 
-                        if (!filter_nal && nalu_type != NAL_H264_IDR && nalu_type != NAL_H264_NONIDR)
+                        if (!filter_nal && nalu_type != NAL_H264_IDR && nalu_type != NAL_H264_NON_IDR)
                         {
                                 VkDeviceSize written = 0;
                                 if (convert_to_rbsp)
@@ -3729,7 +3731,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
                                                 clear_the_ref_slot_queue(s); // we dont need those references anymore
                                         }
                                         // intentional fallthrough
-                                case NAL_H264_NONIDR:
+                                case NAL_H264_NON_IDR:
                                         {
                                                 VkDeviceSize written = 0;
                                                 if (convert_to_rbsp)
@@ -4156,11 +4158,11 @@ static decompress_status vulkan_decompress(void *state, unsigned char *dst, unsi
                         s->timings_count = 0;
                 }
 
-                s->decompress_time_sum += (float)decompress_time / NS_IN_MS_DBL;
-                s->parsing_time_sum += (float)parse_time / NS_IN_MS_DBL;
-                s->vk_queue_time_sum += (float)queue_time / NS_IN_MS_DBL;
-                s->nv12_convert_time_sum += (float)nv12_convert_time / NS_IN_MS_DBL;
-                s->copy_to_dst_time_sum += (float)copy_to_dst_time / NS_IN_MS_DBL;
+                s->decompress_time_sum += (float)NS_TO_MS(decompress_time);
+                s->parsing_time_sum += (float)NS_TO_MS(parse_time);
+                s->vk_queue_time_sum += (float)NS_TO_MS(queue_time);
+                s->nv12_convert_time_sum += (float)NS_TO_MS(nv12_convert_time);
+                s->copy_to_dst_time_sum += (float)NS_TO_MS(copy_to_dst_time);
 
                 ++(s->timings_count);
         #endif
