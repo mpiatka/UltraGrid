@@ -1017,7 +1017,7 @@ static bool create_output_image(struct state_vulkan_decompress *s)
 
         uint32_t imgMemoryTypeIdx = 0;
         if (!find_memory_type(s, lumaMemReq.memoryTypeBits & chromaMemReq.memoryTypeBits, // taking the susbet
-                                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
                                                   &imgMemoryTypeIdx))
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to find required memory type for output image!\n");
@@ -2488,29 +2488,34 @@ static bool write_decoded_frame(struct state_vulkan_decompress *s, frame_data_t 
         assert((size_t)size == s->outputFrameQueue_data_size);
         assert(lumaSize <= s->outputChromaPlaneOffset);
 
-        uint8_t *memory = NULL;
-        VkResult result = vkMapMemory(s->device, s->outputImageMemory, 0, s->outputChromaPlaneOffset + chromaSize*2,
+        unsigned char *memory = NULL;
+        VkDeviceSize mapSize = s->outputChromaPlaneOffset + chromaSize * 2;
+        VkResult result = vkMapMemory(s->device, s->outputImageMemory, 0, mapSize,
                                                                   0, (void**)&memory);
         if (result != VK_SUCCESS) return false;
         assert(memory != NULL);
 
-        uint8_t *dst_mem = s->outputFrameQueue_data + dst_frame->data_idx * s->outputFrameQueue_data_size;
+        VkMappedMemoryRange imageMemRange = {};
+        imageMemRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+        imageMemRange.memory = s->outputImageMemory;
+        imageMemRange.offset = 0;
+        imageMemRange.size = VK_WHOLE_SIZE;
+
+        vkInvalidateMappedMemoryRanges(s->gpu.dev.get(), 1, &imageMemRange);
+
+        unsigned char *dst_mem = s->outputFrameQueue_data + dst_frame->data_idx * s->outputFrameQueue_data_size;
 
         // Translating NV12 into I420:
         // luma plane
-        const uint8_t *luma = memory;
-        //for (size_t i = 0; i < lumaSize; ++i) dst_mem[i] = (unsigned char)luma[i];
+        const unsigned char *luma = memory;
         memcpy(dst_mem, luma, lumaSize);
 
         // chroma plane
-        const uint8_t *chroma = memory + s->outputChromaPlaneOffset;
+        const unsigned char *chroma = memory + s->outputChromaPlaneOffset;
         for (size_t i = 0; i < chromaSize; ++i)
         {
-                unsigned char Cb = (unsigned char)chroma[2*i],
-                                          Cr = (unsigned char)chroma[2*i + 1];
-
-                dst_mem[lumaSize + i] = Cb;
-                dst_mem[lumaSize + chromaSize + i] = Cr;
+                dst_mem[lumaSize + i] = *(chroma++);
+                dst_mem[lumaSize + chromaSize + i] = *(chroma++);
         }
 
         vkUnmapMemory(s->device, s->outputImageMemory);
