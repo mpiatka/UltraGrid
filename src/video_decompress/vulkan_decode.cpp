@@ -2489,7 +2489,7 @@ static bool write_decoded_frame(struct state_vulkan_decompress *s, frame_data_t 
         assert(lumaSize <= s->outputChromaPlaneOffset);
 
         uint8_t *memory = NULL;
-        VkResult result = vkMapMemory(s->device, s->outputImageMemory, 0, s->outputChromaPlaneOffset + chromaSize,
+        VkResult result = vkMapMemory(s->device, s->outputImageMemory, 0, s->outputChromaPlaneOffset + chromaSize*2,
                                                                   0, (void**)&memory);
         if (result != VK_SUCCESS) return false;
         assert(memory != NULL);
