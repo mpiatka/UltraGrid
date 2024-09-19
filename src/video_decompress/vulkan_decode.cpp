@@ -34,6 +34,7 @@
 
 // helper functions for parsing H.264:
 #include "vulkan_decode_h264.h"
+#include "h264utils.hpp"
 
 #define min(a, b) ((a) < (b) ? (a) :(b)) 
 
@@ -2118,170 +2119,13 @@ static void end_video_coding_scope(struct state_vulkan_decompress *s)
         vkCmdEndVideoCodingKHR(s->decodeCmdBuf, &endCodingInfo);
 }
 
-//DEBUG
-/*static void print_bits(unsigned char num)
+static bool get_video_info_from_sps(struct state_vulkan_decompress *s, unsigned char *rbsp, size_t rbsp_len)
 {
-        unsigned int bit = 1<<(sizeof(unsigned char) *8 - 1);
-
-        while (bit)
-        {
-                printf("%i ", num & bit ? 1 : 0);
-                bit >>= 1;
-        }
-}*/
-
-//copied from rtp/rtpenc_h264.c
-static uint32_t get4Bytes(const unsigned char *ptr)
-{
-        return (ptr[0] << 24) | (ptr[1] << 16) | (ptr[2] << 8) | ptr[3];
-}
-
-static const unsigned char * skip_nal_start_code(const unsigned char *nal)
-{
-        //caller should assert that nal stream is at least 4 bytes long
-        uint32_t next4Bytes = get4Bytes(nal);
-
-        if (next4Bytes == 0x00000001) return nal + 4;
-        else if ((next4Bytes & 0xFFFFFF00) == 0x00000100) return nal + 3;
-        else return NULL;
-}
-
-//copied from rtp/rtpenc_h264.c
-static const unsigned char * get_next_nal(const unsigned char *start, long len, bool with_start_code)
-{
-        const unsigned char * const stop = start + len;
-        while (stop - start >= 4) {
-                uint32_t next4Bytes = get4Bytes(start);
-                if (next4Bytes == 0x00000001) {
-                        return start + (with_start_code ? 0 : 4);
-                }
-                if ((next4Bytes & 0xFFFFFF00) == 0x00000100) {
-                        return start + (with_start_code ? 0 : 3);
-                }
-                // We save at least some of "next4Bytes".
-                if ((unsigned) (next4Bytes & 0xFF) > 1) {
-                        // Common case: 0x00000001 or 0x000001 definitely doesn't begin anywhere in "next4Bytes", so we save all of it:
-                        start += 4;
-                } else {
-                        // Save the first byte, and continue testing the rest:
-                        start += 1;
-                }
-        }
-        return NULL;
-}
-
-//DEBUG - copied from rtp/rtpenc_h264.c
-/*static void print_nalu_name(int type)
-{
-        switch ((enum nal_type)type)
-        {
-                case NAL_H264_NON_IDR:
-                        printf("H264 NON-IDR");
-                        break;
-                case NAL_H264_IDR:
-                        printf("H264 IDR");
-                        break;
-                case NAL_H264_SEI:
-                        printf("H264 SEI");
-                        break;
-                case NAL_H264_SPS:
-                        printf("H264 SPS");
-                        break;
-                case NAL_H264_PPS:
-                        printf("H264 PPS");
-                        break;
-                case NAL_H264_AUD:
-                        printf("H264 AUD");
-                        break;
-                case NAL_HEVC_VPS:
-                        printf("HEVC VPS");
-                        break;
-                case NAL_HEVC_SPS:
-                        printf("HEVC SPS");
-                        break;
-                case NAL_HEVC_PPS:
-                        printf("HEVC PPS");
-                        break;
-                case NAL_HEVC_AUD:
-                        printf("HEVC AUD");
-                        break;
-    }
-}
-
-//DEBUG
-static void print_nalu_header(unsigned char header)
-{
-        printf("forbidden bit: %u, idc: %u, type: %u", header & 128 ? 1 : 0,
-                                H264_NALU_HDR_GET_NRI(header), H264_NALU_HDR_GET_TYPE(header));
-}*/
-
-static bool create_rbsp(const unsigned char *nal, size_t nal_len, uint8_t **rbsp, int *rbsp_len)
-{
-        // allocates memory for rbsp and fills it with correct rbsp corresponding to given nal buffer range
-        // returns false if error and prints error msg
-        assert(nal != NULL && rbsp != NULL && rbsp_len != NULL);
-
-        if (sizeof(unsigned char) != sizeof(uint8_t))
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] H.264/H.265 stream handling requires sizeof(unsigned char) == sizeof(uint8_t)!\n");
-                *rbsp_len = 0;
-                return false;
-        }
-
-        *rbsp_len = (int)nal_len;
-        assert(*rbsp_len >= 0);
-        uint8_t *out = (uint8_t*)malloc(nal_len * sizeof(uint8_t));
-        if (out == NULL)
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate memory for RBSP stream data!\n");
-                *rbsp_len = 0;
-                return false;
-        }
-
-        // throw away variable, could be set to 'nal_len' instead, but we are using the fact that 'rbsp_len' is already converted
-        int nal_payload_len = *rbsp_len;
-        // the cast here to (const uint8_t*) is valid because of the first 'if'
-        int ret = nal_to_rbsp((const uint8_t*)nal, &nal_payload_len, out, rbsp_len);
-        if (ret == -1)
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to convert NALU stream into RBSP data!\n");
-                free(out);
-                *rbsp_len = 0;
-                return false;
-        }
-
-        assert(ret == *rbsp_len);
-        *rbsp = out;
-        
-        return true;
-}
-
-static void destroy_rbsp(uint8_t *rbsp)
-{
-        // destroys rbsp previously created with create_rbsp function
-        // (just frees the memory, maybe pointless)
-        free(rbsp);
-}
-
-static bool get_video_info_from_sps(struct state_vulkan_decompress *s, const unsigned char *sps_src, size_t sps_src_len)
-{
-        // extracts the important info about incoming video from SPS NAL data given by sps_src pointer
-        uint8_t *rbsp = NULL;
-        int rbsp_len = 0;
-
-        if (!create_rbsp(sps_src, sps_src_len, &rbsp, &rbsp_len))
-        {
-                //err should get printed inside of create_rbsp
-                return false;
-        }
-        assert(rbsp != NULL);
-
         sps_t sps = {};
         bs_t b = {};
         bs_init(&b, rbsp, rbsp_len);
 
         read_sps(&sps, &b);
-        destroy_rbsp(rbsp);
 
         bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
 
@@ -2324,41 +2168,20 @@ static bool find_first_sps_vps(struct state_vulkan_decompress *s, const unsigned
         // otherwise returns false and prints error msg if error happened
         bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
 
-        const unsigned char *nal = get_next_nal(src, src_len, true), *next_nal = NULL;
-        while (nal != NULL)
-        {
-                const unsigned char *nal_payload = skip_nal_start_code(nal);
-                if (nal_payload == NULL) return false;
+        Nal_unit_reader reader;
+        reader.set_data(src, src_len);
 
-                next_nal = get_next_nal(nal_payload, src_len - (nal_payload - src), true);
-                size_t nal_len = next_nal == NULL ? src_len - (nal - src) : next_nal - nal;
-                if (nal_len <= 4 || (size_t)(nal_payload - nal) >= nal_len)
-                {
-                        log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] NAL unit is too short.\n");
-                        return false;
-                }
-
-                size_t nal_payload_len = nal_len - (nal_payload - nal); //should be non-zero now
-
-                int nalu_type = NALU_HDR_GET_TYPE(nal_payload[0], !isH264);
-                if (isH264 &&
-                        nalu_type == NAL_H264_SPS)
-                {
-                        if (!get_video_info_from_sps(s, nal_payload, nal_payload_len))
-                        {
+        Nal_unit *nal = nullptr;
+        while((nal = reader.get_next())){
+                if (isH264 && nal->type == NAL_H264_SPS) {
+                        if (!get_video_info_from_sps(s, nal->rbsp.data(), nal->rbsp.size())) {
                                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Found first SPS, but it was invalid! Discarting it.\n");
                                 return false;
                         }
-
+                        return true;
+                } else if (!isH264 && (nal->type == NAL_HEVC_SPS || nal->type == NAL_HEVC_VPS)) {
                         return true;
                 }
-                else if (!isH264 &&
-                                 (nalu_type == NAL_HEVC_SPS || nalu_type == NAL_HEVC_VPS))
-                {
-                        return true;
-                }
-
-                nal = next_nal;
         }
 
         return false;
@@ -2378,7 +2201,7 @@ static void * begin_bitstream_writing(struct state_vulkan_decompress *s)
 }
 
 static VkDeviceSize write_bitstream(uint8_t *bitstream, VkDeviceSize bitstream_len, VkDeviceSize bitstream_capacity,
-                                                                    const uint8_t *rbsp, int len, unsigned char nal_header, bool long_startcode)
+                                                                    const uint8_t *rbsp, int len, unsigned char nal_header)
 {
         // writes one given NAL unit into NAL buffer, if error (not enough space in buffer) returns 0
         assert(bitstream != NULL && rbsp != NULL && len > 0);
@@ -2392,7 +2215,6 @@ static VkDeviceSize write_bitstream(uint8_t *bitstream, VkDeviceSize bitstream_l
                                                    sizeof(startcode_short) / sizeof(startcode_short[0]);*/
         
         //DEBUG
-        UNUSED(long_startcode);
         const uint8_t *startcode = startcode_short;
         size_t startcode_len = sizeof(startcode_short) / sizeof(startcode_short[0]);
         
@@ -2731,7 +2553,7 @@ static VkDeviceSize handle_vcl(struct state_vulkan_decompress *s,
         UNUSED(sh_ret); // we want to write it into bitstream anyway
 
         VkDeviceSize written = write_bitstream(bitstream, bitstream_written, bitstream_capacity,
-                                                                                   rbsp, rbsp_len, nal_header, long_startcode);
+                                                                                   rbsp, rbsp_len, nal_header);
         if (written > 0 && *slice_offsets_count < MAX_SLICES)
         {
                 slice_offsets[*slice_offsets_count] = bitstream_written; // pointing at the written startcode
@@ -2843,122 +2665,68 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to map needed vulkan memory for NAL units!\n");
                 return false;
         }
+
+        Nal_unit_reader nal_reader;
+        nal_reader.set_data(src, src_len);
+        Nal_unit *nal = nullptr;
+        while((nal = nal_reader.get_next()))
         {
-                const unsigned char *nal = get_next_nal(src, src_len, true), *next_nal = NULL;
-                size_t nal_len = 0;
-                if (nal == NULL) log_msg(LOG_LEVEL_WARNING, "[vulkan_decode] First NAL is NULL!\n");
-
-                while (nal != NULL)
+                if (!filter_nal && nal->type != NAL_H264_IDR && nal->type != NAL_H264_NON_IDR)
                 {
-                        const unsigned char *nal_payload = skip_nal_start_code(nal);
-                        if (nal_payload == NULL)
+                        VkDeviceSize written = 0;
+                        written = write_bitstream(bitstream, bitstream_written, bitstream_max_size,
+                                        nal->rbsp.data(), nal->rbsp.size(), nal->header);
+                        bitstream_written += written;
+                }
+
+                switch(nal->type)
+                {
+                case NAL_H264_SEI:
+                        break; //switch break
+                case NAL_H264_IDR:
                         {
-                                log_msg(LOG_LEVEL_WARNING, "[vulkan_decode] Encountered NAL unit that does not begin with a start code.\n");
-                                break;
+                                s->prev_poc_lsb = 0;
+                                s->prev_poc_msb = 0;
+                                s->prev_frame_num = 0;
+                                s->prev_frame_num_offset = 0;
+
+                                s->idr_frame_seq = frame_seq;
+                                s->poc_wrap = 0;
+
+                                slice_info->is_idr = true;
+
+                                clear_the_ref_slot_queue(s); // we dont need those references anymore
                         }
-
-                        next_nal = get_next_nal(nal_payload, src_len - (nal_payload - src), true);
-                        nal_len = next_nal == NULL ? src_len - (nal - src) : next_nal - nal;
-                        if (nal_len <= 4 || (size_t)(nal_payload - nal) >= nal_len)
-                        {
-                                log_msg(LOG_LEVEL_WARNING, "[vulkan_decode] Encountered too short NAL unit.\n");
-                                break;
-                        }
-                        
-                        size_t nal_startcode_len = nal_payload - nal;
-                        size_t nal_payload_len = nal_len - nal_startcode_len; //should be non-zero now
-                        bool long_startcode = nal_len - nal_payload_len > 3;
-
-                        unsigned char nalu_header = nal_payload[0];
-                        int nalu_type = NALU_HDR_GET_TYPE(nalu_header, !isH264);
-
-                        uint8_t *rbsp = NULL;
-                        int rbsp_len = 0;
-                        if (!create_rbsp(nal_payload, nal_payload_len, &rbsp, &rbsp_len))
-                        {
-                                //err should get printed inside of create_rbsp
-                                break;
-                        }
-                        assert(rbsp != NULL);
-                        assert(rbsp_len > 0);
-
-                        if (!filter_nal && nalu_type != NAL_H264_IDR && nalu_type != NAL_H264_NON_IDR)
+                        // intentional fallthrough
+                case NAL_H264_NON_IDR:
                         {
                                 VkDeviceSize written = 0;
-                                if (convert_to_rbsp)
-                                {
-                                        written = write_bitstream(bitstream, bitstream_written, bitstream_max_size,
-                                                                                          rbsp, rbsp_len, nalu_header, long_startcode);
-                                }
-                                else //DEBUG version without conversion to rbsp:
-                                {
-                                        written = write_bitstream(bitstream, bitstream_written, bitstream_max_size,
-                                                                                          (uint8_t*)(nal_payload + 1), (int)(nal_payload_len - 1), nalu_header, long_startcode);
-                                }
-                                
+                                written = handle_vcl(s, bitstream, bitstream_written, bitstream_max_size,
+                                                nal->rbsp.data(), nal->rbsp.size(), nal->header, slice_info,
+                                                slice_offsets, &slice_offsets_count, false);
                                 bitstream_written += written;
                         }
-
-                        switch(nalu_type)
+                        break; //switch break
+                case NAL_H264_SPS:
                         {
-                                case NAL_H264_SEI:
-                                        break; //switch break
-                                case NAL_H264_IDR:
-                                        {
-                                                s->prev_poc_lsb = 0;
-                                                s->prev_poc_msb = 0;
-                                                s->prev_frame_num = 0;
-                                                s->prev_frame_num_offset = 0;
-
-                                                s->idr_frame_seq = frame_seq;
-                                                s->poc_wrap = 0;
-
-                                                slice_info->is_idr = true;
-
-                                                clear_the_ref_slot_queue(s); // we dont need those references anymore
-                                        }
-                                        // intentional fallthrough
-                                case NAL_H264_NON_IDR:
-                                        {
-                                                VkDeviceSize written = 0;
-                                                if (convert_to_rbsp)
-                                                {
-                                                        written = handle_vcl(s, bitstream, bitstream_written, bitstream_max_size,
-                                                                                                    rbsp, rbsp_len, nalu_header, slice_info,
-                                                                                                    slice_offsets, &slice_offsets_count, long_startcode);
-                                                }
-                                                else //DEBUG version without conversion to rbsp:
-                                                {
-                                                        written = handle_vcl(s, bitstream, bitstream_written, bitstream_max_size,
-                                                                                                 (uint8_t*)(nal_payload + 1), (int)(nal_payload_len - 1), nalu_header, slice_info,
-                                                                                                 slice_offsets, &slice_offsets_count, long_startcode);
-                                                }
-                                                bitstream_written += written;
-                                        }
-                                        break; //switch break
-                                case NAL_H264_SPS:
-                                        {
-                                                bool sps_ret = handle_sps_nalu(s, rbsp, rbsp_len);
-                                                UNUSED(sps_ret);
-                                        }
-                                        break; //switch break
-                                case NAL_H264_PPS:
-                                        {
-                                                bool pps_ret = handle_pps_nalu(s, rbsp, rbsp_len);
-                                                UNUSED(pps_ret);
-                                        }
-                                        break; //switch break
-
-                                //TODO H.265 NAL unit types
-                                default:
-                                        if (isH264) log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Irrelevant NAL unit => Skipping it.\n");
-                                        if (!isH264) log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] H265 is not implemented!\n");
-                                        break; //switch break
+                                bool sps_ret = handle_sps_nalu(s, nal->rbsp.data(), nal->rbsp.size());
+                                UNUSED(sps_ret);
                         }
+                        break; //switch break
+                case NAL_H264_PPS:
+                        {
+                                bool pps_ret = handle_pps_nalu(s, nal->rbsp.data(), nal->rbsp.size());
+                                UNUSED(pps_ret);
+                        }
+                        break; //switch break
 
-                        destroy_rbsp(rbsp);
-                        nal = next_nal;
+                        //TODO H.265 NAL unit types
+                default:
+                        if (isH264) log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Irrelevant NAL unit => Skipping it.\n");
+                        if (!isH264) log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] H265 is not implemented!\n");
+                        break; //switch break
                 }
+
         }
         end_bitstream_writing(s);
         bitstream = NULL; // just to be sure
