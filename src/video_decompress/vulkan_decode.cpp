@@ -871,37 +871,6 @@ static bool end_cmd_buffer(VkCommandBuffer cmdBuf)
         return true;
 }
 
-static void deduce_stage_and_access_from_layout(VkImageLayout layout, VkPipelineStageFlags2 *stage, VkAccessFlags2 *access)
-{
-        switch (layout)
-        {
-                case VK_IMAGE_LAYOUT_UNDEFINED: // only after the initialization of image
-                        if (stage != NULL) *stage = VK_PIPELINE_STAGE_2_NONE;
-                        if (access != NULL) *access = VK_ACCESS_2_NONE;
-                        break;
-                case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL: // beginning of the cmd buffer or preparing for decoded picture copying
-                        if (stage != NULL) *stage = VK_PIPELINE_STAGE_2_COPY_BIT_KHR;
-                        if (access != NULL) *access = VK_ACCESS_2_TRANSFER_READ_BIT;
-                        break;
-                case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL: // copying into outputImage
-                        if (stage != NULL) *stage = VK_PIPELINE_STAGE_2_COPY_BIT_KHR;
-                        if (access != NULL) *access = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-                        break;
-                /*case VK_IMAGE_LAYOUT_VIDEO_DECODE_DST_KHR: // beginning of the cmd buffer when preparing for decode, or after it
-                        if (stage != NULL) *stage = VK_PIPELINE_STAGE_2_VIDEO_DECODE_BIT_KHR;
-                        if (access != NULL) *access = VK_ACCESS_2_VIDEO_DECODE_READ_BIT_KHR |
-                                                                                  VK_ACCESS_2_VIDEO_DECODE_WRITE_BIT_KHR;
-                        break;*/
-                case VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR: // beginning of the cmd buffer when preparing for decode, or after it
-                        if (stage != NULL) *stage = VK_PIPELINE_STAGE_2_VIDEO_DECODE_BIT_KHR;
-                        if (access != NULL) *access = VK_ACCESS_2_VIDEO_DECODE_READ_BIT_KHR |
-                                                                                  VK_ACCESS_2_VIDEO_DECODE_WRITE_BIT_KHR;
-                        break;
-                default:
-                        break;
-        }
-}
-
 static void transfer_image_layout(VkCommandBuffer cmdBuffer, VkImage image,
                 VkImageLayout oldLayout, VkImageLayout newLayout,
                 uint32_t oldQueue = VK_QUEUE_FAMILY_IGNORED,
