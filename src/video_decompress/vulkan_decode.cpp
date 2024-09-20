@@ -62,7 +62,9 @@
 
 typedef struct        // structure used to pass around variables related to currently decoded frame (slice)
 {
-        bool is_intra, is_reference, is_idr;
+        bool is_intra;
+        bool is_reference;
+        bool is_idr;
         int nal_idc;
         int idr_pic_id;
         int sps_id;
@@ -131,7 +133,7 @@ struct state_vulkan_decompress // state of vulkan_decode module
         AllocatedMemory dpbMemory;
         VkFormat dpbFormat;                                                        // format of VkImages in dpb
         //uint32_t dpbDstPictureIdx;                                        // index (into dpb and dpbViews) of the slot for next to be decoded frame
-        slice_info_t referenceSlotsQueue[MAX_REF_FRAMES];        // queue containing slice infos of the current reference frames 
+        slice_info_t referenceSlotsQueue[MAX_REF_FRAMES] = {};        // queue containing slice infos of the current reference frames 
         uint32_t referenceSlotsQueue_start;                                          // index into referenceSlotsQueue where the queue starts
         uint32_t referenceSlotsQueue_count;                                          // the current length of the reference slots queue
 
@@ -146,7 +148,7 @@ struct state_vulkan_decompress // state of vulkan_decode module
         uint8_t *outputFrameQueue_data;
 
         // Output video description data
-        int width, height;
+        unsigned width, height;
         VkDeviceSize lumaSize, chromaSize;
         int pitch; // currently not used (maybe not needed for multiplanar output formats)
         codec_t out_codec;
@@ -237,12 +239,6 @@ static void * vulkan_decompress_init(void)
                 s->dpbViews[i] = VK_NULL_HANDLE;
         }
         s->dpbFormat = VK_FORMAT_UNDEFINED;
-        for (size_t i = 0; i < MAX_REF_FRAMES; ++i)
-        {
-                // setting the reference queue members to some unvalid value 
-                s->referenceSlotsQueue[i] = (slice_info_t){ .idr_pic_id = -1, .sps_id = -1, .pps_id = -1, .frame_num = -1, .frame_seq = -1,
-                                                                                                        .poc = -1, .poc_lsb = -1 };
-        }
 
         s->outputLumaPlane = VK_NULL_HANDLE;
         s->outputChromaPlane = VK_NULL_HANDLE;
@@ -303,8 +299,6 @@ static VkVideoCodecOperationFlagBitsKHR codec_to_vulkan_flag(codec_t codec)
 static bool configure_with(struct state_vulkan_decompress *s, struct video_desc desc)
 {
         // Configures module with given video parameters, returns true if success
-        const char *spec_name = get_codec_name_long(desc.color_spec);
-
         s->codecOperation = VK_VIDEO_CODEC_OPERATION_NONE_KHR;
         VkVideoCodecOperationFlagBitsKHR videoCodecOperation = codec_to_vulkan_flag(desc.color_spec);
 
@@ -536,9 +530,12 @@ static bool check_for_vulkan_format(VkPhysicalDevice physDevice, VkPhysicalDevic
         {
                 VkFormat format = properties[i].format;
 
-                VkFormatProperties3 extraProps = { .sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3 };
-                VkFormatProperties2 formatProps = { .sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2,
-                                                                                        .pNext = (void*)&extraProps };
+                VkFormatProperties3 extraProps = {};
+                extraProps.sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3;
+                VkFormatProperties2 formatProps = {};
+                formatProps.sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2;
+                formatProps.pNext = &extraProps;
+
                 vkGetPhysicalDeviceFormatProperties2(physDevice, format, &formatProps);
 
                 //DEBUG
@@ -878,10 +875,6 @@ static bool create_output_image(struct state_vulkan_decompress *s)
         VkDeviceSize chromaAlignment = chromaMemReq.alignment;
         s->outputChromaPlaneOffset = (lumaMemReq.size + (chromaAlignment - 1)) & ~(chromaAlignment - 1); //alignment bit mask magic
 
-        log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Luma size: %llu, chroma size: %llu, chroma offset: %llu.\n",
-                                                        lumaMemReq.size, chromaMemReq.size, s->outputChromaPlaneOffset);
-
-
         VkDeviceSize allocSize = s->outputChromaPlaneOffset + chromaMemReq.size;
         s->outputImageMemory = s->gpu.allocateMem(allocSize, 0,
                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
@@ -1002,21 +995,26 @@ static bool create_dpb(struct state_vulkan_decompress *s, VkVideoProfileListInfo
         }
 
         // ---Creating DPB image views---
-        VkImageViewUsageCreateInfo viewUsageInfo = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO,
-                                                                                                 .usage = VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR |
-                                                                                                                   VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR };
-        VkImageSubresourceRange viewSubresourceRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                                                                                                         .baseMipLevel = 0, .levelCount = 1,
-                                                                                                         .baseArrayLayer = 0, .layerCount = 1 };
-        VkImageViewCreateInfo dpbViewInfo = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-                                                                                  .pNext = (void*)&viewUsageInfo,
-                                                                                  .flags = 0,
-                                                                                  .image = VK_NULL_HANDLE, // gets correctly set in the for loop
-                                                                                  .viewType = VK_IMAGE_VIEW_TYPE_2D,
-                                                                                  .format = dpbImgInfo.format,
-                                                                                  .components = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
-                                                                                        VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY },
-                                                                                  .subresourceRange = viewSubresourceRange };
+        VkImageViewUsageCreateInfo viewUsageInfo = {};
+        viewUsageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO;
+        viewUsageInfo.usage = VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR | VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR;
+
+        VkImageSubresourceRange viewSubresourceRange = {};
+        viewSubresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        viewSubresourceRange.baseMipLevel = 0;
+        viewSubresourceRange.levelCount = 1;
+        viewSubresourceRange.baseArrayLayer = 0;
+        viewSubresourceRange.layerCount = 1;
+
+        VkImageViewCreateInfo dpbViewInfo = {};
+        dpbViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        dpbViewInfo.pNext = (void*)&viewUsageInfo;
+        dpbViewInfo.flags = 0;
+        dpbViewInfo.image = VK_NULL_HANDLE; // gets correctly set in the for loop
+        dpbViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        dpbViewInfo.format = dpbImgInfo.format;
+        dpbViewInfo.components = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY };
+        dpbViewInfo.subresourceRange = viewSubresourceRange;
         
         for (size_t i = 0; i < dpb_len; ++i)
         {
@@ -1386,31 +1384,37 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         }
 
         assert(s->codecOperation != VK_VIDEO_CODEC_OPERATION_NONE_KHR);
-        bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
 
         //TODO interlacing
-        VkVideoDecodeH264ProfileInfoKHR h264Profile = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PROFILE_INFO_KHR,
-                                                                                                        .stdProfileIdc = s->profileIdc,
-                                                                                                        .pictureLayout = VK_VIDEO_DECODE_H264_PICTURE_LAYOUT_PROGRESSIVE_KHR };
-        VkVideoDecodeH265ProfileInfoKHR h265Profile = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_PROFILE_INFO_KHR,
-                                                                                                        .stdProfileIdc = STD_VIDEO_H265_PROFILE_IDC_MAIN //TODO H.265
-                                                                                                         };
-        VkVideoDecodeUsageInfoKHR decodeUsageHint = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_USAGE_INFO_KHR,
-                                                                                                  .pNext = isH264 ? (void*)&h264Profile : (void*)&h265Profile,
-                                                                                                  .videoUsageHints = VK_VIDEO_DECODE_USAGE_STREAMING_BIT_KHR };
-        VkVideoProfileInfoKHR videoProfile = { .sType = VK_STRUCTURE_TYPE_VIDEO_PROFILE_INFO_KHR,
-                                                                                   .pNext = (void*)&decodeUsageHint,
-                                                                                   .videoCodecOperation = s->codecOperation,
-                                                                                   .chromaSubsampling = chromaSubsampling,
-                                                                                   .lumaBitDepth = vulkanLumaDepth,
-                                                                                   .chromaBitDepth = vulkanChromaDepth };
+        VkVideoDecodeH264ProfileInfoKHR h264Profile = {};
+        h264Profile.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PROFILE_INFO_KHR;
+        h264Profile.stdProfileIdc = s->profileIdc;
+        h264Profile.pictureLayout = VK_VIDEO_DECODE_H264_PICTURE_LAYOUT_PROGRESSIVE_KHR;
+
+        VkVideoDecodeUsageInfoKHR decodeUsageHint = {};
+        decodeUsageHint.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_USAGE_INFO_KHR;
+        decodeUsageHint.pNext = &h264Profile;
+        decodeUsageHint.videoUsageHints = VK_VIDEO_DECODE_USAGE_STREAMING_BIT_KHR;
+
+        VkVideoProfileInfoKHR videoProfile = {};
+        videoProfile.sType = VK_STRUCTURE_TYPE_VIDEO_PROFILE_INFO_KHR;
+        videoProfile.pNext = &decodeUsageHint;
+        videoProfile.videoCodecOperation = s->codecOperation;
+        videoProfile.chromaSubsampling = chromaSubsampling;
+        videoProfile.lumaBitDepth = vulkanLumaDepth;
+        videoProfile.chromaBitDepth = vulkanChromaDepth;
         
-        VkVideoDecodeH264CapabilitiesKHR h264Capabilites = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_CAPABILITIES_KHR };
-        VkVideoDecodeH265CapabilitiesKHR h265Capabilites = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_CAPABILITIES_KHR };
-        VkVideoDecodeCapabilitiesKHR decodeCapabilities = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_CAPABILITIES_KHR,
-                                                                                                                .pNext = isH264 ? (void*)&h264Capabilites : (void*)&h265Capabilites };
-        VkVideoCapabilitiesKHR videoCapabilities = { .sType = VK_STRUCTURE_TYPE_VIDEO_CAPABILITIES_KHR,
-                                                                                                 .pNext = (void*)&decodeCapabilities };
+        VkVideoDecodeH264CapabilitiesKHR h264Capabilites = {};
+        h264Capabilites.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_CAPABILITIES_KHR;
+
+        VkVideoDecodeCapabilitiesKHR decodeCapabilities = {};
+        decodeCapabilities.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_CAPABILITIES_KHR;
+        decodeCapabilities.pNext = &h264Capabilites;
+
+        VkVideoCapabilitiesKHR videoCapabilities = {};
+        videoCapabilities.sType = VK_STRUCTURE_TYPE_VIDEO_CAPABILITIES_KHR;
+        videoCapabilities.pNext = &decodeCapabilities;
+
         VkResult result = vkGetPhysicalDeviceVideoCapabilitiesKHR(s->physicalDevice, &videoProfile, &videoCapabilities);
         if (result != VK_SUCCESS)
         {
@@ -1463,14 +1467,15 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         VkVideoFormatPropertiesKHR pictureFormatProperites = {}, referencePictureFormatProperties = {};
         VkFormat pictureFormat = VK_FORMAT_UNDEFINED, referencePictureFormat = VK_FORMAT_UNDEFINED;
 
-        VkVideoProfileListInfoKHR videoProfileList = { .sType = VK_STRUCTURE_TYPE_VIDEO_PROFILE_LIST_INFO_KHR,
-                                                                                                   .profileCount = 1,
-                                                                                                   .pProfiles = &videoProfile };
-        VkPhysicalDeviceVideoFormatInfoKHR videoFormatInfo = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_FORMAT_INFO_KHR,
-                                                                                                                   .pNext = (void*)&videoProfileList,
-                                                                                                                   .imageUsage = VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR |
-                                                                                                                                                    VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR |
-                                                                                                                                                 VK_IMAGE_USAGE_TRANSFER_SRC_BIT };
+        VkVideoProfileListInfoKHR videoProfileList = {};
+        videoProfileList.sType = VK_STRUCTURE_TYPE_VIDEO_PROFILE_LIST_INFO_KHR;
+        videoProfileList.profileCount = 1;
+        videoProfileList.pProfiles = &videoProfile;
+
+        VkPhysicalDeviceVideoFormatInfoKHR videoFormatInfo = {};
+        videoFormatInfo.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_FORMAT_INFO_KHR;
+        videoFormatInfo.pNext = &videoProfileList;
+        videoFormatInfo.imageUsage = VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR | VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
         assert(s->physicalDevice != VK_NULL_HANDLE);
 
@@ -1618,17 +1623,18 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         // ---Creating video session---
         assert(s->videoSession == VK_NULL_HANDLE);
 
-        VkVideoSessionCreateInfoKHR sessionInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_SESSION_CREATE_INFO_KHR,
-                                                                                                .pNext = NULL,
-                                                                                                .queueFamilyIndex = s->decodeQueueIdx,
-                                                                                                .flags = query_ret ? VK_VIDEO_SESSION_CREATE_INLINE_QUERIES_BIT_KHR : 0,
-                                                                                                .pVideoProfile = &videoProfile,
-                                                                                                .pictureFormat = pictureFormat,
-                                                                                                .maxCodedExtent = (VkExtent2D){ s->width, s->height },
-                                                                                                .referencePictureFormat = referencePictureFormat,
-                                                                                                .maxDpbSlots = MAX_REF_FRAMES + 1,
-                                                                                                .maxActiveReferencePictures = MAX_REF_FRAMES,
-                                                                                                .pStdHeaderVersion = &videoCapabilities.stdHeaderVersion };
+        VkVideoSessionCreateInfoKHR sessionInfo = {};
+        sessionInfo.sType = VK_STRUCTURE_TYPE_VIDEO_SESSION_CREATE_INFO_KHR;
+        sessionInfo.queueFamilyIndex = s->decodeQueueIdx;
+        sessionInfo.flags = query_ret ? VK_VIDEO_SESSION_CREATE_INLINE_QUERIES_BIT_KHR : 0;
+        sessionInfo.pVideoProfile = &videoProfile;
+        sessionInfo.pictureFormat = pictureFormat;
+        sessionInfo.maxCodedExtent = (VkExtent2D){ s->width, s->height };
+        sessionInfo.referencePictureFormat = referencePictureFormat;
+        sessionInfo.maxDpbSlots = MAX_REF_FRAMES + 1;
+        sessionInfo.maxActiveReferencePictures = MAX_REF_FRAMES;
+        sessionInfo.pStdHeaderVersion = &videoCapabilities.stdHeaderVersion;
+
         result = vkCreateVideoSessionKHR(s->device, &sessionInfo, NULL, &s->videoSession);
         if (result != VK_SUCCESS)
         {
@@ -1647,23 +1653,16 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         // ---Creating video session parameters---
         assert(s->videoSession != VK_NULL_HANDLE);
 
-        VkVideoDecodeH264SessionParametersCreateInfoKHR h264SessionParamsInfo =
-                                        { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_SESSION_PARAMETERS_CREATE_INFO_KHR,
-                                          .maxStdSPSCount = MAX_SPS_IDS,
-                                          .maxStdPPSCount = MAX_PPS_IDS,
-                                          .pParametersAddInfo = NULL };
-        VkVideoDecodeH265SessionParametersCreateInfoKHR h265SessionParamsInfo =
-                                        { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_SESSION_PARAMETERS_CREATE_INFO_KHR,
-                                          .maxStdVPSCount = MAX_VPS_IDS,
-                                          .maxStdSPSCount = MAX_SPS_IDS,
-                                          .maxStdPPSCount = MAX_PPS_IDS,
-                                          .pParametersAddInfo = NULL };
-        VkVideoSessionParametersCreateInfoKHR sessionParamsInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_SESSION_PARAMETERS_CREATE_INFO_KHR,
-                                                                                                                                .pNext = isH264 ?
-                                                                                                                                                        (void*)&h264SessionParamsInfo :
-                                                                                                                                                        (void*)&h265SessionParamsInfo,
-                                                                                                                                .videoSessionParametersTemplate = VK_NULL_HANDLE,
-                                                                                                                                .videoSession = s->videoSession };
+        VkVideoDecodeH264SessionParametersCreateInfoKHR h264SessionParamsInfo = {};
+        h264SessionParamsInfo.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_SESSION_PARAMETERS_CREATE_INFO_KHR;
+        h264SessionParamsInfo.maxStdSPSCount = MAX_SPS_IDS;
+        h264SessionParamsInfo.maxStdPPSCount = MAX_PPS_IDS;
+
+        VkVideoSessionParametersCreateInfoKHR sessionParamsInfo = {};
+        sessionParamsInfo.sType = VK_STRUCTURE_TYPE_VIDEO_SESSION_PARAMETERS_CREATE_INFO_KHR;
+        sessionParamsInfo.pNext = &h264SessionParamsInfo;
+        sessionParamsInfo.videoSession = s->videoSession;
+
         result = vkCreateVideoSessionParametersKHR(s->device, &sessionParamsInfo, NULL, &s->videoSessionParams);
         if (result != VK_SUCCESS)
         {
@@ -1753,50 +1752,6 @@ static uint32_t smallest_dpb_index_not_in_queue(struct state_vulkan_decompress *
         return 0;
 }
 
-static void ref_queue_swap_references(struct state_vulkan_decompress *s, uint32_t index1, uint32_t index2)
-{
-        assert(index1 != index2);
-        assert(index1 < s->referenceSlotsQueue_count);
-        assert(index2 < s->referenceSlotsQueue_count);
-
-        uint32_t wrapped1 = (s->referenceSlotsQueue_start + index1) % MAX_REF_FRAMES;
-        uint32_t wrapped2 = (s->referenceSlotsQueue_start + index2) % MAX_REF_FRAMES;
-
-        slice_info_t tmp = s->referenceSlotsQueue[wrapped1];
-        s->referenceSlotsQueue[wrapped1] = s->referenceSlotsQueue[wrapped2];
-        s->referenceSlotsQueue[wrapped2] = tmp;
-}
-
-static bool ref_slot_priority_smaller_than(slice_info_t ref1, slice_info_t ref2)
-{
-        // returns true if ref1 has lower or same priorty in the reference queue than ref2
-        return ref1.nal_idc < ref2.nal_idc ||
-                  (ref1.nal_idc == ref2.nal_idc && ref1.frame_seq <= ref2.frame_seq);
-}
-
-static uint32_t ref_slot_queue_bubble_index_forward(struct state_vulkan_decompress *s, uint32_t index)
-{
-        // bubbles reference picture at given index in the referecene queue forwards with respect to priority
-        // (lower priority is closer to the queue start -> dropped from the queue earlier if needed)
-        // returns the new bubbled index of this picture
-        
-        slice_info_t bubbled = get_ref_slot_from_queue(s, index);
-        while (index > 0)
-        {
-                slice_info_t compared_to = get_ref_slot_from_queue(s, index - 1);
-                if (ref_slot_priority_smaller_than(compared_to, bubbled)) // we found lower priority reference
-                {
-                        break;
-                }
-                // else swap frames
-                ref_queue_swap_references(s, index - 1, index);
-
-                --index;
-        }
-
-        return index;
-}
-
 static void insert_ref_slot_into_queue(struct state_vulkan_decompress *s, slice_info_t slice_info)
 {
         // inserts given reference picture (it's slice info) into reference slot queue,
@@ -1855,21 +1810,28 @@ static void fill_ref_picture_infos(struct state_vulkan_decompress *s,
                 VkImageView view = s->dpbViews[slice_info.dpbIndex];
                 assert(view != VK_NULL_HANDLE);
 
-                h264Infos[i] = (StdVideoDecodeH264ReferenceInfo){ .flags = {}, .FrameNum = slice_info.frame_num,
-                                                                                                                  .PicOrderCnt = { slice_info.poc, slice_info.poc, } };
-                h264SlotInfos[i] = (VkVideoDecodeH264DpbSlotInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR,
-                                                                                                                          .pStdReferenceInfo = h264Infos + i };
-                picInfos[i] = (VkVideoPictureResourceInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR,
-                                                                                                           .codedOffset = { 0, 0 }, // no offset
-                                                                                                           .codedExtent = videoSize,
-                                                                                                           .baseArrayLayer = 0,
-                                                                                                           .imageViewBinding = view };
-                refInfos[i] = (VkVideoReferenceSlotInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR,
-                                                                                                         //TODO H.265
-                                                                                                         //.pNext = isH264 ? (void*)&h264RefInfo : (void*)&h265RefInfo,
-                                                                                                         .pNext = (void*)(h264SlotInfos + i),
-                                                                                                         .slotIndex = slice_info.dpbIndex,
-                                                                                                         .pPictureResource = picInfos + i };
+                h264Infos[i] = {};
+                h264Infos[i].flags = {};
+                h264Infos[i].FrameNum = slice_info.frame_num;
+                h264Infos[i].PicOrderCnt[0] = slice_info.poc;
+                h264Infos[i].PicOrderCnt[1] = slice_info.poc;
+
+                h264SlotInfos[i] = {};
+                h264SlotInfos[i].sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR;
+                h264SlotInfos[i].pStdReferenceInfo = &h264Infos[i];
+
+                picInfos[i] = {};
+                picInfos[i].sType = VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR;
+                picInfos[i].codedExtent = videoSize;
+                picInfos[i].baseArrayLayer = 0;
+                picInfos[i].imageViewBinding = view;
+
+                refInfos[i] = {};
+                refInfos[i].sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR;
+                //.pNext = isH264 ? (void*)&h264RefInfo : (void*)&h265RefInfo,
+                refInfos[i].pNext = (void*)(h264SlotInfos + i);
+                refInfos[i].slotIndex = slice_info.dpbIndex;
+                refInfos[i].pPictureResource = picInfos + i;
         }
 
         if (out_count != NULL) *out_count = ref_count;
@@ -1878,18 +1840,22 @@ static void fill_ref_picture_infos(struct state_vulkan_decompress *s,
 static void begin_video_coding_scope(struct state_vulkan_decompress *s, VkVideoReferenceSlotInfoKHR *slotInfos, uint32_t slotInfos_count)
 {
         // starts the video coding scope with given slots
-        VkVideoBeginCodingInfoKHR beginCodingInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_BEGIN_CODING_INFO_KHR,
-                                                                                                  .flags = 0,
-                                                                                                  .videoSession = s->videoSession,
-                                                                                                  .videoSessionParameters = s->videoSessionParams,
-                                                                                                  .referenceSlotCount = slotInfos_count,
-                                                                                                  .pReferenceSlots = slotInfos };
+        VkVideoBeginCodingInfoKHR beginCodingInfo = {};
+        beginCodingInfo.sType = VK_STRUCTURE_TYPE_VIDEO_BEGIN_CODING_INFO_KHR;
+        beginCodingInfo.flags = 0;
+        beginCodingInfo.videoSession = s->videoSession;
+        beginCodingInfo.videoSessionParameters = s->videoSessionParams;
+        beginCodingInfo.referenceSlotCount = slotInfos_count;
+        beginCodingInfo.pReferenceSlots = slotInfos;
+
         vkCmdBeginVideoCodingKHR(s->decodeCmdBuf, &beginCodingInfo);
 
         if (s->resetVideoCoding) // before the first use of vulkan video session we must reset the video coding for that session
         {
-                VkVideoCodingControlInfoKHR vidCodingControlInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_CODING_CONTROL_INFO_KHR,
-                                                                                                                         .flags = VK_VIDEO_CODING_CONTROL_RESET_BIT_KHR }; // reset bit
+                VkVideoCodingControlInfoKHR vidCodingControlInfo = {};
+                vidCodingControlInfo.sType = VK_STRUCTURE_TYPE_VIDEO_CODING_CONTROL_INFO_KHR;
+                vidCodingControlInfo.flags = VK_VIDEO_CODING_CONTROL_RESET_BIT_KHR;
+
                 vkCmdControlVideoCodingKHR(s->decodeCmdBuf, &vidCodingControlInfo);
 
                 s->resetVideoCoding = false;
@@ -1898,7 +1864,9 @@ static void begin_video_coding_scope(struct state_vulkan_decompress *s, VkVideoR
 
 static void end_video_coding_scope(struct state_vulkan_decompress *s)
 {
-        VkVideoEndCodingInfoKHR endCodingInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_END_CODING_INFO_KHR };
+        VkVideoEndCodingInfoKHR endCodingInfo = {};
+        endCodingInfo.sType = VK_STRUCTURE_TYPE_VIDEO_END_CODING_INFO_KHR;
+
         vkCmdEndVideoCodingKHR(s->decodeCmdBuf, &endCodingInfo);
 }
 
@@ -2104,9 +2072,9 @@ static bool write_decoded_frame(struct state_vulkan_decompress *s, frame_data_t 
         return true;
 }
 
-static bool update_video_session_params(struct state_vulkan_decompress *s, bool isH264,
-                                                                                sps_t *added_sps,// uint32_t added_sps_count,
-                                                                                pps_t *added_pps)// uint32_t added_pps_count)
+static bool update_video_session_params(struct state_vulkan_decompress *s,
+                sps_t *added_sps,// uint32_t added_sps_count,
+                pps_t *added_pps)// uint32_t added_pps_count)
 {
         assert(s->device != VK_NULL_HANDLE && s->videoSession != VK_NULL_HANDLE);
 
@@ -2130,34 +2098,25 @@ static bool update_video_session_params(struct state_vulkan_decompress *s, bool 
                 added_pps_count = 1;
         }
 
-        VkVideoDecodeH264SessionParametersAddInfoKHR h264AddInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_SESSION_PARAMETERS_ADD_INFO_KHR,
-                                                                                                                                 .stdSPSCount = added_sps_count,
-                                                                                                                                 .pStdSPSs = &vk_sps,
-                                                                                                                                 .stdPPSCount = added_pps_count,
-                                                                                                                                 .pStdPPSs = &vk_pps };
-        //TODO H.265
-        VkVideoDecodeH265SessionParametersAddInfoKHR h265AddInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_SESSION_PARAMETERS_ADD_INFO_KHR,
-                                                                                                                                 //.stdSPSCount = added_sps_count,
-                                                                                                                                 //.pStdSPSs = &vk_sps,
-                                                                                                                                 //.stdPPSCount = added_pps_count,
-                                                                                                                                 //.pStdPPSs = &vk_pps
-                                                                                                                                };
-        VkVideoDecodeH264SessionParametersCreateInfoKHR h264CreateInfo =
-                                        { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_SESSION_PARAMETERS_CREATE_INFO_KHR,
-                                          .maxStdSPSCount = MAX_SPS_IDS,
-                                          .maxStdPPSCount = MAX_PPS_IDS,
-                                          .pParametersAddInfo = &h264AddInfo };
-        //TODO H.265
-        VkVideoDecodeH265SessionParametersCreateInfoKHR h265CreateInfo =
-                                        { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_SESSION_PARAMETERS_CREATE_INFO_KHR,
-                                          .maxStdVPSCount = MAX_VPS_IDS,
-                                          .maxStdSPSCount = MAX_SPS_IDS,
-                                          .maxStdPPSCount = MAX_PPS_IDS,
-                                          .pParametersAddInfo = &h265AddInfo };
-        VkVideoSessionParametersCreateInfoKHR createInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_SESSION_PARAMETERS_CREATE_INFO_KHR,
-                                                                                                                 .pNext = isH264 ? (void*)&h264CreateInfo : (void*)&h265CreateInfo,
-                                                                                                                 .videoSessionParametersTemplate = s->videoSessionParams,
-                                                                                                                 .videoSession = s->videoSession };
+        VkVideoDecodeH264SessionParametersAddInfoKHR h264AddInfo = {};
+        h264AddInfo.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_SESSION_PARAMETERS_ADD_INFO_KHR;
+        h264AddInfo.stdSPSCount = added_sps_count;
+        h264AddInfo.pStdSPSs = &vk_sps;
+        h264AddInfo.stdPPSCount = added_pps_count;
+        h264AddInfo.pStdPPSs = &vk_pps;
+
+        VkVideoDecodeH264SessionParametersCreateInfoKHR h264CreateInfo = {};
+        h264CreateInfo.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_SESSION_PARAMETERS_CREATE_INFO_KHR;
+        h264CreateInfo.maxStdSPSCount = MAX_SPS_IDS;
+        h264CreateInfo.maxStdPPSCount = MAX_PPS_IDS;
+        h264CreateInfo.pParametersAddInfo = &h264AddInfo;
+
+        VkVideoSessionParametersCreateInfoKHR createInfo = {};
+        createInfo.sType = VK_STRUCTURE_TYPE_VIDEO_SESSION_PARAMETERS_CREATE_INFO_KHR;
+        createInfo.pNext = &h264CreateInfo;
+        createInfo.videoSessionParametersTemplate = s->videoSessionParams;
+        createInfo.videoSession = s->videoSession;
+
         VkVideoSessionParametersKHR newVideoSessionParams = VK_NULL_HANDLE;
         VkResult result = vkCreateVideoSessionParametersKHR(s->device, &createInfo, NULL, &newVideoSessionParams);
         if (result != VK_SUCCESS)
@@ -2211,7 +2170,7 @@ static bool handle_sps_nalu(struct state_vulkan_decompress *s, uint8_t *rbsp, in
         s->sps_array[id] = sps;
 
         // potential err msg should get printed inside of update_video_session_params
-        return update_video_session_params(s, isH264, &sps, NULL);
+        return update_video_session_params(s, &sps, NULL);
 }
 
 static bool handle_pps_nalu(struct state_vulkan_decompress *s, uint8_t *rbsp, int rbsp_len)
@@ -2243,7 +2202,7 @@ static bool handle_pps_nalu(struct state_vulkan_decompress *s, uint8_t *rbsp, in
         s->pps_array[id] = pps;
 
         // potential err msg should get printed inside of update_video_session_params
-        return update_video_session_params(s, isH264, NULL, &pps);
+        return update_video_session_params(s, NULL, &pps);
 }
 
 static void fill_slice_info(struct state_vulkan_decompress *s, slice_info_t *si, const slice_header_t *sh)
@@ -2300,7 +2259,7 @@ static bool handle_sh_nalu(struct state_vulkan_decompress *s, uint8_t *rbsp, int
 static VkDeviceSize handle_vcl(struct state_vulkan_decompress *s,
                                                            uint8_t *bitstream, VkDeviceSize bitstream_written, VkDeviceSize bitstream_capacity,
                                                            uint8_t *rbsp, int rbsp_len, unsigned char nal_header, slice_info_t *slice_info,
-                                                           uint32_t slice_offsets[], uint32_t *slice_offsets_count, bool long_startcode)
+                                                           uint32_t slice_offsets[], uint32_t *slice_offsets_count)
 {
         // handles nal data related to slices
         bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
@@ -2352,42 +2311,46 @@ static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_i
 
 
         // ---Filling infos related to bitstream---
-        StdVideoDecodeH264PictureInfo h264DecodeStdInfo = { .flags = picInfoFlags,
-                                                                                                                .seq_parameter_set_id = slice_info.sps_id,
-                                                                                                                .pic_parameter_set_id = slice_info.pps_id,
-                                                                                                                .frame_num = slice_info.frame_num,
-                                                                                                                .idr_pic_id = slice_info.idr_pic_id,
-                                                                                                                .PicOrderCnt = { slice_info.poc, slice_info.poc } };
-        VkVideoDecodeH264PictureInfoKHR h264DecodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PICTURE_INFO_KHR,
-                                                                                                           .pStdPictureInfo = &h264DecodeStdInfo,
-                                                                                                           .sliceCount = slice_offsets_count,
-                                                                                                           .pSliceOffsets = slice_offsets };
-        //TODO H.265
-        VkVideoDecodeH265PictureInfoKHR h265DecodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_PICTURE_INFO_KHR };
+        StdVideoDecodeH264PictureInfo h264DecodeStdInfo = {};
+        h264DecodeStdInfo.flags = picInfoFlags;
+        h264DecodeStdInfo.seq_parameter_set_id = slice_info.sps_id;
+        h264DecodeStdInfo.pic_parameter_set_id = slice_info.pps_id;
+        h264DecodeStdInfo.frame_num = slice_info.frame_num;
+        h264DecodeStdInfo.idr_pic_id = slice_info.idr_pic_id;
+        h264DecodeStdInfo.PicOrderCnt[0] = slice_info.poc;
+        h264DecodeStdInfo.PicOrderCnt[1] = slice_info.poc;
+
 
         bool enable_queries = s->queryPoolRes != VK_NULL_HANDLE;
-        VkVideoInlineQueryInfoKHR queryInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_INLINE_QUERY_INFO_KHR,
-                                                                                        .pNext = isH264 ? (void*)&h264DecodeInfo : (void*)&h265DecodeInfo,
-                                                                                        .queryPool = s->queryPoolRes,
-                                                                                        .firstQuery = 0,
-                                                                                        .queryCount = 1 };
+        VkVideoInlineQueryInfoKHR queryInfo = {};
+        queryInfo.sType = VK_STRUCTURE_TYPE_VIDEO_INLINE_QUERY_INFO_KHR;
+        queryInfo.queryPool = s->queryPoolRes;
+        queryInfo.firstQuery = 0;
+        queryInfo.queryCount = 1;
 
-        VkVideoDecodeInfoKHR decodeInfo = { .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_INFO_KHR,
-                                                                                .pNext = enable_queries ? (void*)&queryInfo :
-                                                                                                 (isH264 ? (void*)&h264DecodeInfo : (void*)&h265DecodeInfo),
-                                                                                .flags = 0,
-                                                                                .srcBuffer = s->bitstreamBuffer,
-                                                                                .srcBufferOffset = 0,
-                                                                                .srcBufferRange = bitstreamBufferWrittenAligned,
-                                                                                .dstPictureResource = *dstVideoPicInfo,
-                                                                                // this must be the same as dstPictureResource when VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR
-                                                                                // otherwise must not be the same as dstPictureResource
-                                                                                .pSetupReferenceSlot = dstSlotInfo,
-                                                                                //specifies the needed used references (but not the decoded frame)
-                                                                                //TODO take_references
-                                                                                .referenceSlotCount = refSlotInfos_count,
-                                                                                .pReferenceSlots = refSlotInfos,
-                                                                                };
+        VkVideoDecodeH264PictureInfoKHR h264DecodeInfo = {};
+        h264DecodeInfo.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PICTURE_INFO_KHR;
+        h264DecodeInfo.pNext = enable_queries ? &queryInfo : nullptr;
+        h264DecodeInfo.pStdPictureInfo = &h264DecodeStdInfo;
+        h264DecodeInfo.sliceCount = slice_offsets_count;
+        h264DecodeInfo.pSliceOffsets = slice_offsets;
+
+        VkVideoDecodeInfoKHR decodeInfo = {};
+        decodeInfo.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_INFO_KHR;
+        decodeInfo.pNext = &h264DecodeInfo;
+        decodeInfo.flags = 0;
+        decodeInfo.srcBuffer = s->bitstreamBuffer;
+        decodeInfo.srcBufferOffset = 0;
+        decodeInfo.srcBufferRange = bitstreamBufferWrittenAligned;
+        decodeInfo.dstPictureResource = *dstVideoPicInfo;
+        // this must be the same as dstPictureResource when VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR
+        // otherwise must not be the same as dstPictureResource
+        decodeInfo.pSetupReferenceSlot = dstSlotInfo;
+        //specifies the needed used references (but not the decoded frame)
+        //TODO take_references
+        decodeInfo.referenceSlotCount = refSlotInfos_count;
+        decodeInfo.pReferenceSlots = refSlotInfos;
+
         vkCmdDecodeVideoKHR(s->decodeCmdBuf, &decodeInfo);
 }
 
@@ -2412,7 +2375,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 
         // ---Copying NAL units into s->bitstreamBuffer---
         // those flags are for debugging purposes - true, false are probably correct for normal usage
-        const bool filter_nal = true, convert_to_rbsp = false;
+        const bool filter_nal = true;
 
         VkDeviceSize bitstream_written = 0;
         const VkDeviceSize bitstream_max_size = s->bitstreamBufferSize;
@@ -2462,7 +2425,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
                                 VkDeviceSize written = 0;
                                 written = handle_vcl(s, bitstream, bitstream_written, bitstream_max_size,
                                                 nal->rbsp.data(), nal->rbsp.size(), nal->header, slice_info,
-                                                slice_offsets, &slice_offsets_count, false);
+                                                slice_offsets, &slice_offsets_count);
                                 bitstream_written += written;
                         }
                         break; //switch break
@@ -2580,22 +2543,27 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
                                                                                                   &s->prev_poc_msb, &s->prev_poc_lsb,
                                                                                                   &s->prev_frame_num, &s->prev_frame_num_offset);
 
-                h264StdInfos[slotInfos_ref_count] = (StdVideoDecodeH264ReferenceInfo){ .flags = {},
-                                                                                                                                                              .FrameNum = slice_info->frame_num,
-                                                                                                                                                              .PicOrderCnt = { slice_info->poc, slice_info->poc } };
-                h264SlotInfos[slotInfos_ref_count] = (VkVideoDecodeH264DpbSlotInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR,
-                                                                                                                                                                .pStdReferenceInfo = h264StdInfos + slotInfos_ref_count };
-                picInfos[slotInfos_ref_count] = (VkVideoPictureResourceInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR,
-                                                                                                                                                 .codedOffset = { 0, 0 }, // empty offset
-                                                                                                                                                 .codedExtent = videoSize,
-                                                                                                                                                 .baseArrayLayer = 0,
-                                                                                                                                                 .imageViewBinding = s->dpbViews[slice_info->dpbIndex] };
-                VkVideoDecodeH265DpbSlotInfoKHR h265SlotInfo = {}; //TODO H.265
-                slotInfos[slotInfos_ref_count] = (VkVideoReferenceSlotInfoKHR){ .sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR,
-                                                                                                                                                .pNext = isH264 ? (void*)(h264SlotInfos + slotInfos_ref_count)
-                                                                                                                                                                                : (void*)&h265SlotInfo,
-                                                                                                                                                .slotIndex = -1, // currently decoded picture must have index -1
-                                                                                                                                                .pPictureResource = picInfos + slotInfos_ref_count };
+                h264StdInfos[slotInfos_ref_count] = {};
+                h264StdInfos[slotInfos_ref_count].flags = {};
+                h264StdInfos[slotInfos_ref_count].FrameNum = slice_info->frame_num;
+                h264StdInfos[slotInfos_ref_count].PicOrderCnt[0] = slice_info->poc;
+                h264StdInfos[slotInfos_ref_count].PicOrderCnt[1] = slice_info->poc;
+
+                h264SlotInfos[slotInfos_ref_count] = {};
+                h264SlotInfos[slotInfos_ref_count].sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR;
+                h264SlotInfos[slotInfos_ref_count].pStdReferenceInfo = h264StdInfos + slotInfos_ref_count;
+
+                picInfos[slotInfos_ref_count] = {};
+                picInfos[slotInfos_ref_count].sType = VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR;
+                picInfos[slotInfos_ref_count].codedExtent = videoSize;
+                picInfos[slotInfos_ref_count].baseArrayLayer = 0;
+                picInfos[slotInfos_ref_count].imageViewBinding = s->dpbViews[slice_info->dpbIndex];
+
+                slotInfos[slotInfos_ref_count] = {};
+                slotInfos[slotInfos_ref_count].sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR;
+                slotInfos[slotInfos_ref_count].pNext = h264SlotInfos + slotInfos_ref_count;
+                slotInfos[slotInfos_ref_count].slotIndex = -1; // currently decoded picture must have index -1
+                slotInfos[slotInfos_ref_count].pPictureResource = picInfos + slotInfos_ref_count;
 
                 begin_video_coding_scope(s, slotInfos, slotInfos_ref_count + 1);
                 slotInfos[slotInfos_ref_count].slotIndex = slice_info->dpbIndex;
