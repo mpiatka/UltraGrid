@@ -105,15 +105,13 @@ struct state_vulkan_decompress // state of vulkan_decode module
         VkBuffer bitstreamBuffer;                                        // needs to be destroyed if valid
         VkDeviceSize bitstreamBufferSize;
         VkDeviceSize bitstreambufferSizeAlignment;
-        VkDeviceMemory bitstreamBufferMemory;                // allocated memory for bitstreamBuffer, needs to be freed if valid
+        AllocatedMemory bitstreamBufferMemory;                // allocated memory for bitstreamBuffer, needs to be freed if valid
         VkCommandPoolUniq decodeCmdPool;
         VkCommandBuffer decodeCmdBuf;
         VkCommandPoolUniq computeCmdPool;
         VkCommandBuffer computeCmdBuf;
         VkVideoSessionKHR videoSession;                                // needs to be destroyed if valid
-        uint32_t videoSessionMemory_count;
-        // array of size videoSessionMemory_count, needs to be freed and VkvideoSessionMemory deallocated
-        VkDeviceMemory *videoSessionMemory;
+        std::vector<AllocatedMemory> videoSessionMemory;
 
         // Parameters of the incoming video:
         int depth_chroma, depth_luma;
@@ -130,7 +128,7 @@ struct state_vulkan_decompress // state of vulkan_decode module
         bool dpbHasDefinedLayout;                                        // indicates that VkImages in 'dpb' array are not in undefined layout
         VkImage dpb[MAX_REF_FRAMES + 1];                        // decoded picture buffer (aka dpb)
         VkImageView dpbViews[MAX_REF_FRAMES + 1];        // dpb image views
-        VkDeviceMemory dpbMemory;                                        // backing memory for dpb - needs to be freed if valid (destroyed in destroy_dpb)
+        AllocatedMemory dpbMemory;
         VkFormat dpbFormat;                                                        // format of VkImages in dpb
         //uint32_t dpbDstPictureIdx;                                        // index (into dpb and dpbViews) of the slot for next to be decoded frame
         slice_info_t referenceSlotsQueue[MAX_REF_FRAMES];        // queue containing slice infos of the current reference frames 
@@ -155,7 +153,7 @@ struct state_vulkan_decompress // state of vulkan_decode module
 
         // Output frame data
         VkImage outputLumaPlane, outputChromaPlane;        // planes for output decoded image, must be destroyed if valid
-        VkDeviceMemory outputImageMemory;
+        AllocatedMemory outputImageMemory;
         VkDeviceSize outputChromaPlaneOffset;
 
         // Vulkan queries
@@ -228,21 +226,17 @@ static void * vulkan_decompress_init(void)
 
         s->fence = VK_NULL_HANDLE;
         s->bitstreamBuffer = VK_NULL_HANDLE; //buffer gets created in allocate_buffers function
-        s->bitstreamBufferMemory = VK_NULL_HANDLE;
         s->bitstreambufferSizeAlignment = 0;
         s->decodeCmdBuf = VK_NULL_HANDLE;                   //same
         s->videoSession = VK_NULL_HANDLE;          //video session gets created in prepare function
         s->videoSessionParams = VK_NULL_HANDLE; //same
         //s->videoSessionParams_update_count = 0;
-        s->videoSessionMemory_count = 0;
-        s->videoSessionMemory = NULL;
 
         for (size_t i = 0; i < MAX_REF_FRAMES + 1; ++i)
         {
                 s->dpb[i] = VK_NULL_HANDLE;
                 s->dpbViews[i] = VK_NULL_HANDLE;
         }
-        s->dpbMemory = VK_NULL_HANDLE;
         s->dpbFormat = VK_FORMAT_UNDEFINED;
         for (size_t i = 0; i < MAX_REF_FRAMES; ++i)
         {
@@ -253,7 +247,6 @@ static void * vulkan_decompress_init(void)
 
         s->outputLumaPlane = VK_NULL_HANDLE;
         s->outputChromaPlane = VK_NULL_HANDLE;
-        s->outputImageMemory = VK_NULL_HANDLE;
         s->outputChromaPlaneOffset = 0;
 
         s->queryPoolRes = VK_NULL_HANDLE;
@@ -270,21 +263,6 @@ static void * vulkan_decompress_init(void)
         return s.release();
 }
 
-static void free_video_session_memory(struct state_vulkan_decompress *s)
-{
-        if (vkFreeMemory != NULL && s->device != VK_NULL_HANDLE && s->videoSessionMemory != NULL)
-        {
-                for (uint32_t i = 0; i < s->videoSessionMemory_count; ++i)
-                {
-                        vkFreeMemory(s->device, s->videoSessionMemory[i], NULL);
-                }
-        }
-
-        free(s->videoSessionMemory);
-        s->videoSessionMemory_count = 0;
-        s->videoSessionMemory = NULL;
-}
-
 static void vulkan_decompress_done(void *state)
 {
         // Free all allocated resources
@@ -299,8 +277,6 @@ static void vulkan_decompress_done(void *state)
         if (vkDestroyVideoSessionKHR != NULL && s->device != VK_NULL_HANDLE)
                         vkDestroyVideoSessionKHR(s->device, s->videoSession, NULL);
         
-        free_video_session_memory(s);
-
         destroy_output_queue(s);
 
         destroy_output_image(s);
@@ -605,37 +581,11 @@ static bool check_for_vulkan_format(VkPhysicalDevice physDevice, VkPhysicalDevic
         return false;
 }
 
-static bool find_memory_type(struct state_vulkan_decompress *s, uint32_t typeFilter,
-                                                                 VkMemoryPropertyFlags reqProperties, uint32_t *idx)
-{
-        // Tries to find index of memory type that support wanted properties
-        // if success return true and set the memory type index
-        assert(s->physicalDevice != VK_NULL_HANDLE);
-
-        VkPhysicalDeviceMemoryProperties memoryProperties = {};
-        vkGetPhysicalDeviceMemoryProperties(s->physicalDevice, &memoryProperties);
-
-        assert(memoryProperties.memoryTypeCount <= 32);
-
-        for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++)
-        {
-                if ((typeFilter & (1 << i)) &&
-                        (memoryProperties.memoryTypes[i].propertyFlags & reqProperties) == reqProperties)
-                {
-                        if (idx != NULL) *idx = i;
-                        return true;
-                }
-        }
-
-        return false;
-}
-
 static bool allocate_buffers(struct state_vulkan_decompress *s, VkVideoProfileListInfoKHR videoProfileList,
                                                          const VkVideoCapabilitiesKHR videoCapabilities)
 {
         // allocates VkBuffer and it's memory for bitstream, returns true if success
         assert(s->bitstreamBuffer == VK_NULL_HANDLE);
-        assert(s->bitstreamBufferMemory == VK_NULL_HANDLE);
 
         const VkDeviceSize wantedBitstreamBufferSize = 10 * 1024 * 1024; //TODO magic number for size
         s->bitstreambufferSizeAlignment = videoCapabilities.minBitstreamBufferSizeAlignment;
@@ -664,32 +614,11 @@ static bool allocate_buffers(struct state_vulkan_decompress *s, VkVideoProfileLi
         VkMemoryRequirements bitstreamBufferMemReq;
         vkGetBufferMemoryRequirements(s->device, s->bitstreamBuffer, &bitstreamBufferMemReq);
 
-        uint32_t memType_idx = 0;
-        if (!find_memory_type(s, bitstreamBufferMemReq.memoryTypeBits,
-                                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                                                  &memType_idx))
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to find required memory type for vulkan bitstream buffer!\n");
-                free_buffers(s);
+        s->bitstreamBufferMemory = s->gpu.allocateMem(bitstreamBufferMemReq.size, s->bitstreambufferSizeAlignment,
+                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                        bitstreamBufferMemReq.memoryTypeBits);
 
-                return false;
-        }
-
-        VkMemoryAllocateInfo memAllocInfo = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-                                                                                  .allocationSize = bitstreamBufferMemReq.size,
-                                                                                  .memoryTypeIndex = memType_idx };
-        result = vkAllocateMemory(s->device, &memAllocInfo, NULL, &s->bitstreamBufferMemory);
-        if (result != VK_SUCCESS)
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate memory for vulkan bitstream buffer!\n");
-                free_buffers(s);
-
-                return false;
-        }
-
-        assert(s->bitstreamBufferMemory != VK_NULL_HANDLE);
-
-        result = vkBindBufferMemory(s->device, s->bitstreamBuffer, s->bitstreamBufferMemory, 0);
+        result = vkBindBufferMemory(s->device, s->bitstreamBuffer, s->bitstreamBufferMemory.deviceMemory, 0);
         if (result != VK_SUCCESS)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to bind vulkan memory to vulkan bitstream buffer!\n");
@@ -710,11 +639,6 @@ static void free_buffers(struct state_vulkan_decompress *s)
         s->bitstreamBuffer = VK_NULL_HANDLE;
         s->bitstreamBufferSize = 0;
         s->bitstreambufferSizeAlignment = 0;
-
-        if (vkFreeMemory != NULL && s->device != VK_NULL_HANDLE)
-                                vkFreeMemory(s->device, s->bitstreamBufferMemory, NULL);
-
-        s->bitstreamBufferMemory = VK_NULL_HANDLE;
 }
 
 static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
@@ -722,7 +646,6 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
         // allocates needed memory for vulkan video session, returns true if success
         assert(s->device != VK_NULL_HANDLE);
         assert(s->videoSession != VK_NULL_HANDLE);
-        assert(s->videoSessionMemory == NULL); // videoSessionMemory should be properly freed beforehand
 
         uint32_t memoryRequirements_count = 0;
         VkResult result = vkGetVideoSessionMemoryRequirementsKHR(s->device, s->videoSession, &memoryRequirements_count, NULL);
@@ -738,14 +661,11 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
         VkBindVideoSessionMemoryInfoKHR *bindMemoryInfo = (VkBindVideoSessionMemoryInfoKHR*)
                                                                                                                 calloc(memoryRequirements_count,
                                                                                                                                 sizeof(VkBindVideoSessionMemoryInfoKHR));
-        s->videoSessionMemory_count = memoryRequirements_count;
-        s->videoSessionMemory = (VkDeviceMemory*)calloc(memoryRequirements_count, sizeof(VkDeviceMemory));
-        if (memoryRequirements == NULL || bindMemoryInfo == NULL || s->videoSessionMemory == NULL)
+        if (memoryRequirements == NULL || bindMemoryInfo == NULL)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate memory for vulkan video session!\n");
                 free(memoryRequirements);
                 free(bindMemoryInfo);
-                free_video_session_memory(s);
 
                 return false;
         }
@@ -754,7 +674,6 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
         {
                 memoryRequirements[i].sType = VK_STRUCTURE_TYPE_VIDEO_SESSION_MEMORY_REQUIREMENTS_KHR;
                 bindMemoryInfo[i].sType = VK_STRUCTURE_TYPE_BIND_VIDEO_SESSION_MEMORY_INFO_KHR;
-                s->videoSessionMemory[i] = VK_NULL_HANDLE;
         }
         
         result = vkGetVideoSessionMemoryRequirementsKHR(s->device, s->videoSession, &memoryRequirements_count, memoryRequirements);
@@ -763,43 +682,26 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to get vulkan video session memory requirements!\n");
                 free(memoryRequirements);
                 free(bindMemoryInfo);
-                free_video_session_memory(s);
 
                 return false;
         }
 
+        s->videoSessionMemory.resize(memoryRequirements_count);
         for (uint32_t i = 0; i < memoryRequirements_count; ++i)
         {
-        uint32_t memoryTypeIndex = 0;
-                if (!find_memory_type(s, memoryRequirements[i].memoryRequirements.memoryTypeBits,
-                                                          0, &memoryTypeIndex))
-                {
-                        log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] No suitable memory type for vulkan video session requirments!\n");
-                        free(memoryRequirements);
-                        free(bindMemoryInfo);
-                        free_video_session_memory(s);
+                s->videoSessionMemory[i] = s->gpu.allocateMem(memoryRequirements[i].memoryRequirements.size,
+                                memoryRequirements[i].memoryRequirements.alignment,
+                                0, memoryRequirements[i].memoryRequirements.memoryTypeBits);
 
-                        return false;
-                }
-
-                VkMemoryAllocateInfo allocateInfo = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-                                                                                          .allocationSize = memoryRequirements[i].memoryRequirements.size,
-                                                                                          .memoryTypeIndex = memoryTypeIndex };
-                result = vkAllocateMemory(s->device, &allocateInfo, NULL, &s->videoSessionMemory[i]);
-                if (result != VK_SUCCESS)
-                {
-                        log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate vulkan memory!\n");
-                        free(memoryRequirements);
-                        free(bindMemoryInfo);
-                        free_video_session_memory(s);
-
+                if(!s->videoSessionMemory[i].deviceMemory){
+                        log_msg(LOG_LEVEL_ERROR, MOD_NAME "Failed to allocate vulkan memory for video session!\n");
                         return false;
                 }
 
                 bindMemoryInfo[i].memoryBindIndex = memoryRequirements[i].memoryBindIndex;
                 bindMemoryInfo[i].memorySize = memoryRequirements[i].memoryRequirements.size;
                 bindMemoryInfo[i].memoryOffset = 0 * memoryRequirements[i].memoryRequirements.alignment; //zero for now
-                bindMemoryInfo[i].memory = s->videoSessionMemory[i];
+                bindMemoryInfo[i].memory = s->videoSessionMemory[i].deviceMemory;
         }
 
         result = vkBindVideoSessionMemoryKHR(s->device, s->videoSession, memoryRequirements_count, bindMemoryInfo);
@@ -808,7 +710,6 @@ static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Can't bind video session memory!\n");
                 free(memoryRequirements);
                 free(bindMemoryInfo);
-                free_video_session_memory(s);
 
                 return false;
         }
@@ -918,7 +819,6 @@ static bool create_output_image(struct state_vulkan_decompress *s)
         assert(s->device != VK_NULL_HANDLE);
         assert(s->outputLumaPlane == VK_NULL_HANDLE);
         assert(s->outputChromaPlane == VK_NULL_HANDLE);
-        assert(s->outputImageMemory == VK_NULL_HANDLE);
 
         const VkExtent3D videoSize = { s->width, s->height, 1 }; //depth must be 1 for VK_IMAGE_TYPE_2D
 
@@ -985,30 +885,20 @@ static bool create_output_image(struct state_vulkan_decompress *s)
         log_msg(LOG_LEVEL_DEBUG, "[vulkan_decode] Luma size: %llu, chroma size: %llu, chroma offset: %llu.\n",
                                                         lumaMemReq.size, chromaMemReq.size, s->outputChromaPlaneOffset);
 
-        uint32_t imgMemoryTypeIdx = 0;
-        if (!find_memory_type(s, lumaMemReq.memoryTypeBits & chromaMemReq.memoryTypeBits, // taking the susbet
-                                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
-                                                  &imgMemoryTypeIdx))
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to find required memory type for output image!\n");
-                destroy_output_image(s);
-                return false;
-        }
-        
-        // ---Allocating memory for both planes---
-        VkMemoryAllocateInfo allocInfo = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-                                                                           .allocationSize = s->outputChromaPlaneOffset + chromaMemReq.size,
-                                                                           .memoryTypeIndex = imgMemoryTypeIdx };
-        result = vkAllocateMemory(s->device, &allocInfo, NULL, &s->outputImageMemory);
-        if (result != VK_SUCCESS)
-        {
+
+        VkDeviceSize allocSize = s->outputChromaPlaneOffset + chromaMemReq.size;
+        s->outputImageMemory = s->gpu.allocateMem(allocSize, 0,
+                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+                        lumaMemReq.memoryTypeBits & chromaMemReq.memoryTypeBits);
+
+        if(!s->outputImageMemory.deviceMemory){
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate device memory for output image!\n");
                 destroy_output_image(s);
                 return false;
         }
 
         // ---Binding memory for each plane---
-        result = vkBindImageMemory(s->device, s->outputLumaPlane, s->outputImageMemory, 0);
+        result = vkBindImageMemory(s->device, s->outputLumaPlane, s->outputImageMemory.deviceMemory, 0);
         if (result != VK_SUCCESS)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to bind vulkan device memory to output image (luma plane)!\n");
@@ -1016,7 +906,7 @@ static bool create_output_image(struct state_vulkan_decompress *s)
                 return false;
         }
 
-        result = vkBindImageMemory(s->device, s->outputChromaPlane, s->outputImageMemory, s->outputChromaPlaneOffset);
+        result = vkBindImageMemory(s->device, s->outputChromaPlane, s->outputImageMemory.deviceMemory, s->outputChromaPlaneOffset);
         if (result != VK_SUCCESS)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to bind vulkan device memory to output image (chroma plane)!\n");
@@ -1038,11 +928,6 @@ static void destroy_output_image(struct state_vulkan_decompress *s)
 
         s->outputLumaPlane = VK_NULL_HANDLE;
         s->outputChromaPlane = VK_NULL_HANDLE;
-
-        // freeing backing device memory
-        if (vkFreeMemory != NULL && s->device != VK_NULL_HANDLE) vkFreeMemory(s->device, s->outputImageMemory, NULL);
-        
-        s->outputImageMemory = VK_NULL_HANDLE;
 }
 
 static bool create_dpb(struct state_vulkan_decompress *s, VkVideoProfileListInfoKHR *videoProfileList)
@@ -1095,34 +980,23 @@ static bool create_dpb(struct state_vulkan_decompress *s, VkVideoProfileListInfo
         VkMemoryRequirements dpbImgMemoryRequirements;
         vkGetImageMemoryRequirements(s->device, s->dpb[0], &dpbImgMemoryRequirements);
 
-        uint32_t imgMemoryTypeIdx = 0;
-        if (!find_memory_type(s, dpbImgMemoryRequirements.memoryTypeBits, 0, &imgMemoryTypeIdx))
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to find required memory type for DPB!\n");
-                destroy_dpb(s);
-                return false;
-        }
-
         VkDeviceSize dpbImgAlignment = dpbImgMemoryRequirements.alignment;
         VkDeviceSize dpbImgAlignedSize = (dpbImgMemoryRequirements.size + (dpbImgAlignment - 1))
-                                                                         & ~(dpbImgAlignment - 1); //alignment bit mask magic
+                & ~(dpbImgAlignment - 1); //alignment bit mask magic
         VkDeviceSize dpbSize = dpbImgAlignedSize * dpb_len;
 
-        VkMemoryAllocateInfo allocInfo = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-                                                                           .allocationSize = dpbSize,
-                                                                           .memoryTypeIndex = imgMemoryTypeIdx };
-        VkResult result = vkAllocateMemory(s->device, &allocInfo, NULL, &s->dpbMemory);
-        if (result != VK_SUCCESS)
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate vulkan device memory for DPB!\n");
-                destroy_dpb(s);
+        s->dpbMemory = s->gpu.allocateMem(dpbSize, 0, 0, dpbImgMemoryRequirements.memoryTypeBits);
+        if(!s->dpbMemory.deviceMemory){
+                
+                log_msg(LOG_LEVEL_ERROR, MOD_NAME "Failed to allocate vulkan device memory for DPB!\n");
                 return false;
         }
+
 
         // ---Binding memory for DPB pictures---
         for (size_t i = 0; i < dpb_len; ++i)
         {
-                result = vkBindImageMemory(s->device, s->dpb[i], s->dpbMemory, i * dpbImgAlignedSize);
+                auto result = vkBindImageMemory(s->device, s->dpb[i], s->dpbMemory.deviceMemory, i * dpbImgAlignedSize);
                 if (result != VK_SUCCESS)
                 {
                         log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to bind vulkan device memory to DPB image (idx: %zu)!\n", i);
@@ -1153,7 +1027,7 @@ static bool create_dpb(struct state_vulkan_decompress *s, VkVideoProfileListInfo
                 assert(s->dpb[i] != VK_NULL_HANDLE);
 
                 dpbViewInfo.image = s->dpb[i];
-                result = vkCreateImageView(s->device, &dpbViewInfo, NULL, s->dpbViews + i);
+                auto result = vkCreateImageView(s->device, &dpbViewInfo, NULL, s->dpbViews + i);
                 if (result != VK_SUCCESS)
                 {
                         log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan image view(%zu) for DPB slot!\n", i);
@@ -1193,10 +1067,6 @@ static void destroy_dpb(struct state_vulkan_decompress *s)
                 s->dpbViews[i] = VK_NULL_HANDLE;
         }
 
-        // freeing backing device memory
-        if (vkFreeMemory != NULL && s->device != VK_NULL_HANDLE) vkFreeMemory(s->device, s->dpbMemory, NULL);
-        
-        s->dpbMemory = VK_NULL_HANDLE;
         s->dpbHasDefinedLayout = false;
 }
 
@@ -2158,15 +2028,9 @@ static bool find_first_sps_vps(struct state_vulkan_decompress *s, const unsigned
 
 static void * begin_bitstream_writing(struct state_vulkan_decompress *s)
 {
-        // maps the bitstream memory and returns pointer onto it's beginning
-        void *memoryPtr = NULL;
+        memset(s->bitstreamBufferMemory.mapPtr, 0, s->bitstreamBufferMemory.size);
 
-        VkResult result = vkMapMemory(s->device, s->bitstreamBufferMemory, 0, VK_WHOLE_SIZE, 0, &memoryPtr);
-        if (result != VK_SUCCESS) return NULL;
-
-        memset(memoryPtr, 0, s->bitstreamBufferSize);
-
-        return memoryPtr;
+        return s->bitstreamBufferMemory.mapPtr;
 }
 
 static VkDeviceSize write_bitstream(uint8_t *bitstream, VkDeviceSize bitstream_len, VkDeviceSize bitstream_capacity,
@@ -2198,14 +2062,6 @@ static VkDeviceSize write_bitstream(uint8_t *bitstream, VkDeviceSize bitstream_l
         memcpy(bitstream + bitstream_len + startcode_len + 1, rbsp, len);        // writing the rbsp data
 
         return result_len;
-}
-
-static void end_bitstream_writing(struct state_vulkan_decompress *s)
-{
-        // unmaps the mapped memory for bitstream
-        if (vkUnmapMemory == NULL || s->device == VK_NULL_HANDLE) return;
-
-        vkUnmapMemory(s->device, s->bitstreamBufferMemory);
 }
 
 static bool detect_poc_wrapping(struct state_vulkan_decompress *s)
@@ -2269,7 +2125,6 @@ static bool write_decoded_frame(struct state_vulkan_decompress *s, frame_data_t 
         // assumes that decoded frame is in NV12 format and output is wanted in I42O format,
         // so it manually does the conversion 
         assert(s->device != VK_NULL_HANDLE);
-        assert(s->outputImageMemory != VK_NULL_HANDLE);
         assert(dst_frame != NULL);
 
         VkDeviceSize lumaSize = s->lumaSize;                // using local variable, otherwise would get bad performance
@@ -2279,16 +2134,9 @@ static bool write_decoded_frame(struct state_vulkan_decompress *s, frame_data_t 
         assert((size_t)size == s->outputFrameQueue_data_size);
         assert(lumaSize <= s->outputChromaPlaneOffset);
 
-        unsigned char *memory = NULL;
-        VkDeviceSize mapSize = s->outputChromaPlaneOffset + chromaSize * 2;
-        VkResult result = vkMapMemory(s->device, s->outputImageMemory, 0, mapSize,
-                                                                  0, (void**)&memory);
-        if (result != VK_SUCCESS) return false;
-        assert(memory != NULL);
-
         VkMappedMemoryRange imageMemRange = {};
         imageMemRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-        imageMemRange.memory = s->outputImageMemory;
+        imageMemRange.memory = s->outputImageMemory.deviceMemory;
         imageMemRange.offset = 0;
         imageMemRange.size = VK_WHOLE_SIZE;
 
@@ -2298,18 +2146,16 @@ static bool write_decoded_frame(struct state_vulkan_decompress *s, frame_data_t 
 
         // Translating NV12 into I420:
         // luma plane
-        const unsigned char *luma = memory;
+        const unsigned char *luma = (const unsigned char *) s->outputImageMemory.mapPtr;
         memcpy(dst_mem, luma, lumaSize);
 
         // chroma plane
-        const unsigned char *chroma = memory + s->outputChromaPlaneOffset;
+        const unsigned char *chroma = luma + s->outputChromaPlaneOffset;
         for (size_t i = 0; i < chromaSize; ++i)
         {
                 dst_mem[lumaSize + i] = *(chroma++);
                 dst_mem[lumaSize + chromaSize + i] = *(chroma++);
         }
-
-        vkUnmapMemory(s->device, s->outputImageMemory);
 
         return true;
 }
@@ -2697,8 +2543,6 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
                 }
 
         }
-        end_bitstream_writing(s);
-        bitstream = NULL; // just to be sure
          assert(bitstream_written <= bitstream_max_size);
         
         #ifdef DECODE_TIMING
