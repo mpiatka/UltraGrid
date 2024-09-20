@@ -101,7 +101,7 @@ struct state_vulkan_decompress // state of vulkan_decode module
         VkSemaphoreUniq decodeDoneSem;
         VkVideoCodecOperationFlagBitsKHR codecOperation;
         bool prepared, sps_vps_found, resetVideoCoding;
-        VkFence fence;
+        VkFenceUniq frameReadyFence;
         VkBuffer bitstreamBuffer;                                        // needs to be destroyed if valid
         VkDeviceSize bitstreamBufferSize;
         VkDeviceSize bitstreambufferSizeAlignment;
@@ -224,7 +224,6 @@ static void * vulkan_decompress_init(void)
         s->computeQueue = computeQueueRes.value();
         s->computeQueueIdx = s->gpu.dev->get_queue_index(vkb::QueueType::graphics).value();
 
-        s->fence = VK_NULL_HANDLE;
         s->bitstreamBuffer = VK_NULL_HANDLE; //buffer gets created in allocate_buffers function
         s->bitstreambufferSizeAlignment = 0;
         s->decodeCmdBuf = VK_NULL_HANDLE;                   //same
@@ -284,9 +283,6 @@ static void vulkan_decompress_done(void *state)
         destroy_dpb(s);
 
         free_buffers(s);
-
-        if (vkDestroyFence != NULL && s->device != VK_NULL_HANDLE)
-                vkDestroyFence(s->device, s->fence, NULL);
 
         free(s->pps_array);
         free(s->sps_array);
@@ -1528,13 +1524,8 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         assert(pictureFormat == referencePictureFormat);
         s->dpbFormat = referencePictureFormat;
 
-        // ---Creating synchronization fence---
-        assert(s->device != VK_NULL_HANDLE);
-        assert(s->fence == VK_NULL_HANDLE);
-
-        VkFenceCreateInfo fenceInfo = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-        result = vkCreateFence(s->device, &fenceInfo, NULL, &s->fence);
-        if (result != VK_SUCCESS)
+        s->frameReadyFence = s->gpu.getFence(false);
+        if (!s->frameReadyFence)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan fence for synchronization!\n");
                 return false;
@@ -1545,13 +1536,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         // ---Creating bitstreamBuffer for encoded NAL bitstream---
         if (!allocate_buffers(s, videoProfileList, videoCapabilities))
         {
-                // err msg should get printed inside of allocate_buffers
-                if (vkDestroyFence != NULL)
-                {
-                        vkDestroyFence(s->device, s->fence, NULL);
-                        s->fence = VK_NULL_HANDLE;
-                }
-
                 return false;
         }
 
@@ -1562,11 +1546,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan command pools!\n");
                 free_buffers(s);
-                if (vkDestroyFence != NULL)
-                {
-                        vkDestroyFence(s->device, s->fence, NULL);
-                        s->fence = VK_NULL_HANDLE;
-                }
 
                 return false;
         }
@@ -1590,11 +1569,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate vulkan command buffers!\n");
                 free_buffers(s);
-                if (vkDestroyFence != NULL)
-                {
-                        vkDestroyFence(s->device, s->fence, NULL);
-                        s->fence = VK_NULL_HANDLE;
-                }
 
                 return false;
         }
@@ -1604,11 +1578,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         {
                 // err msg should get printed inside of create_dpb
                 free_buffers(s);
-                if (vkDestroyFence != NULL)
-                {
-                        vkDestroyFence(s->device, s->fence, NULL);
-                        s->fence = VK_NULL_HANDLE;
-                }
 
                 return false;
         }
@@ -1619,11 +1588,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 // err msg should get printed inside of create_output_image
                 destroy_dpb(s);
                 free_buffers(s);
-                if (vkDestroyFence != NULL)
-                {
-                        vkDestroyFence(s->device, s->fence, NULL);
-                        s->fence = VK_NULL_HANDLE;
-                }
 
                 return false;
         }
@@ -1635,11 +1599,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 destroy_output_image(s);
                 destroy_dpb(s);
                 free_buffers(s);
-                if (vkDestroyFence != NULL)
-                {
-                        vkDestroyFence(s->device, s->fence, NULL);
-                        s->fence = VK_NULL_HANDLE;
-                }
 
                 return false;
         }
@@ -1679,11 +1638,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 destroy_output_image(s);
                 destroy_dpb(s);
                 free_buffers(s);
-                if (vkDestroyFence != NULL)
-                {
-                        vkDestroyFence(s->device, s->fence, NULL);
-                        s->fence = VK_NULL_HANDLE;
-                }
 
                 return false;
         }
@@ -1724,11 +1678,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 destroy_output_image(s);
                 destroy_dpb(s);
                 free_buffers(s);
-                if (vkDestroyFence != NULL)
-                {
-                        vkDestroyFence(s->device, s->fence, NULL);
-                        s->fence = VK_NULL_HANDLE;
-                }
                 
                 return false;
         }
@@ -1753,11 +1702,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 destroy_output_image(s);
                 destroy_dpb(s);
                 free_buffers(s);
-                if (vkDestroyFence != NULL)
-                {
-                        vkDestroyFence(s->device, s->fence, NULL);
-                        s->fence = VK_NULL_HANDLE;
-                }
 
                 return false;
         }
@@ -2726,7 +2670,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
                 return false;
         }
 
-        result = vkQueueSubmit(s->computeQueue, 1, &computeSubmit, s->fence);
+        result = vkQueueSubmit(s->computeQueue, 1, &computeSubmit, s->frameReadyFence);
         if (result != VK_SUCCESS)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to submit the compute cmd buffer into queue!\n");
@@ -2743,7 +2687,8 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
         // ---Synchronization---
         const uint64_t synchronizationTimeout = 500 * 1000 * 1000; // = 500ms (timeout is in nanoseconds)
 
-        result = vkWaitForFences(s->device, 1, &s->fence, VK_TRUE, synchronizationTimeout);
+        VkFence fence = s->frameReadyFence;
+        result = vkWaitForFences(s->device, 1, &fence, VK_TRUE, synchronizationTimeout);
         if (result != VK_SUCCESS)
         {
                 if (result == VK_TIMEOUT) log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Vulkan can't synchronize! -> Timeout reached.\n");
@@ -2753,7 +2698,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
                 return false;
         }
 
-        result = vkResetFences(s->device, 1, &s->fence);
+        result = vkResetFences(s->device, 1, &fence);
         if (result != VK_SUCCESS)
         {
                 // should happen only when out of memory
