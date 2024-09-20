@@ -3,6 +3,22 @@
 
 #define MOD_NAME "[vulkan GPU] "
 
+namespace{
+
+template <typename T>
+T roundUp(T val, T alignment){
+        if(alignment ==  0)
+                return val;
+
+        T remainder = val % alignment;
+        if(remainder == 0)
+                return val;
+
+        return val + alignment - remainder;
+}
+
+}
+
 bool Gpu::init(){
         if(volkInitialize() != VK_SUCCESS){
                 log_msg(LOG_LEVEL_ERROR, MOD_NAME "Failed to initialize volk\n");
@@ -119,4 +135,54 @@ VkCommandPoolUniq Gpu::getCmdPool(uint32_t queueFamIdx){
                 return {};
 
         return VkCommandPoolUniq(dev.get(), pool);
+}
+
+AllocatedMemory Gpu::allocateMem(VkDeviceSize size, VkDeviceSize alignment,
+                VkMemoryPropertyFlags flags, uint32_t allowedTypes)
+{
+        VkMemoryAllocateInfo allocInfo = {};
+        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocInfo.memoryTypeIndex = UINT32_MAX;
+
+        bool mapMemory = false;
+
+        for(size_t i = 0; i < dev->physical_device.memory_properties.memoryTypeCount; i++){
+                if(!((1 << i) & allowedTypes))
+                        continue;
+
+                const auto& memProp = dev->physical_device.memory_properties.memoryTypes[i];
+                if((memProp.propertyFlags & flags) == flags){
+                        allocInfo.memoryTypeIndex = i;
+                        mapMemory = memProp.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+                        break;
+                }
+        }
+
+        if(allocInfo.memoryTypeIndex == UINT32_MAX)
+                return {};
+
+        allocInfo.allocationSize = roundUp(size, alignment);
+
+        VkDeviceMemory tmp = nullptr;
+        if(vkAllocateMemory(dev.get(), &allocInfo, nullptr, &tmp) != VK_SUCCESS)
+                return {};
+
+        VkDeviceMemoryUniq mem(dev.get(), tmp);
+
+        void *map = nullptr;
+        if(mapMemory){
+                if(vkMapMemory(dev.get(), mem, 0, allocInfo.allocationSize, 0, &map) != VK_SUCCESS)
+                {
+                        log_msg(LOG_LEVEL_ERROR, MOD_NAME "Failed to map allocated device memory\n");
+                        map = nullptr;
+                }
+        }
+
+        return {
+                .deviceMemory = std::move(mem),
+                .memType = allocInfo.memoryTypeIndex,
+                .size = allocInfo.allocationSize,
+                .mapPtr = map
+        };
+
 }

@@ -79,5 +79,6 @@ using VkShaderModuleUniq = VkUniqueHandle<VkDevice, VkShaderModule, &vkDestroySh
 using VkDescriptorPoolUniq = VkUniqueHandle<VkDevice, VkDescriptorPool, &vkDestroyDescriptorPool>;
 using VkDescriptorSetLayoutUniq = VkUniqueHandle<VkDevice, VkDescriptorSetLayout, &vkDestroyDescriptorSetLayout>;
 using VkBufferUniq = VkUniqueHandle<VkDevice, VkBuffer, &vkDestroyBuffer>;
+using VkDeviceMemoryUniq = VkUniqueHandle<VkDevice, VkDeviceMemory, &vkFreeMemory>;
 
 #endif
