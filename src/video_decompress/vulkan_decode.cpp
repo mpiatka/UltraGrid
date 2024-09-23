@@ -56,7 +56,6 @@
 #define MAX_REF_FRAMES 16
 #define MAX_SLICES 128
 #define MAX_OUTPUT_FRAMES_QUEUE_SIZE 32
-#define BITSTREAM_STARTCODE 0, 0, 1
 
 #define MOD_NAME "[vulkan_decode] "
 
@@ -195,6 +194,88 @@ bool DpbImages::init(Gpu *gpu, unsigned width, unsigned height, VkFormat format,
         return true;
 }
 
+struct BitstreamBuffer{
+        bool init(Gpu *gpu, VkDeviceSize size, VkDeviceSize alignment, VkVideoProfileListInfoKHR *videoProfileList);
+        void reset() { written = 0; }
+        bool write(unsigned char *data, size_t len, unsigned char nal_header);
+        size_t get_available_write_len() const { return memory.size - written; }
+        uint32_t get_write_offset() const { return written; }
+        VkDeviceSize get_written_aligned() const {
+                return (written + (alignment - 1)) & ~(alignment - 1); //alignment bit mask magic
+        }
+
+        void clear_to_alignment() {  } //TODO
+
+        VkBufferUniq buf;
+        AllocatedMemory memory;
+        VkDeviceSize alignment = 0;
+
+        size_t written = 0;
+};
+
+bool BitstreamBuffer::init(Gpu *gpu, VkDeviceSize size, VkDeviceSize alignment, VkVideoProfileListInfoKHR *videoProfileList){
+        this->alignment = alignment;
+        size = (size + (alignment - 1)) & ~(alignment - 1); //alignment bit mask magic
+
+        VkBufferCreateInfo bitstreamBufferInfo = {};
+        bitstreamBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bitstreamBufferInfo.pNext = videoProfileList;
+        bitstreamBufferInfo.flags = 0;
+        bitstreamBufferInfo.usage = VK_BUFFER_USAGE_VIDEO_DECODE_SRC_BIT_KHR;
+        bitstreamBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        bitstreamBufferInfo.size = size;
+
+        VkBuffer tmpBuf;
+        VkResult result = vkCreateBuffer(gpu->dev.get(), &bitstreamBufferInfo, NULL, &tmpBuf);
+        if (result != VK_SUCCESS) {
+                log_msg(LOG_LEVEL_ERROR, MOD_NAME "Failed to create vulkan buffer for decoding!\n");
+                return false;
+        }
+        buf = VkBufferUniq(gpu->dev.get(), tmpBuf);
+
+        VkMemoryRequirements bitstreamBufferMemReq;
+        vkGetBufferMemoryRequirements(gpu->dev.get(), buf, &bitstreamBufferMemReq);
+
+        memory = gpu->allocateMem(bitstreamBufferMemReq.size, alignment,
+                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                        bitstreamBufferMemReq.memoryTypeBits);
+
+        result = vkBindBufferMemory(gpu->dev.get(), buf, memory.deviceMemory, 0);
+        if (result != VK_SUCCESS) {
+                log_msg(LOG_LEVEL_ERROR, MOD_NAME "Failed to bind vulkan memory to vulkan bitstream buffer!\n");
+                return false;
+        }
+
+        return true;
+}
+
+bool BitstreamBuffer::write(unsigned char *data, size_t len, unsigned char nal_header){
+        assert(buf != VK_NULL_HANDLE);
+        assert(data != nullptr && len > 0);
+
+        const unsigned char startcode[] = { 0, 0, 1 };
+        size_t startcode_len = sizeof(startcode);
+        
+        size_t write_len = sizeof(startcode) + 1 + len; // startcode + header + rbsp data
+        
+        // check if enough space for rbsp in the buffer, return zero if not
+        // (zero => error as we always want to write at least the startcode length anyway)
+        if(written + write_len > get_available_write_len()){
+                log_msg(LOG_LEVEL_ERROR, MOD_NAME "Not enough space in bitstream buffer\n");
+                return false;
+        }
+
+        auto write_ptr = static_cast<unsigned char *>(memory.mapPtr) + written;
+
+        memcpy(write_ptr, startcode, startcode_len);                // writing the nal start code
+        write_ptr[startcode_len] = nal_header;                // writing the nal header
+        memcpy(write_ptr + startcode_len + 1, data, len);        // writing the rbsp data
+
+        written += write_len;
+
+        return true;
+}
+
 struct state_vulkan_decompress // state of vulkan_decode module
 {
         Gpu gpu;
@@ -212,11 +293,6 @@ struct state_vulkan_decompress // state of vulkan_decode module
         VkVideoCodecOperationFlagBitsKHR codecOperation;
         bool prepared, sps_vps_found, resetVideoCoding;
         VkFenceUniq frameReadyFence;
-
-        VkBuffer bitstreamBuffer;                                        // needs to be destroyed if valid
-        VkDeviceSize bitstreamBufferSize;
-        VkDeviceSize bitstreambufferSizeAlignment;
-        AllocatedMemory bitstreamBufferMemory;                // allocated memory for bitstreamBuffer, needs to be freed if valid
 
         VkCommandPoolUniq decodeCmdPool;
         VkCommandBuffer decodeCmdBuf;
@@ -239,6 +315,8 @@ struct state_vulkan_decompress // state of vulkan_decode module
 
         DpbImages dpbImgs;
         bool dpbHasDefinedLayout = false;
+
+        BitstreamBuffer bitstreamBuffer;
                                                                                    //
         slice_info_t referenceSlotsQueue[MAX_REF_FRAMES] = {};        // queue containing slice infos of the current reference frames 
         uint32_t referenceSlotsQueue_start;                                          // index into referenceSlotsQueue where the queue starts
@@ -283,7 +361,6 @@ struct state_vulkan_decompress // state of vulkan_decode module
 };
 
 
-static void free_buffers(struct state_vulkan_decompress *s);
 static void destroy_output_image(struct state_vulkan_decompress *s);
 static void destroy_output_queue(struct state_vulkan_decompress *s);
 static void destroy_queries(struct state_vulkan_decompress *s);
@@ -332,8 +409,6 @@ static void * vulkan_decompress_init(void)
         s->computeQueue = computeQueueRes.value();
         s->computeQueueIdx = s->gpu.dev->get_queue_index(vkb::QueueType::graphics).value();
 
-        s->bitstreamBuffer = VK_NULL_HANDLE; //buffer gets created in allocate_buffers function
-        s->bitstreambufferSizeAlignment = 0;
         s->decodeCmdBuf = VK_NULL_HANDLE;                   //same
         s->videoSession = VK_NULL_HANDLE;          //video session gets created in prepare function
         s->videoSessionParams = VK_NULL_HANDLE; //same
@@ -374,8 +449,6 @@ static void vulkan_decompress_done(void *state)
         destroy_output_queue(s);
 
         destroy_output_image(s);
-
-        free_buffers(s);
 
         free(s->pps_array);
         free(s->sps_array);
@@ -667,66 +740,6 @@ static bool check_for_vulkan_format(VkPhysicalDevice physDevice, VkPhysicalDevic
         log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Wanted output video format is not supported!\n");
         free(properties);
         return false;
-}
-
-static bool allocate_buffers(struct state_vulkan_decompress *s, VkVideoProfileListInfoKHR videoProfileList,
-                                                         const VkVideoCapabilitiesKHR videoCapabilities)
-{
-        // allocates VkBuffer and it's memory for bitstream, returns true if success
-        assert(s->bitstreamBuffer == VK_NULL_HANDLE);
-
-        const VkDeviceSize wantedBitstreamBufferSize = 10 * 1024 * 1024; //TODO magic number for size
-        s->bitstreambufferSizeAlignment = videoCapabilities.minBitstreamBufferSizeAlignment;
-        s->bitstreamBufferSize = (wantedBitstreamBufferSize + (s->bitstreambufferSizeAlignment - 1))
-                                                         & ~(s->bitstreambufferSizeAlignment - 1); //alignment bit mask magic
-        VkBufferCreateInfo bitstreamBufferInfo = {};
-        bitstreamBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bitstreamBufferInfo.pNext = (void*)&videoProfileList;
-        bitstreamBufferInfo.flags = 0;
-        bitstreamBufferInfo.usage = VK_BUFFER_USAGE_VIDEO_DECODE_SRC_BIT_KHR;
-        bitstreamBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        bitstreamBufferInfo.size = s->bitstreamBufferSize;
-        bitstreamBufferInfo.queueFamilyIndexCount = 1;
-        bitstreamBufferInfo.pQueueFamilyIndices = &s->decodeQueueIdx;
-        VkResult result = vkCreateBuffer(s->device, &bitstreamBufferInfo, NULL, &s->bitstreamBuffer);
-        if (result != VK_SUCCESS)
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan buffer for decoding!\n");
-                free_buffers(s);
-
-                return false;
-        }
-
-        assert(s->bitstreamBuffer != VK_NULL_HANDLE);
-
-        VkMemoryRequirements bitstreamBufferMemReq;
-        vkGetBufferMemoryRequirements(s->device, s->bitstreamBuffer, &bitstreamBufferMemReq);
-
-        s->bitstreamBufferMemory = s->gpu.allocateMem(bitstreamBufferMemReq.size, s->bitstreambufferSizeAlignment,
-                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                        bitstreamBufferMemReq.memoryTypeBits);
-
-        result = vkBindBufferMemory(s->device, s->bitstreamBuffer, s->bitstreamBufferMemory.deviceMemory, 0);
-        if (result != VK_SUCCESS)
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to bind vulkan memory to vulkan bitstream buffer!\n");
-                free_buffers(s);
-                
-                return false;
-        }
-
-        return true;
-}
-
-static void free_buffers(struct state_vulkan_decompress *s)
-{
-        //buffers needs to get destroyed first
-        if (vkDestroyBuffer != NULL && s->device != VK_NULL_HANDLE)
-                                vkDestroyBuffer(s->device, s->bitstreamBuffer, NULL);
-
-        s->bitstreamBuffer = VK_NULL_HANDLE;
-        s->bitstreamBufferSize = 0;
-        s->bitstreambufferSizeAlignment = 0;
 }
 
 static bool allocate_memory_for_video_session(struct state_vulkan_decompress *s)
@@ -1488,7 +1501,8 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         s->decodeDoneSem = s->gpu.getSemaphore();
 
         // ---Creating bitstreamBuffer for encoded NAL bitstream---
-        if (!allocate_buffers(s, videoProfileList, videoCapabilities))
+        const VkDeviceSize bufSize = 10 * 1024 * 1024; //TODO magic number for size
+        if(!s->bitstreamBuffer.init(&s->gpu, bufSize, videoCapabilities.minBitstreamBufferSizeAlignment, &videoProfileList))
         {
                 return false;
         }
@@ -1499,8 +1513,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         if (!s->decodeCmdPool || !s->computeCmdPool)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan command pools!\n");
-                free_buffers(s);
-
                 return false;
         }
 
@@ -1522,14 +1534,10 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         if (!s->computeCmdBuf || !s->decodeCmdBuf)
         {
                 log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to allocate vulkan command buffers!\n");
-                free_buffers(s);
-
                 return false;
         }
 
         if(!s->dpbImgs.init(&s->gpu, s->width, s->height, referencePictureFormat, &videoProfileList, MAX_REF_FRAMES + 1)){
-                free_buffers(s);
-
                 return false;
         }
 
@@ -1537,8 +1545,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         if (!create_output_image(s))
         {
                 // err msg should get printed inside of create_output_image
-                free_buffers(s);
-
                 return false;
         }
 
@@ -1547,8 +1553,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         {
                 // err msg should get printed inside of create_output_queue
                 destroy_output_image(s);
-                free_buffers(s);
-
                 return false;
         }
 
@@ -1586,8 +1590,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 destroy_queries(s);
                 destroy_output_queue(s);
                 destroy_output_image(s);
-                free_buffers(s);
-
                 return false;
         }
 
@@ -1618,7 +1620,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 destroy_queries(s);
                 destroy_output_queue(s);
                 destroy_output_image(s);
-                free_buffers(s);
                 
                 return false;
         }
@@ -1641,7 +1642,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 destroy_queries(s);
                 destroy_output_queue(s);
                 destroy_output_image(s);
-                free_buffers(s);
 
                 return false;
         }
@@ -1877,44 +1877,6 @@ static bool find_first_sps_vps(struct state_vulkan_decompress *s, const unsigned
         }
 
         return false;
-}
-
-static void * begin_bitstream_writing(struct state_vulkan_decompress *s)
-{
-        memset(s->bitstreamBufferMemory.mapPtr, 0, s->bitstreamBufferMemory.size);
-
-        return s->bitstreamBufferMemory.mapPtr;
-}
-
-static VkDeviceSize write_bitstream(uint8_t *bitstream, VkDeviceSize bitstream_len, VkDeviceSize bitstream_capacity,
-                                                                    const uint8_t *rbsp, int len, unsigned char nal_header)
-{
-        // writes one given NAL unit into NAL buffer, if error (not enough space in buffer) returns 0
-        assert(bitstream != NULL && rbsp != NULL && len > 0);
-
-        const uint8_t startcode_short[] = { BITSTREAM_STARTCODE };
-        /*const uint8_t startcode_long[] = { 0, BITSTREAM_STARTCODE };
-
-        const uint8_t *startcode = long_startcode ? startcode_long : startcode_short;
-        size_t startcode_len = long_startcode ?
-                                                   sizeof(startcode_long) / sizeof(startcode_long[0]) :
-                                                   sizeof(startcode_short) / sizeof(startcode_short[0]);*/
-        
-        //DEBUG
-        const uint8_t *startcode = startcode_short;
-        size_t startcode_len = sizeof(startcode_short) / sizeof(startcode_short[0]);
-        
-        VkDeviceSize result_len = (VkDeviceSize)startcode_len + 1 + (VkDeviceSize)len; // startcode + header + rbsp data
-        
-        // check if enough space for rbsp in the buffer, return zero if not
-        // (zero => error as we always want to write at least the startcode length anyway)
-        if (bitstream_len + result_len > bitstream_capacity) return 0;
-
-        memcpy(bitstream + bitstream_len, startcode, startcode_len);                // writing the nal start code
-        bitstream[bitstream_len + startcode_len] = (uint8_t)nal_header;                // writing the nal header
-        memcpy(bitstream + bitstream_len + startcode_len + 1, rbsp, len);        // writing the rbsp data
-
-        return result_len;
 }
 
 static bool detect_poc_wrapping(struct state_vulkan_decompress *s)
@@ -2197,8 +2159,7 @@ static bool handle_sh_nalu(struct state_vulkan_decompress *s, uint8_t *rbsp, int
         return true;
 }
 
-static VkDeviceSize handle_vcl(struct state_vulkan_decompress *s,
-                                                           uint8_t *bitstream, VkDeviceSize bitstream_written, VkDeviceSize bitstream_capacity,
+static bool handle_vcl(struct state_vulkan_decompress *s,
                                                            uint8_t *rbsp, int rbsp_len, unsigned char nal_header, slice_info_t *slice_info,
                                                            uint32_t slice_offsets[], uint32_t *slice_offsets_count)
 {
@@ -2211,31 +2172,31 @@ static VkDeviceSize handle_vcl(struct state_vulkan_decompress *s,
         bool sh_ret = handle_sh_nalu(s, rbsp, rbsp_len, nal_type, nal_idc, slice_info);
         UNUSED(sh_ret); // we want to write it into bitstream anyway
 
-        VkDeviceSize written = write_bitstream(bitstream, bitstream_written, bitstream_capacity,
-                                                                                   rbsp, rbsp_len, nal_header);
-        if (written > 0 && *slice_offsets_count < MAX_SLICES)
-        {
-                slice_offsets[*slice_offsets_count] = bitstream_written; // pointing at the written startcode
+        uint32_t write_pos = s->bitstreamBuffer.get_write_offset();
+        bool write_succesful = s->bitstreamBuffer.write(rbsp, rbsp_len, nal_header);
+        if (write_succesful > 0 && *slice_offsets_count < MAX_SLICES) {
+                slice_offsets[*slice_offsets_count] = write_pos; // pointing at the written startcode
                 *slice_offsets_count += 1;
 
                 slice_info->is_reference = nal_idc > 0;
                 if (nal_idc > slice_info->nal_idc) slice_info->nal_idc = nal_idc;
+        } else {
+                log_msg(LOG_LEVEL_WARNING, MOD_NAME "NAL writing fail!\n");       
+                return false;
         }
-        else log_msg(LOG_LEVEL_WARNING, "[vulkan_decode] NAL writing fail!\n");
 
-        return written;
+        return true;
 }
 
-static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_info, VkDeviceSize bitstreamBufferWritten,
+static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_info,
                                                  uint32_t slice_offsets[], uint32_t slice_offsets_count,
                                                  VkVideoReferenceSlotInfoKHR refSlotInfos[], uint32_t refSlotInfos_count,// uint32_t take_references,
                                                  VkVideoReferenceSlotInfoKHR *dstSlotInfo, VkVideoPictureResourceInfoKHR *dstVideoPicInfo)
 {
         bool isH264 = s->codecOperation == VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
-        VkDeviceSize bitstreamBufferWrittenAligned = (bitstreamBufferWritten + (s->bitstreambufferSizeAlignment - 1))
-                                                                                                 & ~(s->bitstreambufferSizeAlignment - 1); //alignment bit mask magic
+
+        s->bitstreamBuffer.clear_to_alignment();
         
-        assert(bitstreamBufferWrittenAligned <= s->bitstreamBufferSize);
         assert(slice_offsets_count > 0);
         // for IDR pictures the id must be valid
         assert(!slice_info.is_idr || slice_info.idr_pic_id >= 0);
@@ -2280,9 +2241,9 @@ static void decode_frame(struct state_vulkan_decompress *s, slice_info_t slice_i
         decodeInfo.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_INFO_KHR;
         decodeInfo.pNext = &h264DecodeInfo;
         decodeInfo.flags = 0;
-        decodeInfo.srcBuffer = s->bitstreamBuffer;
+        decodeInfo.srcBuffer = s->bitstreamBuffer.buf;
         decodeInfo.srcBufferOffset = 0;
-        decodeInfo.srcBufferRange = bitstreamBufferWrittenAligned;
+        decodeInfo.srcBufferRange = s->bitstreamBuffer.get_written_aligned();
         decodeInfo.dstPictureResource = *dstVideoPicInfo;
         // this must be the same as dstPictureResource when VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR
         // otherwise must not be the same as dstPictureResource
@@ -2314,20 +2275,11 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
         uint32_t slice_offsets[MAX_SLICES] = {};
         uint32_t slice_offsets_count = 0; 
 
+        s->bitstreamBuffer.reset();
+
         // ---Copying NAL units into s->bitstreamBuffer---
         // those flags are for debugging purposes - true, false are probably correct for normal usage
         const bool filter_nal = true;
-
-        VkDeviceSize bitstream_written = 0;
-        const VkDeviceSize bitstream_max_size = s->bitstreamBufferSize;
-        assert(bitstream_max_size > 0);
-
-        uint8_t *bitstream = (uint8_t*)begin_bitstream_writing(s);
-        if (bitstream == NULL)
-        {
-                log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to map needed vulkan memory for NAL units!\n");
-                return false;
-        }
 
         Nal_unit_reader nal_reader;
         nal_reader.set_data(src, src_len);
@@ -2336,10 +2288,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
         {
                 if (!filter_nal && nal->type != NAL_H264_IDR && nal->type != NAL_H264_NON_IDR)
                 {
-                        VkDeviceSize written = 0;
-                        written = write_bitstream(bitstream, bitstream_written, bitstream_max_size,
-                                        nal->rbsp.data(), nal->rbsp.size(), nal->header);
-                        bitstream_written += written;
+                        s->bitstreamBuffer.write(nal->rbsp.data(), nal->rbsp.size(), nal->header);
                 }
 
                 switch(nal->type)
@@ -2363,11 +2312,8 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
                         // intentional fallthrough
                 case NAL_H264_NON_IDR:
                         {
-                                VkDeviceSize written = 0;
-                                written = handle_vcl(s, bitstream, bitstream_written, bitstream_max_size,
-                                                nal->rbsp.data(), nal->rbsp.size(), nal->header, slice_info,
+                                handle_vcl(s, nal->rbsp.data(), nal->rbsp.size(), nal->header, slice_info,
                                                 slice_offsets, &slice_offsets_count);
-                                bitstream_written += written;
                         }
                         break; //switch break
                 case NAL_H264_SPS:
@@ -2391,7 +2337,6 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
                 }
 
         }
-         assert(bitstream_written <= bitstream_max_size);
         
         #ifdef DECODE_TIMING
                 time_ns_t parse_time_end = get_time_in_ns();
@@ -2508,7 +2453,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 
                 begin_video_coding_scope(s, slotInfos, slotInfos_ref_count + 1);
                 slotInfos[slotInfos_ref_count].slotIndex = slice_info->dpbIndex;
-                decode_frame(s, *slice_info, bitstream_written, slice_offsets, slice_offsets_count,
+                decode_frame(s, *slice_info, slice_offsets, slice_offsets_count,
                                          slotInfos, slotInfos_ref_count,
                                          slotInfos + slotInfos_ref_count, picInfos + slotInfos_ref_count);
                 end_video_coding_scope(s);
