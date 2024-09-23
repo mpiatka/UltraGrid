@@ -87,6 +87,114 @@ typedef struct        // structure representing output frame, stored in outputFr
         int poc_wrap;
 } frame_data_t;
 
+struct DpbImages{
+        bool init(Gpu *gpu, unsigned width, unsigned height, VkFormat format, VkVideoProfileListInfoKHR *videoProfileList, size_t dpb_len);
+
+        AllocatedMemory dpbMemory;
+        std::vector<VkImageUniq> imgs;
+        std::vector<VkImageViewUniq> views;
+        VkFormat format = VK_FORMAT_UNDEFINED;
+};
+
+bool DpbImages::init(Gpu *gpu, unsigned width, unsigned height, VkFormat format, VkVideoProfileListInfoKHR *videoProfileList, size_t dpb_len){
+        assert(imgs.size() == 0);
+        const VkExtent3D videoSize = { width, height, 1 };
+        this->format = format;
+
+        // ---Creating DPB VkImages---
+        VkImageCreateInfo dpbImgInfo = {};
+        dpbImgInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        dpbImgInfo.pNext = videoProfileList;
+        dpbImgInfo.flags = 0;
+        dpbImgInfo.usage = VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR |
+                VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR |
+                VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        dpbImgInfo.imageType = VK_IMAGE_TYPE_2D;
+        dpbImgInfo.mipLevels = 1;
+        dpbImgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        dpbImgInfo.format = format;
+        dpbImgInfo.extent = videoSize;
+        dpbImgInfo.arrayLayers = 1;
+        dpbImgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        dpbImgInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        for (size_t i = 0; i < dpb_len; ++i)
+        {
+                VkImage tmpImg = VK_NULL_HANDLE;
+                VkResult result = vkCreateImage(gpu->dev.get(), &dpbImgInfo, NULL, &tmpImg);
+                if (result != VK_SUCCESS)
+                {
+                        log_msg(LOG_LEVEL_ERROR, MOD_NAME "Failed to create vulkan image(%zu) for DPB slot!\n", i);
+                        return false;
+                }
+                imgs.emplace_back(gpu->dev.get(), tmpImg);
+        }
+
+        // ---Device memory allocation---
+        VkMemoryRequirements dpbImgMemoryRequirements;
+        vkGetImageMemoryRequirements(gpu->dev.get(), imgs[0], &dpbImgMemoryRequirements);
+
+        VkDeviceSize dpbImgAlignment = dpbImgMemoryRequirements.alignment;
+        VkDeviceSize dpbImgAlignedSize = (dpbImgMemoryRequirements.size + (dpbImgAlignment - 1))
+                & ~(dpbImgAlignment - 1); //alignment bit mask magic
+        VkDeviceSize dpbSize = dpbImgAlignedSize * dpb_len;
+
+        dpbMemory = gpu->allocateMem(dpbSize, 0, 0, dpbImgMemoryRequirements.memoryTypeBits);
+        if(!dpbMemory.deviceMemory){
+                
+                log_msg(LOG_LEVEL_ERROR, MOD_NAME "Failed to allocate vulkan device memory for DPB!\n");
+                return false;
+        }
+
+        // ---Binding memory for DPB pictures---
+        for (size_t i = 0; i < dpb_len; ++i)
+        {
+                auto result = vkBindImageMemory(gpu->dev.get(), imgs[i], dpbMemory.deviceMemory, i * dpbImgAlignedSize);
+                if (result != VK_SUCCESS)
+                {
+                        log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to bind vulkan device memory to DPB image (idx: %zu)!\n", i);
+                        return false;
+                }
+        }
+
+        // ---Creating DPB image views---
+        VkImageViewUsageCreateInfo viewUsageInfo = {};
+        viewUsageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO;
+        viewUsageInfo.usage = VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR | VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR;
+
+        VkImageSubresourceRange viewSubresourceRange = {};
+        viewSubresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        viewSubresourceRange.baseMipLevel = 0;
+        viewSubresourceRange.levelCount = 1;
+        viewSubresourceRange.baseArrayLayer = 0;
+        viewSubresourceRange.layerCount = 1;
+
+        VkImageViewCreateInfo dpbViewInfo = {};
+        dpbViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        dpbViewInfo.pNext = &viewUsageInfo;
+        dpbViewInfo.flags = 0;
+        dpbViewInfo.image = VK_NULL_HANDLE; // gets correctly set in the for loop
+        dpbViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        dpbViewInfo.format = dpbImgInfo.format;
+        dpbViewInfo.components = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY };
+        dpbViewInfo.subresourceRange = viewSubresourceRange;
+        
+        for (size_t i = 0; i < dpb_len; ++i)
+        {
+                dpbViewInfo.image = imgs[i];
+                VkImageView tmpView = VK_NULL_HANDLE;
+                auto result = vkCreateImageView(gpu->dev.get(), &dpbViewInfo, NULL, &tmpView);
+                if (result != VK_SUCCESS)
+                {
+                        log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan image view(%zu) for DPB slot!\n", i);
+                        return false;
+                }
+                views.emplace_back(gpu->dev.get(), tmpView);
+        }
+
+        return true;
+}
+
 struct state_vulkan_decompress // state of vulkan_decode module
 {
         Gpu gpu;
@@ -104,14 +212,17 @@ struct state_vulkan_decompress // state of vulkan_decode module
         VkVideoCodecOperationFlagBitsKHR codecOperation;
         bool prepared, sps_vps_found, resetVideoCoding;
         VkFenceUniq frameReadyFence;
+
         VkBuffer bitstreamBuffer;                                        // needs to be destroyed if valid
         VkDeviceSize bitstreamBufferSize;
         VkDeviceSize bitstreambufferSizeAlignment;
         AllocatedMemory bitstreamBufferMemory;                // allocated memory for bitstreamBuffer, needs to be freed if valid
+
         VkCommandPoolUniq decodeCmdPool;
         VkCommandBuffer decodeCmdBuf;
         VkCommandPoolUniq computeCmdPool;
         VkCommandBuffer computeCmdBuf;
+
         VkVideoSessionKHR videoSession;                                // needs to be destroyed if valid
         std::vector<AllocatedMemory> videoSessionMemory;
 
@@ -126,13 +237,9 @@ struct state_vulkan_decompress // state of vulkan_decode module
         sps_t *sps_array;
         pps_t *pps_array;
 
-        // Memory related to decode picture buffer and picture queue
-        bool dpbHasDefinedLayout;                                        // indicates that VkImages in 'dpb' array are not in undefined layout
-        VkImage dpb[MAX_REF_FRAMES + 1];                        // decoded picture buffer (aka dpb)
-        VkImageView dpbViews[MAX_REF_FRAMES + 1];        // dpb image views
-        AllocatedMemory dpbMemory;
-        VkFormat dpbFormat;                                                        // format of VkImages in dpb
-        //uint32_t dpbDstPictureIdx;                                        // index (into dpb and dpbViews) of the slot for next to be decoded frame
+        DpbImages dpbImgs;
+        bool dpbHasDefinedLayout = false;
+                                                                                   //
         slice_info_t referenceSlotsQueue[MAX_REF_FRAMES] = {};        // queue containing slice infos of the current reference frames 
         uint32_t referenceSlotsQueue_start;                                          // index into referenceSlotsQueue where the queue starts
         uint32_t referenceSlotsQueue_count;                                          // the current length of the reference slots queue
@@ -178,7 +285,6 @@ struct state_vulkan_decompress // state of vulkan_decode module
 
 static void free_buffers(struct state_vulkan_decompress *s);
 static void destroy_output_image(struct state_vulkan_decompress *s);
-static void destroy_dpb(struct state_vulkan_decompress *s);
 static void destroy_output_queue(struct state_vulkan_decompress *s);
 static void destroy_queries(struct state_vulkan_decompress *s);
 
@@ -233,13 +339,6 @@ static void * vulkan_decompress_init(void)
         s->videoSessionParams = VK_NULL_HANDLE; //same
         //s->videoSessionParams_update_count = 0;
 
-        for (size_t i = 0; i < MAX_REF_FRAMES + 1; ++i)
-        {
-                s->dpb[i] = VK_NULL_HANDLE;
-                s->dpbViews[i] = VK_NULL_HANDLE;
-        }
-        s->dpbFormat = VK_FORMAT_UNDEFINED;
-
         s->outputLumaPlane = VK_NULL_HANDLE;
         s->outputChromaPlane = VK_NULL_HANDLE;
         s->outputChromaPlaneOffset = 0;
@@ -275,8 +374,6 @@ static void vulkan_decompress_done(void *state)
         destroy_output_queue(s);
 
         destroy_output_image(s);
-
-        destroy_dpb(s);
 
         free_buffers(s);
 
@@ -321,8 +418,6 @@ static bool configure_with(struct state_vulkan_decompress *s, struct video_desc 
         s->lumaSize = s->width * s->height;
         s->chromaSize = (s->width / 2) * (s->height / 2);
 
-        s->dpbHasDefinedLayout = false;
-        s->dpbFormat = VK_FORMAT_UNDEFINED;
         s->referenceSlotsQueue_start = 0;
         s->referenceSlotsQueue_count = 0;
 
@@ -919,151 +1014,6 @@ static void destroy_output_image(struct state_vulkan_decompress *s)
         s->outputChromaPlane = VK_NULL_HANDLE;
 }
 
-static bool create_dpb(struct state_vulkan_decompress *s, VkVideoProfileListInfoKHR *videoProfileList)
-{
-        // Creates the DPB (decoded picture buffer) images and output image for decoded result,
-        // if success then returns true - resulting images must be destroyed using destroy_dpb,
-        // all created images are left in undefined layout
-        assert(s->device != VK_NULL_HANDLE);
-        assert(s->dpbFormat != VK_FORMAT_UNDEFINED);
-
-        const VkImageType imageType = VK_IMAGE_TYPE_2D;
-        const VkExtent3D videoSize = { s->width, s->height, 1 }; //depth must be 1 for VK_IMAGE_TYPE_2D
-
-        //imageCreateMaxMipLevels, imageCreateMaxArrayLayers, imageCreateMaxExtent, and imageCreateSampleCounts
-
-        // ---Creating DPB VkImages---
-        VkImageCreateInfo dpbImgInfo = {};
-        dpbImgInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        dpbImgInfo.pNext = (void*)videoProfileList;
-        dpbImgInfo.flags = 0;
-        dpbImgInfo.usage = VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR |
-                //VK_IMAGE_USAGE_VIDEO_DECODE_SRC_BIT_KHR |
-                VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR |
-                VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-        dpbImgInfo.imageType = imageType;
-        dpbImgInfo.mipLevels = 1;
-        dpbImgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-        dpbImgInfo.format = s->dpbFormat;
-        dpbImgInfo.extent = videoSize;
-        dpbImgInfo.arrayLayers = 1;
-        dpbImgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        dpbImgInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        dpbImgInfo.queueFamilyIndexCount = 1;
-        dpbImgInfo.pQueueFamilyIndices = &s->decodeQueueIdx;
-
-        size_t dpb_len = sizeof(s->dpb) / sizeof(s->dpb[0]);
-
-        for (size_t i = 0; i < dpb_len; ++i)
-        {
-                VkResult result = vkCreateImage(s->device, &dpbImgInfo, NULL, s->dpb + i);
-                if (result != VK_SUCCESS)
-                {
-                        log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan image(%zu) for DPB slot!\n", i);
-                        destroy_dpb(s);
-                        return false;
-                }
-        }
-
-        // ---Device memory allocation---
-        VkMemoryRequirements dpbImgMemoryRequirements;
-        vkGetImageMemoryRequirements(s->device, s->dpb[0], &dpbImgMemoryRequirements);
-
-        VkDeviceSize dpbImgAlignment = dpbImgMemoryRequirements.alignment;
-        VkDeviceSize dpbImgAlignedSize = (dpbImgMemoryRequirements.size + (dpbImgAlignment - 1))
-                & ~(dpbImgAlignment - 1); //alignment bit mask magic
-        VkDeviceSize dpbSize = dpbImgAlignedSize * dpb_len;
-
-        s->dpbMemory = s->gpu.allocateMem(dpbSize, 0, 0, dpbImgMemoryRequirements.memoryTypeBits);
-        if(!s->dpbMemory.deviceMemory){
-                
-                log_msg(LOG_LEVEL_ERROR, MOD_NAME "Failed to allocate vulkan device memory for DPB!\n");
-                return false;
-        }
-
-
-        // ---Binding memory for DPB pictures---
-        for (size_t i = 0; i < dpb_len; ++i)
-        {
-                auto result = vkBindImageMemory(s->device, s->dpb[i], s->dpbMemory.deviceMemory, i * dpbImgAlignedSize);
-                if (result != VK_SUCCESS)
-                {
-                        log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to bind vulkan device memory to DPB image (idx: %zu)!\n", i);
-                        destroy_dpb(s);
-                        return false;
-                }
-        }
-
-        // ---Creating DPB image views---
-        VkImageViewUsageCreateInfo viewUsageInfo = {};
-        viewUsageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO;
-        viewUsageInfo.usage = VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR | VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR;
-
-        VkImageSubresourceRange viewSubresourceRange = {};
-        viewSubresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        viewSubresourceRange.baseMipLevel = 0;
-        viewSubresourceRange.levelCount = 1;
-        viewSubresourceRange.baseArrayLayer = 0;
-        viewSubresourceRange.layerCount = 1;
-
-        VkImageViewCreateInfo dpbViewInfo = {};
-        dpbViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        dpbViewInfo.pNext = (void*)&viewUsageInfo;
-        dpbViewInfo.flags = 0;
-        dpbViewInfo.image = VK_NULL_HANDLE; // gets correctly set in the for loop
-        dpbViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        dpbViewInfo.format = dpbImgInfo.format;
-        dpbViewInfo.components = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY };
-        dpbViewInfo.subresourceRange = viewSubresourceRange;
-        
-        for (size_t i = 0; i < dpb_len; ++i)
-        {
-                assert(s->dpb[i] != VK_NULL_HANDLE);
-
-                dpbViewInfo.image = s->dpb[i];
-                auto result = vkCreateImageView(s->device, &dpbViewInfo, NULL, s->dpbViews + i);
-                if (result != VK_SUCCESS)
-                {
-                        log_msg(LOG_LEVEL_ERROR, "[vulkan_decode] Failed to create vulkan image view(%zu) for DPB slot!\n", i);
-                        destroy_dpb(s);
-                        return false;
-                }
-        }
-
-        return true;
-}
-
-static void destroy_dpb(struct state_vulkan_decompress *s)
-{
-        size_t dpb_len = sizeof(s->dpb) / sizeof(s->dpb[0]);
-
-        // freeing dpb image views
-        if (vkDestroyImageView != NULL && s->device != VK_NULL_HANDLE)
-        {
-                for (size_t i = 0; i < dpb_len; ++i)
-                {
-                        vkDestroyImageView(s->device, s->dpbViews[i], NULL);
-                }
-        }
-
-        // freeing dpb images
-        if (vkDestroyImage != NULL && s->device != VK_NULL_HANDLE)
-        {
-                for (size_t i = 0; i < dpb_len; ++i)
-                {
-                        vkDestroyImage(s->device, s->dpb[i], NULL);
-                }
-        }
-
-        for (size_t i = 0; i < dpb_len; ++i)
-        {
-                s->dpb[i] = VK_NULL_HANDLE;
-                s->dpbViews[i] = VK_NULL_HANDLE;
-        }
-
-        s->dpbHasDefinedLayout = false;
-}
-
 static bool create_output_queue(struct state_vulkan_decompress *s)
 {
         // Creates queue for output decoded frames
@@ -1527,7 +1477,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
 
         //TODO in the future make these (possibly) separate
         assert(pictureFormat == referencePictureFormat);
-        s->dpbFormat = referencePictureFormat;
 
         s->frameReadyFence = s->gpu.getFence(false);
         if (!s->frameReadyFence)
@@ -1578,10 +1527,7 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 return false;
         }
 
-        // ---Creating DPB (decoded picture buffer)---
-        if (!create_dpb(s, &videoProfileList))
-        {
-                // err msg should get printed inside of create_dpb
+        if(!s->dpbImgs.init(&s->gpu, s->width, s->height, referencePictureFormat, &videoProfileList, MAX_REF_FRAMES + 1)){
                 free_buffers(s);
 
                 return false;
@@ -1591,7 +1537,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         if (!create_output_image(s))
         {
                 // err msg should get printed inside of create_output_image
-                destroy_dpb(s);
                 free_buffers(s);
 
                 return false;
@@ -1602,7 +1547,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
         {
                 // err msg should get printed inside of create_output_queue
                 destroy_output_image(s);
-                destroy_dpb(s);
                 free_buffers(s);
 
                 return false;
@@ -1642,7 +1586,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 destroy_queries(s);
                 destroy_output_queue(s);
                 destroy_output_image(s);
-                destroy_dpb(s);
                 free_buffers(s);
 
                 return false;
@@ -1675,7 +1618,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 destroy_queries(s);
                 destroy_output_queue(s);
                 destroy_output_image(s);
-                destroy_dpb(s);
                 free_buffers(s);
                 
                 return false;
@@ -1699,7 +1641,6 @@ static bool prepare(struct state_vulkan_decompress *s, bool *wrong_pixfmt)
                 destroy_queries(s);
                 destroy_output_queue(s);
                 destroy_output_image(s);
-                destroy_dpb(s);
                 free_buffers(s);
 
                 return false;
@@ -1807,7 +1748,7 @@ static void fill_ref_picture_infos(struct state_vulkan_decompress *s,
                 assert(slice_info.frame_num >= 0);
                 assert(slice_info.dpbIndex < MAX_REF_FRAMES + 1);
 
-                VkImageView view = s->dpbViews[slice_info.dpbIndex];
+                VkImageView view = s->dpbImgs.views[slice_info.dpbIndex];
                 assert(view != VK_NULL_HANDLE);
 
                 h264Infos[i] = {};
@@ -1891,7 +1832,7 @@ static bool get_video_info_from_sps(struct state_vulkan_decompress *s, unsigned 
         {
                 chroma_format_idc = sps.chroma_format_idc;
         }
-        //printf("profile_idc: %d, chroma_format_idc: %d\n", sps.profile_idc, chroma_format_idc);
+        printf("profile_idc: %d, chroma_format_idc: %d\n", sps.profile_idc, chroma_format_idc);
         s->subsampling = isH264 ? h264_flag_to_subsampling((StdVideoH264ChromaFormatIdc)chroma_format_idc)
                                                         : h265_flag_to_subsampling((StdVideoH265ChromaFormatIdc)chroma_format_idc);
         //printf("chroma: %d, luma: %d, subs: %d\n", s->depth_chroma, s->depth_luma, s->subsampling);
@@ -2505,7 +2446,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
                         srcLayout = VK_IMAGE_LAYOUT_UNDEFINED;
                         srcQueueFam = s->decodeQueueIdx;
                 }
-                transfer_image_layout(s->decodeCmdBuf, s->dpb[i],
+                transfer_image_layout(s->decodeCmdBuf, s->dpbImgs.imgs[i],
                                 srcLayout, VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR,
                                 srcQueueFam, s->decodeQueueIdx);
         }
@@ -2557,7 +2498,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
                 picInfos[slotInfos_ref_count].sType = VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR;
                 picInfos[slotInfos_ref_count].codedExtent = videoSize;
                 picInfos[slotInfos_ref_count].baseArrayLayer = 0;
-                picInfos[slotInfos_ref_count].imageViewBinding = s->dpbViews[slice_info->dpbIndex];
+                picInfos[slotInfos_ref_count].imageViewBinding = s->dpbImgs.views[slice_info->dpbIndex];
 
                 slotInfos[slotInfos_ref_count] = {};
                 slotInfos[slotInfos_ref_count].sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR;
@@ -2577,17 +2518,17 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
         // ---VkImage synchronization and layout transfering after video coding scope---
         for (size_t i = 0; i < MAX_REF_FRAMES + 1; ++i)
         {
-                transfer_image_layout(s->decodeCmdBuf, s->dpb[i],
+                transfer_image_layout(s->decodeCmdBuf, s->dpbImgs.imgs[i],
                                                           VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                                                           s->decodeQueueIdx, s->computeQueueIdx);
-                transfer_image_layout(s->computeCmdBuf, s->dpb[i],
+                transfer_image_layout(s->computeCmdBuf, s->dpbImgs.imgs[i],
                                                           VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                                                           s->decodeQueueIdx, s->computeQueueIdx);
         }
         
         // ---Copying decoded DPB image into output image---
-        assert(s->dpbFormat == VK_FORMAT_G8_B8R8_2PLANE_420_UNORM); //TODO handle other potential formats too
-        copy_decoded_image(s, s->dpb[slice_info->dpbIndex]);
+        assert(s->dpbImgs.format == VK_FORMAT_G8_B8R8_2PLANE_420_UNORM); //TODO handle other potential formats too
+        copy_decoded_image(s, s->dpbImgs.imgs[slice_info->dpbIndex]);
         transfer_image_layout(s->computeCmdBuf, s->outputLumaPlane,
                                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
         transfer_image_layout(s->computeCmdBuf, s->outputChromaPlane,
@@ -2595,7 +2536,7 @@ static bool parse_and_decode(struct state_vulkan_decompress *s, unsigned char *s
 
         for (size_t i = 0; i < MAX_REF_FRAMES + 1; ++i)
         {
-                transfer_image_layout(s->computeCmdBuf, s->dpb[i],
+                transfer_image_layout(s->computeCmdBuf, s->dpbImgs.imgs[i],
                                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR,
                                 s->computeQueueIdx, s->decodeQueueIdx);
         }
