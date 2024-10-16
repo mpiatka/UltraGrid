@@ -187,10 +187,13 @@ private:
         void prepare_input_tex(video_frame *f, bool pbo_frame) override final{
                 int w = (f->tiles[0].width + 1) / 2;
                 int h = f->tiles[0].height;
+                bool pbo = handle_pbo(f, pbo_frame);
+                char *data = pbo ? nullptr : f->tiles[0].data;
 
-                input_tex.load_frame(w, h, GL_RGBA,
-                                GL_RGBA, GL_UNSIGNED_BYTE,
-                                f, pbo_frame);
+                input_tex.load_frame(w, h, GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, data);
+
+                if(pbo)
+                        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
         }
 };
 
@@ -316,9 +319,13 @@ private:
         void prepare_input_tex(video_frame *f, bool pbo_frame = false) override final{
                 int w = vc_get_linesize(f->tiles[0].width, v210) / 4;
                 int h = f->tiles[0].height;
-                input_tex.load_frame(w, h, GL_RGB10_A2,
-                                GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV,
-                                f, pbo_frame);
+                bool pbo = handle_pbo(f, pbo_frame);
+                char *data = pbo ? nullptr : f->tiles[0].data;
+
+                input_tex.load_frame(w, h, GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV, data);
+
+                if(pbo)
+                        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
         }
 };
 
@@ -359,23 +366,33 @@ private:
         void prepare_input_tex(video_frame *f, bool pbo_frame = false) override final{
                 int w = f->tiles[0].width;
                 int h = f->tiles[0].height;
-                input_tex.load_frame(w, h, GL_RGBA,
-                                GL_RGBA, GL_UNSIGNED_SHORT,
-                                f, pbo_frame);
+                bool pbo = handle_pbo(f, pbo_frame);
+                char *data = pbo ? nullptr : f->tiles[0].data;
+
+                input_tex.load_frame(w, h, GL_RGBA, GL_RGBA, GL_UNSIGNED_SHORT, data);
+
+                if(pbo)
+                        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
         }
 };
 
 class DXT1_convertor : public Loading_convertor{
 public:
-        void put_frame(video_frame *f, bool) override{
+        void put_frame(video_frame *f, bool pbo_frame) override{
                 int w = (f->tiles[0].width + 3) / 4 * 4;
                 int h = (f->tiles[0].height + 3) / 4 * 4;
+                bool pbo = handle_pbo(f, pbo_frame);
+                char *data = pbo ? nullptr : f->tiles[0].data;
+
                 glBindTexture(GL_TEXTURE_2D, tex->get());
                 glCompressedTexImage2D(GL_TEXTURE_2D, 0,
                                 GL_COMPRESSED_RGBA_S3TC_DXT1_EXT,
                                 w, h, 0,
                                 w * h / 2,
-                                f->tiles[0].data);
+                                data);
+
+                if(pbo)
+                        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
         }
 };
 
@@ -402,16 +419,22 @@ public:
         DXT5_convertor(): Rendering_convertor(vert_src, fp_display_dxt5ycocg) {  }
 
 private:
-        void prepare_input_tex(video_frame *f, bool) override final{
+        void prepare_input_tex(video_frame *f, bool pbo_frame) override final{
                 int w = (f->tiles[0].width + 3) / 4 * 4;
                 int h = (f->tiles[0].height + 3) / 4 * 4;
+                bool pbo = handle_pbo(f, pbo_frame);
+                char *data = pbo ? nullptr : f->tiles[0].data;
+
                 input_tex.allocate();
                 glBindTexture(GL_TEXTURE_2D, input_tex.get());
                 glCompressedTexImage2D(GL_TEXTURE_2D, 0,
                                 GL_COMPRESSED_RGBA_S3TC_DXT5_EXT,
                                 w, h, 0,
                                 w * h,
-                                f->tiles[0].data);
+                                data);
+
+                if(pbo)
+                        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
         }
 };
 
@@ -442,16 +465,22 @@ public:
         DXT1_YUV_convertor(): Rendering_convertor(vert_src, fp_display_dxt1_yuv) {  }
 
 private:
-        void prepare_input_tex(video_frame *f, bool) override final{
+        void prepare_input_tex(video_frame *f, bool pbo_frame) override final{
                 int w = f->tiles[0].width;
                 int h = f->tiles[0].height;
+                bool pbo = handle_pbo(f, pbo_frame);
+                char *data = pbo ? nullptr : f->tiles[0].data;
+
                 input_tex.allocate();
                 glBindTexture(GL_TEXTURE_2D, input_tex.get());
                 glCompressedTexImage2D(GL_TEXTURE_2D, 0,
                                 GL_COMPRESSED_RGBA_S3TC_DXT1_EXT,
                                 w, h, 0,
                                 (w * h/16) * 8,
-                                f->tiles[0].data);
+                                data);
+
+                if(pbo)
+                        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
         }
 };
 
@@ -507,9 +536,12 @@ public:
         void put_frame(video_frame *f, bool pbo_frame = false) override{
                 int w = f->tiles[0].width;
                 int h = f->tiles[0].height;
-                tex->load_frame(w, h, GL_RGB,
-                                GL_RGB, GL_UNSIGNED_BYTE,
-                                f, pbo_frame);
+                bool pbo = handle_pbo(f, pbo_frame);
+                char *data = pbo ? nullptr : f->tiles[0].data;
+
+                tex->load_frame(w, h, GL_RGB, GL_RGB, GL_UNSIGNED_BYTE, data);
+                if(pbo)
+                        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
         }
 };
 
@@ -518,9 +550,12 @@ public:
         void put_frame(video_frame *f, bool pbo_frame = false) override{
                 int w = f->tiles[0].width;
                 int h = f->tiles[0].height;
-                tex->load_frame(w, h, GL_RGBA,
-                                GL_RGBA, GL_UNSIGNED_BYTE,
-                                f, pbo_frame);
+                bool pbo = handle_pbo(f, pbo_frame);
+                char *data = pbo ? nullptr : f->tiles[0].data;
+
+                tex->load_frame(w, h, GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, data);
+                if(pbo)
+                        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
         }
 };
 

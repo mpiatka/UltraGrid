@@ -80,6 +80,7 @@ PanoramaScene::PanoramaScene(GlProgram program, Model model): program(std::move(
         model(std::move(model))
 {
         tex.allocateTextures();
+        uploader.enable_pbo(true);
 }
 
 void PanoramaScene::render(int width, int height){

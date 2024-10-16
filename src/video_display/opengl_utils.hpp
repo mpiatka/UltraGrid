@@ -171,11 +171,10 @@ public:
         void allocate();
 
         void load_frame(int w, int h,
-                        GLint internal_format,
-                        GLenum src_format,
-                        GLenum type,
-                        video_frame *f,
-                        bool pbo_frame);
+                GLint internal_format,
+                GLenum src_format,
+                GLenum type,
+                char *data);
 
         Texture(const Texture&) = delete;
         Texture(Texture&& o) { swap(o); }
@@ -311,6 +310,9 @@ public:
         virtual void attach_texture(Texture& tex) = 0;
 
         void set_pbo(GlBuffer *pbo) { internal_pbo = pbo; }
+
+        bool handle_pbo(video_frame *f, bool pbo_frame);
+
 protected:
         GlBuffer *internal_pbo = nullptr;
 };

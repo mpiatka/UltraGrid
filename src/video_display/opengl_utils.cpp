@@ -261,30 +261,15 @@ void Texture::load_frame(int w, int h,
                 GLint internal_format,
                 GLenum src_format,
                 GLenum type,
-                video_frame *f,
-                bool pbo_frame)
+                char *data)
 {
-        char *src_data = f->tiles[0].data;
         allocate(w, h, internal_format);
         glBindTexture(GL_TEXTURE_2D, tex_id);
-
-        if(pbo_frame){
-                GlBuffer *pbo = static_cast<GlBuffer *>(f->callbacks.dispose_udata);
-
-                glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo->get());
-                glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
-                f->tiles[0].data = nullptr;
-                src_data = nullptr;
-        }
 
         glTexImage2D(GL_TEXTURE_2D, 0, internal_format,
                         w, h, 0,
                         src_format, type,
-                        src_data);
-
-        if(pbo_frame){
-                glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-        }
+                        data);
 }
 
 void Texture::allocate(){
@@ -314,6 +299,27 @@ void Framebuffer::attach_texture(GLuint tex){
                 printf("Error %d\n", glGetError());
         }
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+bool Frame_convertor::handle_pbo(video_frame *f, bool pbo_frame){
+        if(pbo_frame){
+                GlBuffer *pbo = static_cast<GlBuffer *>(f->callbacks.dispose_udata);
+
+                glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo->get());
+                glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+                f->tiles[0].data = nullptr;
+                return true;
+        } else if(internal_pbo){
+                glBindBuffer(GL_PIXEL_UNPACK_BUFFER, internal_pbo->get());
+                glBufferData(GL_PIXEL_UNPACK_BUFFER, f->tiles[0].data_len, 0, GL_STREAM_DRAW);
+                void *ptr = glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY);
+                memcpy(ptr, f->tiles[0].data, f->tiles[0].data_len);
+                glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+
+                return true;
+        }
+
+        return false;
 }
 
 void FrameUploader::put_frame(video_frame *f, bool pbo_frame){
