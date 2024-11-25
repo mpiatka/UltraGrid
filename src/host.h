@@ -129,6 +129,7 @@ void set_audio_delay(int val);
 struct init_data;
 struct init_data *common_preinit(int argc, char *argv[]);
 void common_cleanup(struct init_data *init_data);
+void library_preinit();
 
 // root module management
 void init_root_module(struct module *root_mod);
@@ -136,6 +137,7 @@ void register_should_exit_callback(struct module *mod, void (*callback)(void *),
 void unregister_should_exit_callback(struct module *mod,
                                      void (*callback)(void *), void *udata);
 void exit_uv(int status);
+void root_module_exit(struct module *root_mod, int status);
 int get_exit_status(struct module *root_mod);
 
 void print_capabilities(const char *cfg);

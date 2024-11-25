@@ -39,6 +39,7 @@ DECKLINK_PATH = @DECKLINK_PATH@
 DYLIBBUNDLER  = @DYLIBBUNDLER@
 DYLIBBUNDLER_FLAGS += @DYLIBBUNDLER_FLAGS@
 EXEEXT        = @EXEEXT@
+DYNLIBEXT     = @DYNLIBEXT@
 TARGET       ?= bin/uv$(EXEEXT)
 BUNDLE        = uv.app
 GUI_BUNDLE_DEP = gui/QT/uv-qt.app
@@ -59,6 +60,7 @@ ifeq (@REFLECTOR_REQ@,yes)
 REFLECTOR_TARGET ?= bin/hd-rum-transcode$(EXEEXT)
 endif
 TEST_TARGET  = bin/run_tests$(EXEEXT)
+UGLIBRARY_TARGET ?= bin/libultragrid$(DYNLIBEXT)
 
 PACKAGE_TARNAME ?= @PACKAGE_TARNAME@
 PREFIX = @prefix@
@@ -207,6 +209,10 @@ REFLECTOR_OBJS = @REFLECTOR_OBJS@ $(COMMON_OBJS) \
 		src/hd-rum-translator/hd-rum-recompress.o \
 		src/hd-rum-translator/hd-rum-translator.o \
 
+UGLIBRARY_OBJS =  @ULTRAGRID_OBJS@ $(COMMON_OBJS) \
+		 src/libultragrid.o \
+		 src/video_display/pipe.o \
+
 TEST_OBJS = $(COMMON_OBJS) \
 	    @TEST_OBJS@ \
 	    test/codec_conversions_test.o \
@@ -231,7 +237,7 @@ DEP_FILES = $(patsubst %.lib,%.P,$(DEP_FILES_1:.o=.P)) # replace .o and also .li
 # -------------------------------------------------------------------------------------------------
 .PHONY: doc
 
-all: $(TARGET) $(GUI_TARGET) $(REFLECTOR_TARGET) @MANPAGES@ @MODULES@ configure-messages
+all: $(TARGET) $(GUI_TARGET) $(REFLECTOR_TARGET) $(UGLIBRARY_TARGET) @MANPAGES@ @MODULES@ configure-messages
 
 src/dir-stamp:
 	$(MKDIR_P) $(dir $@)
@@ -247,6 +253,10 @@ endif
 $(REFLECTOR_TARGET): src/dir-stamp $(REFLECTOR_OBJS) $(GENERATED_HEADERS) bin/hd-rum-av
 	$(MKDIR_P) $(dir $@)
 	$(LINKER) $(LDFLAGS) $(REFLECTOR_OBJS) $(LIBS) -o $@
+
+$(UGLIBRARY_TARGET): src/dir-stamp $(UGLIBRARY_OBJS) $(GENERATED_HEADERS)
+	$(MKDIR_P) $(dir $@)
+	$(LINKER) $(LDFLAGS) -shared $(UGLIBRARY_OBJS) -o $@ $(LIBS) $(ULTRAGRID_LIBS) -Wl,--out-implib,bin/libultragrid.lib
 
 bin/hd-rum-av: $(srcdir)/data/template/bin/hd-rum-av
 	$(MKDIR_P) $(dir $@)

@@ -125,16 +125,20 @@ if test "$host_vendor" = "apple"; then
         system=MacOSX
 	AC_DEFINE([HAVE_MACOSX], [1], [This is Mac X OS])
         APPEXT=.app
+        DYNLIBEXT=.dylib
 elif expr "$host_os" : ".*mingw32.*" > /dev/null || expr "$host_os" : ".*msys.*" > /dev/null; then
         system=Windows
         APPEXT=.exe
+        DYNLIBEXT=.dll
 	AC_DEFINE([WIN32], [1], [This is an Windows OS])
 else
         system=Linux
+        DYNLIBEXT=.so
 	AC_DEFINE([HAVE_LINUX], [1], [This is Linux])
 fi
 AC_MSG_RESULT($system);
 AC_SUBST(system)
+AC_SUBST(DYNLIBEXT)
 
 if test $build != $host; then
         cross_compile=yes # don't confuse with autoconf's $cross_compiling - ours is more correct

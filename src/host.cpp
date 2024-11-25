@@ -432,6 +432,23 @@ static void echeck_unexpected_exit(void ) {
         fprintf(stderr, "exit() called unexpectedly! Maybe by some library?\n");
 }
 
+void library_preinit(){
+        static char *fake_argv[] = {"uv_library_fake_argv", nullptr};
+	uv_argc = 1;
+	uv_argv = fake_argv;
+#ifdef _WIN32
+        WSADATA wsaData;
+        int err = WSAStartup(MAKEWORD(2, 2), &wsaData);
+        if(err != 0) {
+                fprintf(stderr, "WSAStartup failed with error %d.", err);
+        }
+        if(LOBYTE(wsaData.wVersion) != 2 || HIBYTE(wsaData.wVersion) != 2) {
+                fprintf(stderr, "Counld not found usable version of Winsock.\n");
+        }
+#endif
+        ug_rand_init();
+}
+
 struct init_data *common_preinit(int argc, char *argv[])
 {
         uv_argc = argc;
@@ -615,6 +632,12 @@ void init_root_module(struct module *root_mod) {
         root_mod->deleter = state_root::deleter;
         state_root_static = new state_root();
         root_mod->priv_data = state_root_static;
+}
+
+void root_module_exit(struct module *root_mod, int status){
+        auto root_s = static_cast<state_root *>(root_mod->priv_data);
+        root_s->exit_status = status;
+        root_s->broadcast_should_exit();
 }
 
 /**
