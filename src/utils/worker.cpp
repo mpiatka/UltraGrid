@@ -97,8 +97,8 @@ struct wp_worker {
 
                 pthread_join(m_thread_id, NULL);
                 pthread_mutex_destroy(&m_lock);
-                pthread_cond_destroy(&m_task_ready_cv);
-                pthread_cond_destroy(&m_task_completed_cv);
+                //pthread_cond_destroy(&m_task_ready_cv);
+                //pthread_cond_destroy(&m_task_completed_cv);
         }
         static void      *enter_loop(void *args);
         void              run();
