@@ -165,6 +165,10 @@ public:
         Log_output& operator=(const Log_output&) = delete;
         Log_output& operator=(Log_output&&) = delete;
 
+	void set_log_callback(void(*log_callback)(const char *)){
+		this->log_callback = log_callback;
+	}
+
 private:
         void submit();
         void submit_raw(); //just pass to output as is, no styles, timestamps, etc.
@@ -186,6 +190,8 @@ private:
         std::mutex mut;
         std::string last_msg;
         int last_msg_repeats = 0;
+
+	void (*log_callback)(const char *msg) = nullptr;
 
         friend class Buffer;
 };
@@ -223,6 +229,10 @@ inline void Log_output::submit(){
         static constexpr int ts_bufsize = 32; //log10(2^64) is 19.3, so should be enough
         char ts_str[ts_bufsize];
         ts_str[0] = '\0';
+
+	if(log_callback){
+		log_callback(get_internal_buffer().c_str());
+	}
                                               
         if (show_timestamps == LOG_TIMESTAMP_ENABLED
                 || (show_timestamps == LOG_TIMESTAMP_AUTO && log_level >= LOG_LEVEL_VERBOSE))

@@ -8,6 +8,7 @@
 #include "video_rxtx/ultragrid_rtp.hpp"
 #include "video_display.h"
 #include "video_display/pipe.hpp"
+#include "debug.h"
 
 unsigned libug_get_version(){
 	return LIBULTRAGRID_HEADER_VERSION;
@@ -148,4 +149,8 @@ void libug_send_video_frame(libug_handle *h, struct video_frame *frame){
 void libug_start_recv(libug_handle *h){
         h->recv_thread = std::thread(video_rxtx::receiver_thread, h->video_rxtx_state);
         display_run_new_thread(h->display);
+}
+
+void libug_set_log_callback(void(*log_callback)(const char *)){
+	get_log_output().set_log_callback(log_callback);
 }

@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 
-#define LIBULTRAGRID_HEADER_VERSION 1
+#define LIBULTRAGRID_HEADER_VERSION 2
 
 unsigned libug_get_version();
 
@@ -44,6 +44,7 @@ void libug_start_recv(struct libug_handle *h);
 
 void libug_send_video_frame(struct libug_handle *h, struct video_frame *frame);
 
+void libug_set_log_callback(void(*log_callback)(const char *));
 #ifdef __cplusplus
 }
 #endif
