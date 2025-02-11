@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 
-#define LIBULTRAGRID_HEADER_VERSION 2
+#define LIBULTRAGRID_HEADER_VERSION 3
 
 unsigned libug_get_version();
 
@@ -26,6 +26,8 @@ typedef struct libug_conf{
         const char *compress;
         const char *fec;
         int tx_port;
+        int mtu;
+        long long rate_limit;
 
         //Recv params
         int rx_port;

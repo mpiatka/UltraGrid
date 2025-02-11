@@ -53,6 +53,9 @@ void libug_init_conf(libug_conf *conf){
         conf->fec = "none";
         conf->rx_port = 7004;
         conf->tx_port = 5004;
+
+        conf->mtu = 1500;
+        conf->rate_limit = RATE_DYNAMIC;
 }
 
 struct libug_handle *libug_create_handle(const struct libug_conf *conf){
@@ -65,6 +68,7 @@ struct libug_handle *libug_create_handle(const struct libug_conf *conf){
         struct common_opts common = { COMMON_OPTS_INIT };
         init_root_module(&handle->root_module);
         common.parent = &handle->root_module;
+        common.mtu = conf->mtu;
 
 
         if(conf->compress)
@@ -90,7 +94,7 @@ struct libug_handle *libug_create_handle(const struct libug_conf *conf){
         params["rx_port"].i = rx_port;
         params["tx_port"].i = conf->tx_port;
         params["fec"].str = handle->fec_str.c_str();
-        params["bitrate"].ll = 8000000;
+        params["bitrate"].ll = conf->rate_limit;
 
         printf("Rx_port=%d\n", rx_port);
 
