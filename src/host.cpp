@@ -447,6 +447,10 @@ void library_preinit(){
         }
 #endif
         ug_rand_init();
+
+#ifdef HAVE_FEC_INIT
+        fec_init();
+#endif
 }
 
 struct init_data *common_preinit(int argc, char *argv[])
