@@ -48,6 +48,8 @@
 #include "omt_common.hpp"
 #include "video_display.h"
 #include "video_frame.h"
+#include "audio/types.h"
+#include "audio/utils.h"
 #include "utils/misc.h"
 #include "utils/thread.h"
 
@@ -55,6 +57,11 @@ namespace{
 using frame_uniq = std::unique_ptr<video_frame, deleter_from_fcn<vf_free>>;
 
 constexpr auto MAX_QUEUED_FRAMES = 1;
+
+struct Omt_frame_with_data{
+        OMTMediaFrame omt_frame{};
+        std::vector<float> data;
+};
 
 struct state_vdisp_omt{
         omt_send_uniq omt_send;
@@ -67,8 +74,9 @@ struct state_vdisp_omt{
         std::condition_variable free_frame_cv;
         std::vector<frame_uniq> free_frames;
 
-        std::condition_variable video_frame_cv;
+        std::condition_variable send_queue_cv;
         std::queue<frame_uniq> frame_queue;
+        std::queue<Omt_frame_with_data> audio_queue;
 
         std::thread worker;
         std::string sender_name = "UltraGrid";
@@ -91,17 +99,32 @@ void omt_disp_worker(state_vdisp_omt *s){
         set_thread_name("OMT display worker");
 
         while(true){
+                frame_uniq video_frame;
+                Omt_frame_with_data audio_frame;
+
                 std::unique_lock lock(s->mutex);
-                s->video_frame_cv.wait(lock, [s]{ return !s->frame_queue.empty(); });
-                auto frame = std::move(s->frame_queue.front());
-                s->frame_queue.pop();
+                s->send_queue_cv.wait(lock, [s]{ return !s->frame_queue.empty() || !s->audio_queue.empty(); });
+                if(!s->frame_queue.empty()){
+                        video_frame = std::move(s->frame_queue.front());
+                        s->frame_queue.pop();
+                        if(!video_frame){
+                                break;
+                        }
+                }
+                if(!s->audio_queue.empty()){
+                        audio_frame = std::move(s->audio_queue.front());
+                        s->audio_queue.pop();
+                }
                 lock.unlock();
 
-                if(!frame){
-                        break;
+
+                if(video_frame){
+                        send_video_frame(s, std::move(video_frame));
                 }
 
-                send_video_frame(s, std::move(frame));
+                if(!audio_frame.data.empty()){
+                        omt_send(s->omt_send.get(), &audio_frame.omt_frame);
+                }
         }
 }
 
@@ -190,7 +213,7 @@ bool display_omt_putf(void *state, video_frame *frame, long long timeout_ns){
 
         s->frame_queue.push(std::move(f));
         lock.unlock();
-        s->video_frame_cv.notify_one();
+        s->send_queue_cv.notify_one();
 
         return true;
 }
@@ -249,6 +272,55 @@ void display_omt_probe(device_info **available_cards, int *count, void(**/*delet
         *available_cards = nullptr;
         *count = 0;
 }
+
+Omt_frame_with_data ug_audio_to_omt(const audio_frame *frame){
+        Omt_frame_with_data ret;
+
+        auto samples_all_channels = frame->data_len / frame->bps;
+        auto samples_per_channel = samples_all_channels / frame->ch_count;
+
+        ret.data.resize(samples_all_channels);
+
+        std::vector<char *> out_ch_datas(frame->ch_count, nullptr);
+        for(int i = 0; i < frame->ch_count; i++){
+                out_ch_datas[i] = reinterpret_cast<char *>(&ret.data[i * samples_per_channel]);
+        }
+
+        interleaved2noninterleaved_float(out_ch_datas.data(), frame->data, frame->bps, frame->data_len, frame->ch_count);
+
+        ret.omt_frame.Type = OMTFrameType_Audio;
+        ret.omt_frame.Timestamp = -1;
+        ret.omt_frame.Codec = OMTCodec_FPA1;
+        ret.omt_frame.Channels = frame->ch_count;
+        ret.omt_frame.SampleRate = frame->sample_rate;
+        ret.omt_frame.SamplesPerChannel = samples_per_channel;
+        ret.omt_frame.Data = ret.data.data();
+        ret.omt_frame.DataLength = static_cast<int>(ret.data.size() * sizeof(float));
+
+        return ret;
+}
+
+void display_omt_put_audio(void *state, const audio_frame *frame){
+        auto s = static_cast<state_vdisp_omt *>(state);
+
+        std::unique_lock lock(s->mutex);
+        s->audio_queue.push(ug_audio_to_omt(frame));
+        lock.unlock();
+        s->send_queue_cv.notify_one();
+}
+
+bool display_omt_reconf_audio(void */*state*/, int /*bits_per_sample*/, int channels, int sample_rate){
+        if(sample_rate != 44100 && sample_rate != 48000){
+                return false;
+        }
+
+        if(channels > 32 || channels < 1){
+                return false;
+        }
+
+        return true;
+}
+
 }
 
 static constexpr video_display_info display_omt_info = {
@@ -260,8 +332,8 @@ static constexpr video_display_info display_omt_info = {
         display_omt_putf,
         display_omt_reconfigure,
         display_omt_get_property,
-        nullptr, // _put_audio_frame
-        nullptr, // _reconfigure_audio
+        display_omt_put_audio,
+        display_omt_reconf_audio,
         MOD_NAME,
 };
 
