@@ -261,6 +261,18 @@ bool display_omt_get_property(void */*state*/, int property, void *val, size_t *
                 }
                 *len = sizeof(supported_il_modes);
                 break;
+        case DISPLAY_PROPERTY_AUDIO_FORMAT:
+        {
+                assert(*len == sizeof(audio_desc));
+                auto *desc = static_cast<struct audio_desc *>(val);
+                desc->ch_count = std::min(std::max(desc->ch_count, 1), 32);
+                if(desc->sample_rate != 48000 && desc->sample_rate != 44100){
+                        desc->sample_rate = 48000;
+                }
+                desc->codec = AC_PCM;
+                desc->bps = desc->bps < 3 ? 2 : 4;
+        }
+                break;
         default:
                 return false;
         }
