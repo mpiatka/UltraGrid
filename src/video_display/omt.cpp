@@ -36,6 +36,7 @@
  */
 
 #define MOD_NAME "[omt] "
+#include <cassert>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -76,9 +77,14 @@ struct state_vdisp_omt{
 
         std::condition_variable send_queue_cv;
         std::queue<frame_uniq> frame_queue;
+
+        std::condition_variable audio_queue_cv;
         std::queue<Omt_frame_with_data> audio_queue;
 
-        std::thread worker;
+        std::atomic<bool> should_exit = false;
+        std::thread video_worker;
+        std::thread audio_worker;
+
         std::string sender_name = "UltraGrid";
         OMTQuality quality = OMTQuality_Medium;
 };
@@ -95,36 +101,41 @@ void send_video_frame(state_vdisp_omt *s, frame_uniq frame){
         s->free_frame_cv.notify_one();
 }
 
-void omt_disp_worker(state_vdisp_omt *s){
-        set_thread_name("OMT display worker");
+void omt_disp_video_worker(state_vdisp_omt *s){
+        set_thread_name(__func__);
 
         while(true){
                 frame_uniq video_frame;
-                Omt_frame_with_data audio_frame;
 
                 std::unique_lock lock(s->mutex);
-                s->send_queue_cv.wait(lock, [s]{ return !s->frame_queue.empty() || !s->audio_queue.empty(); });
-                if(!s->frame_queue.empty()){
-                        video_frame = std::move(s->frame_queue.front());
-                        s->frame_queue.pop();
-                        if(!video_frame){
-                                break;
-                        }
-                }
-                if(!s->audio_queue.empty()){
-                        audio_frame = std::move(s->audio_queue.front());
-                        s->audio_queue.pop();
+                s->send_queue_cv.wait(lock, [s]{ return !s->frame_queue.empty(); });
+                video_frame = std::move(s->frame_queue.front());
+                s->frame_queue.pop();
+                if(!video_frame){
+                        break;
                 }
                 lock.unlock();
 
+                send_video_frame(s, std::move(video_frame));
+        }
+}
 
-                if(video_frame){
-                        send_video_frame(s, std::move(video_frame));
-                }
+void omt_disp_audio_worker(state_vdisp_omt *s){
+        set_thread_name(__func__);
 
-                if(!audio_frame.data.empty()){
-                        omt_send(s->omt_send.get(), &audio_frame.omt_frame);
-                }
+        while(!s->should_exit){
+                Omt_frame_with_data audio_frame;
+
+                std::unique_lock lock(s->mutex);
+                s->audio_queue_cv.wait(lock, [s]{ return !s->audio_queue.empty() || s->should_exit; });
+                if(s->should_exit)
+                        break;
+
+                audio_frame = std::move(s->audio_queue.front());
+                s->audio_queue.pop();
+                lock.unlock();
+
+                omt_send(s->omt_send.get(), &audio_frame.omt_frame);
         }
 }
 
@@ -158,7 +169,8 @@ void *display_omt_init(module */*parent*/, const char *fmt, unsigned int /*flags
 
         init_send(s.get());
 
-        s->worker = std::thread(omt_disp_worker, s.get());
+        s->video_worker = std::thread(omt_disp_video_worker, s.get());
+        s->audio_worker = std::thread(omt_disp_audio_worker, s.get());
 
         return s.release();
 }
@@ -166,8 +178,15 @@ void *display_omt_init(module */*parent*/, const char *fmt, unsigned int /*flags
 void display_omt_done(void *state){
         auto s = static_cast<state_vdisp_omt *>(state);
 
-        if(s->worker.joinable()){
-                s->worker.join();
+        s->should_exit = true;
+        s->audio_queue_cv.notify_one();
+
+        if(s->video_worker.joinable()){
+                s->video_worker.join();
+        }
+
+        if(s->audio_worker.joinable()){
+                s->audio_worker.join();
         }
 
         delete s;
@@ -192,6 +211,9 @@ video_frame *display_omt_getf(void *state){
 bool display_omt_putf(void *state, video_frame *frame, long long timeout_ns){
         auto s = static_cast<state_vdisp_omt *>(state);
         auto f = frame_uniq(frame);
+
+        if(!f)
+                s->should_exit = true;
 
         std::unique_lock lock(s->mutex);
 
@@ -288,8 +310,8 @@ void display_omt_probe(device_info **available_cards, int *count, void(**/*delet
 Omt_frame_with_data ug_audio_to_omt(const audio_frame *frame){
         Omt_frame_with_data ret;
 
-        auto samples_all_channels = frame->data_len / frame->bps;
-        auto samples_per_channel = samples_all_channels / frame->ch_count;
+        const auto samples_all_channels = frame->data_len / frame->bps;
+        const auto samples_per_channel = samples_all_channels / frame->ch_count;
 
         ret.data.resize(samples_all_channels);
 
@@ -318,7 +340,7 @@ void display_omt_put_audio(void *state, const audio_frame *frame){
         std::unique_lock lock(s->mutex);
         s->audio_queue.push(ug_audio_to_omt(frame));
         lock.unlock();
-        s->send_queue_cv.notify_one();
+        s->audio_queue_cv.notify_one();
 }
 
 bool display_omt_reconf_audio(void */*state*/, int /*bits_per_sample*/, int channels, int sample_rate){
