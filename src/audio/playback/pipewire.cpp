@@ -292,7 +292,7 @@ static bool audio_play_pw_reconfigure(void *state, audio_desc desc){
         std::byte buffer[1024];
         auto pod_builder = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
 
-        const auto audio_info = SPA_AUDIO_INFO_RAW_INIT(
+        auto audio_info = SPA_AUDIO_INFO_RAW_INIT(
                         .format = format,
                         .rate = rate,
                         .channels = static_cast<unsigned>(desc.ch_count),
