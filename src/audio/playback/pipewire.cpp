@@ -94,7 +94,7 @@ static void audio_play_pw_help(){
 static void on_process(void *userdata) noexcept{
         auto s = static_cast<state_pipewire_play *>(userdata);
 
-        const int frame_size = s->desc.ch_count * s->desc.bps;
+        const uint32_t frame_size = s->desc.ch_count * s->desc.bps;
         unsigned avail_frames = ring_get_current_size(s->ring_buf.get()) / frame_size;
 
         //Write at least quant frames to prevent underrun on pipewire side
@@ -112,8 +112,8 @@ static void on_process(void *userdata) noexcept{
                 if (!dst)
                         return;
 
-                const int to_write_total = std::min<int>(buf->datas[0].maxsize / frame_size, remaining_write_frames);
-                const int to_write_audio = std::min<int>(to_write_total, avail_frames);
+                const uint32_t to_write_total = std::min(buf->datas[0].maxsize / frame_size, remaining_write_frames);
+                const uint32_t to_write_audio = std::min(to_write_total, avail_frames);
 
                 if(to_write_audio > 0){
                         ring_buffer_read(s->ring_buf.get(), dst, to_write_audio * frame_size);
@@ -122,7 +122,7 @@ static void on_process(void *userdata) noexcept{
                         dst += to_write_audio * frame_size;
                 }
 
-                const int to_write_silence = to_write_total - to_write_audio;
+                const uint32_t to_write_silence = to_write_total - to_write_audio;
                 memset(dst, 0, to_write_silence * frame_size);
                 remaining_write_frames -= to_write_silence;
 
