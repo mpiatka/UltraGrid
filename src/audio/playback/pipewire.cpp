@@ -70,7 +70,7 @@ struct state_pipewire_play{
         unsigned quant = 128;
 };
 
-static void audio_play_pw_probe(struct device_info **available_devices, int *count, void (**deleter)(void *))
+static void audio_play_pw_probe(device_info **available_devices, int *count, void (**deleter)(void *))
 {
         *deleter = free;
         *available_devices = static_cast<device_info *>(calloc(1, sizeof(device_info)));
@@ -101,14 +101,14 @@ static void on_process(void *userdata) noexcept{
         auto remaining_write_frames = std::max(s->quant, avail_frames);
 
         while(remaining_write_frames > 0){
-                struct pw_buffer *b = pw_stream_dequeue_buffer(s->stream.get());
+                pw_buffer *b = pw_stream_dequeue_buffer(s->stream.get());
                 if (!b) {
                         pw_log_warn("out of buffers: %m");
                         return;
                 }
-                struct spa_buffer *buf = b->buffer;
+                spa_buffer *buf = b->buffer;
 
-                char *dst = static_cast<char *>(buf->datas[0].data);
+                auto dst = static_cast<char *>(buf->datas[0].data);
                 if (!dst)
                         return;
 
@@ -136,19 +136,21 @@ static void on_process(void *userdata) noexcept{
         }
 }
 
-static void * audio_play_pw_init(const struct audio_playback_opts *opts){
+static void * audio_play_pw_init(const audio_playback_opts *opts){
         auto s = std::make_unique<state_pipewire_play>();
 
         std::string_view cfg_sv(opts->cfg);
         while(!cfg_sv.empty()){
                 auto tok = tokenize(cfg_sv, ':', '"');
-                auto key = tokenize(tok, '=');
-                auto val = tokenize(tok, '=');
+                const auto key = tokenize(tok, '=');
+                const auto val = tokenize(tok, '=');
 
                 if(key == "help"){
                         audio_play_pw_help();
                         return INIT_NOERR;
-                } else if(key == "target"){
+                }
+
+                if(key == "target"){
                         s->target = val;
                 } else if(key == "buffer-len"){
                         parse_num(val, s->buf_len_ms);
@@ -165,10 +167,10 @@ static void * audio_play_pw_init(const struct audio_playback_opts *opts){
         return s.release();
 }
 
-static void audio_play_pw_put_frame(void *state, const struct audio_frame *frame){
+static void audio_play_pw_put_frame(void *state, const audio_frame *frame){
         auto s = static_cast<state_pipewire_play *>(state);
 
-        auto avail = ring_get_available_write_size(s->ring_buf.get());
+        const auto avail = ring_get_available_write_size(s->ring_buf.get());
         auto to_write = frame->data_len;
         if(to_write > avail){
                 log_msg(LOG_LEVEL_WARNING, MOD_NAME "Got frame of len %d, but ring has only %d free\n", frame->data_len, ring_get_available_write_size(s->ring_buf.get()));
@@ -179,26 +181,21 @@ static void audio_play_pw_put_frame(void *state, const struct audio_frame *frame
 }
 
 static bool is_format_supported(void *data, size_t *len){
-        struct audio_desc desc;
+        audio_desc desc{};
         if (*len < sizeof(desc)) {
                 return false;
-        } else {
-                memcpy(&desc, data, sizeof(desc));
         }
+
+        memcpy(&desc, data, sizeof(desc));
 
         return desc.codec == AC_PCM && desc.bps >= 1 && desc.bps <= 4;
 }
 
-static bool audio_play_pw_ctl(void *state, int request, void *data, size_t *len){
-        UNUSED(state);
-
-        switch (request) {
-        case AUDIO_PLAYBACK_CTL_QUERY_FORMAT:
+static bool audio_play_pw_ctl(void */*state*/, int request, void *data, size_t *len){
+        if(request == AUDIO_PLAYBACK_CTL_QUERY_FORMAT)
                 return is_format_supported(data, len);
-        default:
-                return false;
 
-        }
+        return false;
 }
 
 static void on_state_changed(void *state, enum pw_stream_state old, enum pw_stream_state new_state, const char *error)
@@ -215,13 +212,13 @@ static void on_state_changed(void *state, enum pw_stream_state old, enum pw_stre
         pw_thread_loop_signal(s->pw.pipewire_loop.get(), false);
 }
 
-static void on_param_changed(void *state, uint32_t id, const struct spa_pod *param){
+static void on_param_changed(void *state, uint32_t id, const spa_pod *param){
         auto s = static_cast<state_pipewire_play *>(state);
 
         if(!param || id != SPA_PARAM_Format)
                 return;
 
-        spa_audio_info audio_params;
+        spa_audio_info audio_params{};
         int res = spa_format_parse(param, &audio_params.media_type, &audio_params.media_subtype);
         if(res < 0
                         || audio_params.media_type != SPA_MEDIA_TYPE_audio
@@ -273,11 +270,11 @@ constexpr pw_stream_events stream_events = []{
         return events;
 }();
 
-static bool audio_play_pw_reconfigure(void *state, struct audio_desc desc){
+static bool audio_play_pw_reconfigure(void *state, audio_desc desc){
         auto s = static_cast<state_pipewire_play *>(state);
 
-        unsigned rate = desc.sample_rate;
-        spa_audio_format format = get_pw_format_from_bps(desc.bps);
+        const unsigned rate = desc.sample_rate;
+        const spa_audio_format format = get_pw_format_from_bps(desc.bps);
 
         auto props = pw_properties_new(
                         PW_KEY_MEDIA_TYPE, "Audio",
@@ -295,7 +292,7 @@ static bool audio_play_pw_reconfigure(void *state, struct audio_desc desc){
         std::byte buffer[1024];
         auto pod_builder = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
 
-        auto audio_info = SPA_AUDIO_INFO_RAW_INIT(
+        const auto audio_info = SPA_AUDIO_INFO_RAW_INIT(
                         .format = format,
                         .rate = rate,
                         .channels = static_cast<unsigned>(desc.ch_count),
@@ -367,7 +364,7 @@ static void audio_play_pw_done(void *state){
         delete s;
 }
 
-static const struct audio_playback_info aplay_pw_info = {
+constexpr audio_playback_info aplay_pw_info = {
         audio_play_pw_probe,
         audio_play_pw_init,
         audio_play_pw_put_frame,
