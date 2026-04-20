@@ -264,22 +264,14 @@ static void on_param_changed(void *state, uint32_t id, const struct spa_pod *par
         }
 }
 
-const static pw_stream_events stream_events = { 
-        .version = PW_VERSION_STREAM_EVENTS,
-        .destroy = nullptr,
-        .state_changed = on_state_changed,
-        .control_info = nullptr,
-        .io_changed = nullptr,
-        .param_changed = on_param_changed,
-        .add_buffer = nullptr,
-        .remove_buffer = nullptr,
-        .process = on_process,
-        .drained = nullptr,
-#if PW_MAJOR > 0 || PW_MINOR > 3 || (PW_MINOR == 3 && PW_MICRO > 39)
-        .command = nullptr,
-        .trigger_done = nullptr,
-#endif
-};
+constexpr pw_stream_events stream_events = []{
+        pw_stream_events events{};
+        events.version = PW_VERSION_STREAM_EVENTS;
+        events.state_changed = on_state_changed;
+        events.param_changed = on_param_changed;
+        events.process = on_process;
+        return events;
+}();
 
 static bool audio_play_pw_reconfigure(void *state, struct audio_desc desc){
         auto s = static_cast<state_pipewire_play *>(state);
