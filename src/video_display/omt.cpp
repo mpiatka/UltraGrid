@@ -61,7 +61,7 @@ constexpr auto MAX_QUEUED_FRAMES = 1;
 
 struct Omt_frame_with_data{
         OMTMediaFrame omt_frame{};
-        std::vector<float> data;
+        std::unique_ptr<float[]> data;
 };
 
 struct state_vdisp_omt{
@@ -313,7 +313,7 @@ Omt_frame_with_data ug_audio_to_omt(const audio_frame *frame){
         const auto samples_all_channels = frame->data_len / frame->bps;
         const auto samples_per_channel = samples_all_channels / frame->ch_count;
 
-        ret.data.resize(samples_all_channels);
+        ret.data = std::make_unique<float[]>(samples_all_channels);
 
         std::vector<char *> out_ch_datas(frame->ch_count, nullptr);
         for(int i = 0; i < frame->ch_count; i++){
@@ -328,8 +328,8 @@ Omt_frame_with_data ug_audio_to_omt(const audio_frame *frame){
         ret.omt_frame.Channels = frame->ch_count;
         ret.omt_frame.SampleRate = frame->sample_rate;
         ret.omt_frame.SamplesPerChannel = samples_per_channel;
-        ret.omt_frame.Data = ret.data.data();
-        ret.omt_frame.DataLength = static_cast<int>(ret.data.size() * sizeof(float));
+        ret.omt_frame.Data = ret.data.get();
+        ret.omt_frame.DataLength = static_cast<int>(samples_all_channels * sizeof(float));
 
         return ret;
 }
