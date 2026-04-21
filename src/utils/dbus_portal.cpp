@@ -54,18 +54,28 @@
 #include "misc.h"
 #include "dbus_portal.hpp"
 
+#include <random>
+
 
 #define MOD_NAME "[dbus] "
 
 namespace {
+
+std::string generate_token(){
+        std::random_device random_device;
+        auto random_engine = std::default_random_engine(random_device());
+        auto dist = std::uniform_int_distribution<uint64_t>();
+        const auto rand_val = dist(random_engine);
+
+        return "uv_" + std::to_string(rand_val);
+}
+
 struct request_path_t {
         std::string token;
         std::string path;
 
         static request_path_t create(const std::string &name) {
-                ++token_counter;
-
-                auto token = std::string("uv") + std::to_string(token_counter);
+                const auto token = generate_token();
                 request_path_t result = {
                         .token = token,
                         .path = std::string("/org/freedesktop/portal/desktop/request/") + name + "/" + token
@@ -74,32 +84,20 @@ struct request_path_t {
                 LOG(LOG_LEVEL_DEBUG) << "new request: '" << result.path << "'\n";
                 return result;
         }
-
-private:
-        static unsigned int token_counter;
 };
-
-unsigned int request_path_t::token_counter = 0;
 
 struct session_path_t {
         std::string token;
         std::string path;
 
         static session_path_t create(const std::string &name) {
-                ++token_counter;
-
-                auto token = std::string("uv") + std::to_string(token_counter);
+                auto token = generate_token();
                 return {
                         .token = token,
                         .path = std::string("/org/freedesktop/portal/desktop/session/") + name + "/" + token
                 };
         }
-
-private:
-        static unsigned int token_counter;
 };
-
-unsigned int session_path_t::token_counter = 0;
 
 struct GVariant_deleter { void operator()(GVariant *a) { g_variant_unref(a); } };
 using GVariant_uniq = std::unique_ptr<GVariant, GVariant_deleter>;
