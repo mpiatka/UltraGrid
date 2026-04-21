@@ -65,21 +65,13 @@ struct Audio_frame_data{
 template<typename T>
 class Double_buffer{
 public:
-        Double_buffer() = default;
-
         T& front() noexcept{ return bufs[idx]; }
         T& back() noexcept{ return bufs[idx ^ 1]; }
 
-        void swap(){
-                auto lk = lock();
-                idx ^= 1;
-        }
-
-        [[nodiscard]] std::scoped_lock<std::mutex> lock() { return std::scoped_lock(mutex); }
+        void swap() noexcept{ idx ^= 1; }
 private:
-        std::mutex mutex;
         T bufs[2];
-        int idx = 0;
+        uint8_t idx = 0;
 };
 
 struct state_omt_cap{
@@ -94,6 +86,7 @@ struct state_omt_cap{
 
         video_frame_uniq ug_frame;
 
+        std::mutex mutex;
         Double_buffer<Audio_frame_data> audio_f;
 
         std::atomic<bool> should_exit = false;
@@ -205,7 +198,7 @@ void omt_cap_audio_worker(state_omt_cap *s){
                 if(!omt_audio)
                         continue;
 
-                auto lk = s->audio_f.lock();
+                std::scoped_lock lk(s->mutex);
                 auto& f = s->audio_f.back();
 
                 if(!f.data
@@ -247,11 +240,14 @@ void capture_omt_done(void *state){
 video_frame *capture_omt_grab(void *state, audio_frame **audio){
         auto s = static_cast<state_omt_cap *>(state);
 
-        s->audio_f.front().f.data_len = 0;
-        s->audio_f.swap();
+        {
+                std::scoped_lock lk(s->mutex);
+                s->audio_f.front().f.data_len = 0;
+                s->audio_f.swap();
 
-        if(auto& audio_frame = s->audio_f.front(); audio_frame.f.data_len != 0){
-                *audio = &audio_frame.f;
+                if(auto& audio_frame = s->audio_f.front(); audio_frame.f.data_len != 0){
+                        *audio = &audio_frame.f;
+                }
         }
 
         const auto omt_frame = omt_receive(s->omt_h.get(), OMTFrameType_Video, 100);
