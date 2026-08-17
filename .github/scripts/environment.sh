@@ -40,6 +40,10 @@ is_arm() {
         [ "$(uname -m)" = arm64 ] || [ "$GITHUB_WORKFLOW" = 'ARM builds' ]
 }
 
+cd ext-deps
+git clone --depth 1 'https://github.com/wolfpld/tracy.git'
+cd ..
+
 export FEATURES="\
  --enable-option-checking=fatal\
  --with-live555=/usr/local\
@@ -82,6 +86,7 @@ export FEATURES="\
  --enable-ximea\
  --enable-zfec\
  --disable-drm_disp\
+ --enable-tracy\
 "
 CUDA_FEATURES="--enable-cuda_dxt --enable-gpujpeg --enable-ldgm-gpu --enable-uyvy"
 case "$RUNNER_OS" in
