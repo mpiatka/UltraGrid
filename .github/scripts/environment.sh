@@ -88,7 +88,7 @@ export FEATURES="\
  --disable-drm_disp\
  --enable-tracy\
 "
-CUDA_FEATURES="--enable-cuda_dxt --enable-gpujpeg --enable-ldgm-gpu --enable-uyvy"
+CUDA_FEATURES="--enable-cuda_dxt --disable-gpujpeg --enable-ldgm-gpu --enable-uyvy"
 case "$RUNNER_OS" in
         Linux)
                 FEATURES="$FEATURES --enable-plugins \
