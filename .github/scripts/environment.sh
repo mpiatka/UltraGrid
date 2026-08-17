@@ -61,7 +61,7 @@ export FEATURES="\
  --enable-libavcodec\
  --enable-natpmp\
  --enable-ndi\
- --enable-omt\
+ --disable-omt\
  --enable-openapv\
  --enable-openssl\
  --enable-pcp\
