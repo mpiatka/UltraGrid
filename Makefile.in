@@ -664,7 +664,7 @@ install: all
 	$(INSTALL) -m 755 $(TARGET) $(REFLECTOR_TARGET) $(DESTDIR)$(bindir)
 	$(INSTALL) -m 755 $(srcdir)/data/template/bin/* $(DESTDIR)$(bindir)
 	if [ -f "$(GUI_TARGET)" ]; then \
-		$(INSTALL) -m 755 $(GUI_TARGET) $(DESTDIR)$(bindir);\
+		make -C gui/QT install DESTDIR="$(DESTDIR)";\
 		$(INSTALL) -d -m 755 $(DESTDIR)$(datadir)/applications;\
 		$(INSTALL) -m 644 $(srcdir)/data/uv-qt.desktop $(DESTDIR)$(datadir)/applications;\
 		$(INSTALL) -d -m 755 $(DESTDIR)$(datadir)/metainfo;\
