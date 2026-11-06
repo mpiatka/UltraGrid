@@ -109,7 +109,7 @@ case "$RUNNER_OS" in
 --enable-syphon \
 "
                 if is_arm; then
-                        FEATURES="$FEATURES --disable-opencv"
+                        FEATURES="$FEATURES --disable-opencv --disable-resize --disable-conference"
                 fi
                 ;;
         Windows)
